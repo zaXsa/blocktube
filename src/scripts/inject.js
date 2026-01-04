@@ -1188,15 +1188,18 @@
     }
   }
 
-  function blockChipsShelves(data) {
-    const selector = '.ytdChipsShelfWithVideoShelfRendererHost';
+  function blockChipsShelves() { // Note: data parameter is removed if selectors are hardcoded
+    // Define selector directly as an array of strings
+    const selectors = ['.ytdChipsShelfWithVideoShelfRendererHost', '.ytd-rich-shelf-renderer'];
     let observerInstance; // To hold the MutationObserver instance
 
     // Function to remove elements immediately
     function removeElements() {
-      const elementsToRemove = document.querySelectorAll(selector);
-      elementsToRemove.forEach(el => {
-        el.remove();
+      selectors.forEach(selector => { // Iterate over each selector
+        const elementsToRemove = document.querySelectorAll(selector);
+        elementsToRemove.forEach(el => {
+          el.remove();
+        });
       });
     }
 
@@ -1214,13 +1217,15 @@
             mutation.addedNodes.forEach(node => {
               // Ensure node is an Element before checking matches/querySelector
               if (node.nodeType === Node.ELEMENT_NODE) {
-                if (node.matches(selector)) { // Check if the added node itself matches
-                  node.remove();
-                } else if (node.querySelector(selector)) { // Check if a child of the added node matches
-                  node.querySelectorAll(selector).forEach(el => {
-                    el.remove();
-                  });
-                }
+                selectors.forEach(selector => { // Iterate over each selector
+                  if (node.matches(selector)) { // Check if the added node itself matches
+                    node.remove();
+                  } else if (node.querySelector(selector)) { // Check if a child of the added node matches
+                    node.querySelectorAll(selector).forEach(el => {
+                      el.remove();
+                    });
+                  }
+                });
               }
             });
           }
@@ -1231,7 +1236,7 @@
       observerInstance.observe(bodyElement, { childList: true, subtree: true });
     });
   }
-
+  
   function fixAutoplay() {
     if (!this?.object?.playerOverlays) return;
     if (isMobileInterface) return fixAutoPlayMobile.call(this);
