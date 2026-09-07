@@ -147,6 +147,7 @@
     'reelShelfRenderer',
     'richSectionRenderer'
   ];
+  const deleteAllowedSet = new Set(deleteAllowed);
 
   // those filter properties require RegExp checking
   const regexProps = [
@@ -702,9 +703,10 @@
       const idx = keys ? keys[i] : i;
       if (obj[idx] === undefined) continue;
 
-      // filter next child
+      // filter next child (skip primitives: they can never match a renderer)
       // also if current object is an array, splice child
-      const childDel = this.filter(obj[idx]);
+      const child = obj[idx];
+      const childDel = (typeof child === 'object' && child !== null) ? this.filter(child) : undefined;
       if (childDel && keys === undefined) {
         deletePrev = true;
         obj.splice(idx, 1);
@@ -715,9 +717,9 @@
       }
 
       // if next child is an empty array that we filtered, mark parent for removal.
-      if (obj[idx] instanceof Array && obj[idx].length === 0 && childDel) {
+      if (childDel && obj[idx] instanceof Array && obj[idx].length === 0) {
         deletePrev = true;
-      } else if (childDel && deleteAllowed.includes(idx)) {
+      } else if (childDel && deleteAllowedSet.has(idx)) {
         // special childs that needs removing if they're empty
         delete obj[idx];
         deletePrev = true;
