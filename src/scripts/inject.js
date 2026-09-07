@@ -130,6 +130,7 @@
     'slimVideoMetadataSectionRenderer',
     'videoWithContextRenderer'
   ];
+  const contextMenuObjectsSet = new Set(contextMenuObjects);
 
   // those properties can be safely deleted when one of thier child got filtered
   const deleteAllowed = [
@@ -155,6 +156,7 @@
     'title',
     'comment',
   ];
+  const regexPropsSet = new Set(regexProps);
 
   // TODO: add rules descriptions
   // !! Filter Rules definitions
@@ -491,6 +493,9 @@
 
     this.object = object;
     this.filterRules = filterRules;
+    // Precomputed rule-name table so matchFilterRule can scan the object's
+    // own (few) keys instead of iterating every rule key per visited node.
+    this.ruleNamesSet = new Set(Object.keys(filterRules));
     this.contextMenus = contextMenus;
     this.blockedComments = [];
 
@@ -504,7 +509,12 @@
     return this;
   }
 
-  ObjectFilter.prototype.isDataEmpty = function () {
+  // Cached result of isDataEmpty: storageData + jsFilterEnabled only change
+  // between (or at) storageReceived, so this is recomputed there (and when a
+  // runtime context-menu block pushes a new entry into filterData).
+  let dataEmpty = false;
+
+  function computeDataEmpty() {
     if (storageData.options.shorts || storageData.options.movies || storageData.options.mixes) return false;
     if (!isNaN(storageData.options.percent_watched_hide)) return false;
 
@@ -516,7 +526,7 @@
     }
 
     return !jsFilterEnabled;
-  };
+  }
 
   ObjectFilter.prototype.matchFilterData = function (filters, obj, objectType) {
     const friendlyVideoObj = {};
@@ -528,7 +538,7 @@
       if (filterPath === undefined) return false;
 
       const properties = storageData.filterData[h];
-      if (regexProps.includes(h) && (properties === undefined || properties.length === 0 && !jsFilterEnabled)) return false;
+      if (regexPropsSet.has(h) && (properties === undefined || properties.length === 0 && !jsFilterEnabled)) return false;
 
       let value = getFlattenByPath(obj, filterPath);
       if (value === undefined) return false;
@@ -537,7 +547,7 @@
            && !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname)
            && parseInt(value) >= storageData.options.percent_watched_hide) return true;
 
-      if (regexProps.includes(h) && properties.some(prop => prop && prop.test(value))) return true;
+      if (regexPropsSet.has(h) && properties.some(prop => prop && prop.test(value))) return true;
 
       if (h === 'vidLength') {
         const vidLen = parseTime(value);
@@ -617,38 +627,41 @@
     return false;
   }
 
-  ObjectFilter.prototype.matchFilterRule = function (obj) {
-    if (this.isDataEmpty()) return [];
+  ObjectFilter.prototype.matchFilterRule = function (obj, objKeys = Object.keys(obj)) {
+    if (dataEmpty) return [];
 
-    return Object.keys(this.filterRules).reduce((res, h) => {
+    const res = [];
+    for (let i = 0; i < objKeys.length; i += 1) {
+      const h = objKeys[i];
+      if (!this.ruleNamesSet.has(h)) continue;
+
+      const filteredObject = obj[h];
+      if (!filteredObject) continue;
+
+      const filterRule = this.filterRules[h];
       let properties;
       let customFunc;
       let related;
-      const filteredObject = obj[h];
-
-      if (filteredObject) {
-        const filterRule = this.filterRules[h];
-        if (has.call(filterRule, 'properties')) {
-          properties = filterRule.properties;
-          customFunc = filterRule.customFunc;
-          related = filterRule.related;
-        } else {
-          properties = filterRule;
-          customFunc = undefined;
-          related = undefined;
-        }
-
-        const isMatch = this.isExtendedMatched(filteredObject, h) || this.matchFilterData(properties, filteredObject, h);
-        if (isMatch) {
-          res.push({
-            name: h,
-            customFunc,
-            related,
-          });
-        }
+      if (has.call(filterRule, 'properties')) {
+        properties = filterRule.properties;
+        customFunc = filterRule.customFunc;
+        related = filterRule.related;
+      } else {
+        properties = filterRule;
+        customFunc = undefined;
+        related = undefined;
       }
-      return res;
-    }, []);
+
+      const isMatch = this.isExtendedMatched(filteredObject, h) || this.matchFilterData(properties, filteredObject, h);
+      if (isMatch) {
+        res.push({
+          name: h,
+          customFunc,
+          related,
+        });
+      }
+    }
+    return res;
   };
 
   ObjectFilter.prototype.filter = function (obj = this.object) {
@@ -659,29 +672,29 @@
       return deletePrev;
     }
 
-    // object filtering
-    const matchedRules = this.matchFilterRule(obj);
-    matchedRules.forEach((r) => {
-      let customRet = true;
-      if (r.customFunc !== undefined) {
-        customRet = r.customFunc.call(this, obj, r.name);
-      }
-      if (customRet) {
-        delete obj[r.name];
-        deletePrev = r.related || true;
-      }
-    });
-
     let len = 0;
     let keys;
 
-    // If object is an array len is the number of it's members
+    // If object is an array len is the number of it's members; arrays are
+    // numerically keyed so they can never match a rule name -> skip matching.
     if (obj instanceof Array) {
       len = obj.length;
-      // otherwise, this is a plain object, len is number of keys
     } else {
       keys = Object.keys(obj);
       len = keys.length;
+
+      // object filtering
+      const matchedRules = this.matchFilterRule(obj, keys);
+      matchedRules.forEach((r) => {
+        let customRet = true;
+        if (r.customFunc !== undefined) {
+          customRet = r.customFunc.call(this, obj, r.name);
+        }
+        if (customRet) {
+          delete obj[r.name];
+          deletePrev = r.related || true;
+        }
+      });
     }
 
     // loop backwards for easier splice
@@ -711,7 +724,7 @@
       }
     }
 
-    if (this.contextMenus) !isMobileInterface ? addContextMenus(obj) : addContextMenusMobile(obj);
+    if (this.contextMenus) !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
     return deletePrev;
   };
 
@@ -950,50 +963,69 @@
     window.postMessage({ from: 'BLOCKTUBE_PAGE', type, data }, document.location.origin);
   }
 
+  // Pre-compiled filter paths. The same path strings (from filterRules and the
+  // literals below) are resolved against thousands of objects, so split + regex
+  // parsing happens once per unique path instead of per call.
+  const pathCache = new Map();
+
+  function compilePathSegment(v) {
+    if (!/\[.*\]/.test(v)) return { key: v };
+    const indices = [];
+    const re = /\[(\d+)\]/g;
+    let m;
+    while ((m = re.exec(v)) !== null) indices.push(parseInt(m[1], 10));
+    const baseMatch = v.match(/^([^\[]+)/);
+    return { key: baseMatch && baseMatch[1] ? baseMatch[1] : undefined, indices };
+  }
+
+  function compiledPath(path) {
+    if (path instanceof Array) {
+      const out = [];
+      for (let i = 0; i < path.length; i += 1) out.push(compilePathSegment(path[i]));
+      return out;
+    }
+    let compiled = pathCache.get(path);
+    if (compiled === undefined) {
+      compiled = path.split('.').map(compilePathSegment);
+      pathCache.set(path, compiled);
+    }
+    return compiled;
+  }
+
   function getObjectByPath(obj, path, def = undefined) {
-    const paths = (path instanceof Array) ? path : path.split('.');
+    const compiled = compiledPath(path);
     let nextObj = obj;
 
-    const exist = paths.every((v) => {
-      // support bracket/index notation like "metadataRows[1]"
-      if (/\[.*\]/.test(v)) {
-        // split base name and all numeric indices like "a[1][2]"
-        const parts = [];
-        const baseMatch = v.match(/^([^\[]+)/);
-        if (baseMatch && baseMatch[1]) parts.push(baseMatch[1]);
-        const idxMatches = [...v.matchAll(/\[(\d+)\]/g)].map(m => parseInt(m[1], 10));
+    for (let i = 0; i < compiled.length; i += 1) {
+      const seg = compiled[i];
 
-        // navigate to base property first (if present)
-        for (let p = 0; p < parts.length; p += 1) {
-          const key = parts[p];
-          if (!nextObj || !has.call(nextObj, key)) return false;
-          nextObj = nextObj[key];
+      if (seg.indices === undefined) {
+        // segment is a plain token (no bracket)
+        if (nextObj instanceof Array) {
+          // when we have an array of objects, find an element that contains the key v
+          const found = nextObj.find(o => has.call(o, seg.key));
+          if (found === undefined) return def;
+          nextObj = found[seg.key];
+        } else {
+          if (!nextObj || !has.call(nextObj, seg.key)) return def;
+          nextObj = nextObj[seg.key];
         }
-
+      } else {
+        // navigate to base property first (if present)
+        if (seg.key !== undefined) {
+          if (!nextObj || !has.call(nextObj, seg.key)) return def;
+          nextObj = nextObj[seg.key];
+        }
         // then apply numeric indices in order
-        for (let k = 0; k < idxMatches.length; k += 1) {
-          const idx = idxMatches[k];
-          if (!Array.isArray(nextObj) || idx < 0 || idx >= nextObj.length) return false;
+        for (let k = 0; k < seg.indices.length; k += 1) {
+          const idx = seg.indices[k];
+          if (!Array.isArray(nextObj) || idx < 0 || idx >= nextObj.length) return def;
           nextObj = nextObj[idx];
         }
-
-        return true;
       }
+    }
 
-      // segment is a plain token (no bracket)
-      if (nextObj instanceof Array) {
-        // when we have an array of objects, find an element that contains the key v
-        const found = nextObj.find(o => has.call(o, v));
-        if (found === undefined) return false;
-        nextObj = found[v];
-      } else {
-        if (!nextObj || !has.call(nextObj, v)) return false;
-        nextObj = nextObj[v];
-      }
-      return true;
-    });
-
-    return exist ? nextObj : def;
+    return nextObj;
   }
 
   function parseTime(timeStr) {
@@ -1311,8 +1343,14 @@
     }
   }
 
-  function addContextMenusMobile(obj) {
-    const attr = contextMenuObjects.find(e => has.call(obj, e));
+  function addContextMenusMobile(obj, keys) {
+    let attr;
+    if (keys !== undefined) {
+      for (let i = 0; i < keys.length; i += 1) {
+        // same live-ownership guard as findAndExtractMenuItems
+        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) { attr = keys[i]; break; }
+      }
+    }
     if (attr === undefined) return;
 
     const parentData = obj[attr];
@@ -1609,8 +1647,15 @@
     return items;
   }
 
-  function findAndExtractMenuItems(obj) {
-    const attr = contextMenuObjects.find(e => Object.prototype.hasOwnProperty.call(obj, e));
+  function findAndExtractMenuItems(obj, keys) {
+    let attr;
+    if (keys !== undefined) {
+      for (let i = 0; i < keys.length; i += 1) {
+        // has.call(obj, key) is the LIVE check: keys is a snapshot taken before
+        // rule deletion, so a key may have been deleted since it was captured.
+        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) { attr = keys[i]; break; }
+      }
+    }
     if (!attr) return null;
 
     const result = extractMenuItems(obj, attr);
@@ -1762,8 +1807,8 @@
     return JSON.parse(JSON.stringify(obj));
   }
 
-  function addContextMenus(obj) {
-    const extracted = findAndExtractMenuItems(obj);
+  function addContextMenus(obj, keys) {
+    const extracted = findAndExtractMenuItems(obj, keys);
     if (!extracted) return;
 
     const { items, hasChannel, hasVideo, isLockupViewModel, attr } = extracted;
@@ -1876,6 +1921,8 @@
       jsFilterEnabled = false;
     }
 
+    dataEmpty = computeDataEmpty();
+
     if (shouldStartHook && !window.btDispatched) {
       startHook();
     }
@@ -1951,6 +1998,7 @@
     if (data._btOriginalAttr === 'commentRenderer') {
       let comments = document.querySelector('ytm-section-list-renderer')
       storageData.filterData.channelId.push(RegExp('^' + data._btOriginalData.id + '$'));
+      dataEmpty = computeDataEmpty();
       ObjectFilter(comments.data, filterRules.comments, [], false);
     }
   }
