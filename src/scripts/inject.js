@@ -1983,11 +1983,11 @@
       const player = playerData.playerResponse;
 
       const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
-      const owner = ownerRenderer.data || ownerRenderer.getCurrentData();
+      const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
 
-      const ownerUCID = owner.title.runs[0].navigationEndpoint.browseEndpoint.browseId;
+      const ownerUCID = getObjectByPath(owner, 'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId');
       let playerUCID = player.videoDetails.channelId;
-      if (playerUCID !== ownerUCID) {
+      if (ownerUCID && ownerUCID !== playerUCID) {
         playerUCID = [playerUCID, ownerUCID];
       }
       channelData = {
