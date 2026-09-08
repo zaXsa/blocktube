@@ -550,6 +550,14 @@
 
       if (regexPropsSet.has(h) && properties.some(prop => prop && prop.test(value))) return true;
 
+      // Collab videos (avatar stack): a blocked collaborator other than the
+      // first creator isn't caught by the single channelId above, so test
+      // every collaborator in the stack as well.
+      if (h === 'channelId' && objectType === 'lockupViewModel' && properties.length > 0) {
+        const collabIds = getCollaboratorChannelIds(obj);
+        if (collabIds.some(id => properties.some(prop => prop && prop.test(id)))) return true;
+      }
+
       if (h === 'vidLength') {
         const vidLen = parseTime(value);
         if (vidLen === -2 && storageData.options.shorts) {
@@ -959,6 +967,21 @@
       value = getObjectByPath(obj, filterPathArr[idx]);
       if (value !== undefined) return flattenRuns(value);
     }
+  }
+
+  // Collect every collaborator channel id from a lockupViewModel avatar stack.
+  // Collab videos render one card per creator, and getFlattenByPath only
+  // returns the first channelId it resolves.
+  function getCollaboratorChannelIds(obj) {
+    const listItems = getObjectByPath(obj, 'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems');
+    const ids = [];
+    if (Array.isArray(listItems)) {
+      for (let i = 0; i < listItems.length; i += 1) {
+        const id = getObjectByPath(listItems[i], 'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId');
+        if (id !== undefined) ids.push(id);
+      }
+    }
+    return ids;
   }
 
   function postMessage(type, data) {
