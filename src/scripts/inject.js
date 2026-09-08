@@ -1242,7 +1242,7 @@
 
   function blockChipsShelves() { // Note: data parameter is removed if selectors are hardcoded
     // Define selector directly as an array of strings
-    const selectors = ['.ytdChipsShelfWithVideoShelfRendererHost', '.ytd-rich-shelf-renderer', '.ytd-statement-banner-renderer'];
+    const selectors = ['ytd-rich-section-renderer:has(ytd-brand-video-singleton-renderer)', 'ytd-brand-video-singleton-renderer', '.ytdChipsShelfWithVideoShelfRendererHost', '.ytd-rich-shelf-renderer', '.ytd-statement-banner-renderer'];
     let observerInstance; // To hold the MutationObserver instance
 
     // Function to remove elements immediately
