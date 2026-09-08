@@ -1,6 +1,6 @@
 {
   "name": "BlockTube",
-  "version": "4.8.1",
+  "version": "4.8.2",
   "description": "Block shelves YouTube™ content blocker",
   "manifest_version": 3,
   "content_scripts": [
