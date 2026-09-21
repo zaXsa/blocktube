@@ -47,29 +47,38 @@ Filter and block unwanted content from YouTube™.
   - Block the entire page and leave a custom message
   - Auto redirect user to the next video
 
-* How can I ensure this extension cannot be bypassed?   
-  TODO
-
 ## Development & Build
 
 *Ubuntu*
 ```
-# Install build requirements
+# Prerequisites
 sudo apt install nodejs npm
-sudo npm install -g terser
 
 # Clone Repo
 git clone https://github.com/amitbl/blocktube
+cd blocktube
+npm install
 
 ### Make your changes ###
+# NOTE: src/scripts/inject.js is a GENERATED bundle of the fragments in
+# src/scripts/inject/*.js (src/scripts/consts.js is embedded as fragment #0).
+# Never hand-edit it — edit a fragment, then regenerate:
+
+# Regenerate the inject bundle + verify it matches the fragments
+npm run build:inject
+npm run check:inject
+
+# Lint / format checks (CI gate)
+npm run lint
+npm run fmt:check
 
 # Build package
 ./tools/build.sh firefox
 ./tools/build.sh chrome
 
 # Output packages locations
-./dist/firefox/blocktube_firefox_VERSION.zip
-./dist/chrome/blocktube_chrome_VERSION.zip
+./dist/firefox/blocktube_firefox_v<VERSION>.zip
+./dist/chrome/blocktube_chrome_v<VERSION>.zip
 
 # Temporary installation / debugging
 Firefox: https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/
