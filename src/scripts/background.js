@@ -1,10 +1,9 @@
 'use strict';
 
 const has = Object.prototype.hasOwnProperty;
-const unicodeBoundry = "[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:'\",\\.\\/<>\\?`~:]+";
+const unicodeBoundry = '[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:\'",\\.\\/<>\\?`~:]+';
 const ports = {};
 let enabled = true;
-let initStorage = false;
 let compiledStorage;
 let storage = {
   filterData: {
@@ -14,8 +13,8 @@ let storage = {
     comment: [],
     title: [],
     vidLength: [null, null],
-    javascript: "",
-    percentWatchedHide: null
+    javascript: '',
+    percentWatchedHide: null,
   },
   options: {
     trending: false,
@@ -26,11 +25,11 @@ let storage = {
     suggestions_only: false,
     autoplay: false,
     enable_javascript: false,
-    block_message: "",
+    block_message: '',
     block_feedback: false,
     disable_db_normalize: false,
     disable_you_there: false,
-    disable_on_history: false
+    disable_on_history: false,
   },
 };
 
@@ -43,7 +42,9 @@ const utils = {
     if (entriesArr.length === 1 && entriesArr[0] === '') return [];
 
     // skip empty and comments lines
-    const filtered = [...new Set(entriesArr.filter(x => !(!x || x === '' || x.startsWith('//'))))];
+    const filtered = [
+      ...new Set(entriesArr.filter((x) => !(!x || x === '' || x.startsWith('//')))),
+    ];
 
     return filtered.map((v) => {
       v = v.trim();
@@ -60,9 +61,16 @@ const utils = {
       }
 
       // regular keyword
-      return ['(^|' + unicodeBoundry + ')(' +
-        v.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&') +
-        ')(' + unicodeBoundry + '|$)', 'i'];
+      return [
+        '(^|' +
+          unicodeBoundry +
+          ')(' +
+          v.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&') +
+          ')(' +
+          unicodeBoundry +
+          '|$)',
+        'i',
+      ];
     });
   },
 
@@ -100,12 +108,12 @@ const utils = {
   sendReloadToAll() {
     Object.keys(ports).forEach((p) => {
       try {
-        ports[p].postMessage({ type: 'reloadRequired'});
+        ports[p].postMessage({ type: 'reloadRequired' });
       } catch (e) {
         console.error('Where are you my child?');
       }
     });
-  }
+  },
 };
 
 chrome.storage.local.get(['storageData', 'enabled'], (data) => {
@@ -114,15 +122,14 @@ chrome.storage.local.get(['storageData', 'enabled'], (data) => {
     compiledStorage = utils.compileAll(data.storageData);
   }
   if (Object.hasOwn(data, 'enabled')) {
-    enabled = data.enabled
+    enabled = data.enabled;
   }
-  initStorage = true;
   utils.sendFiltersToAll();
 
   chrome.runtime.onConnect.addListener((port) => {
-    port.onDisconnect.addListener((port) => {
-        const key = port.sender.contextId || port.sender.frameId;
-        delete ports[key];
+    port.onDisconnect.addListener((dcPort) => {
+      const key = dcPort.sender.contextId || dcPort.sender.frameId;
+      delete ports[key];
     });
     const key = port.sender.contextId || port.sender.frameId;
     ports[key] = port;
@@ -130,7 +137,7 @@ chrome.storage.local.get(['storageData', 'enabled'], (data) => {
       switch (msg.type) {
         case 'contextBlock': {
           storage.filterData[msg.data.type].push(...msg.data.entries);
-          chrome.storage.local.set({storageData: storage});
+          chrome.storage.local.set({ storageData: storage });
           break;
         }
       }
@@ -149,11 +156,10 @@ chrome.storage.local.get(['storageData', 'enabled'], (data) => {
       utils.sendFiltersToAll();
     }
   });
-
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === chrome.runtime.OnInstalledReason.UPDATE) {
     utils.sendReloadToAll();
   }
-})
+});

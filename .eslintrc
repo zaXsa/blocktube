@@ -1,19 +1,33 @@
 {
+  "root": true,
   "env": {
     "browser": true,
     "webextensions": true,
-    "es6": true,
+    "es2020": true
   },
+  "parserOptions": {
+    "ecmaVersion": 2020
+  },
+  "extends": ["eslint:recommended", "prettier"],
+  "ignorePatterns": [
+    "src/ui/cm/**",
+    "tools/bench/baseline/**",
+    "dist/**"
+  ],
   "rules": {
-    "strict": [2, "global"],
-    "max-len": [2, {
-      "code": 100
-    }],
-    "no-console": [0],
-    "no-underscore-dangle": [0],
-    "func-names": [0],
-    "no-use-before-define": [0],
-    "no-param-reassign": [0]
+    "strict": "off",
+    "quotes": ["error", "single", { "avoidEscape": true }],
+    "semi": ["error", "always"],
+    "no-console": "off",
+    "no-underscore-dangle": "off",
+    "func-names": "off",
+    "no-use-before-define": "off",
+    "no-param-reassign": "off",
+    "no-shadow": "error",
+    "no-unused-vars": ["error", { "args": "none", "caughtErrors": "none" }],
+    "no-empty": ["error", { "allowEmptyCatch": true }]
   },
-  "extends": "airbnb-base"
+  "globals": {
+    "CodeMirror": "readonly"
+  }
 }

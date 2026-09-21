@@ -13,27 +13,31 @@
 
     function getHandler(nextPath, enableHook) {
       return {
-        get: function(target, key) {
-          if (key === nextPath[0] && typeof target[key] === 'object' && target[key] !== null && !target[key].isProxy_) {
+        get: function (target, key) {
+          if (
+            key === nextPath[0] &&
+            typeof target[key] === 'object' &&
+            target[key] !== null &&
+            !target[key].isProxy_
+          ) {
             nextPath.shift();
             target[key] = new Proxy(target[key], getHandler(nextPath, nextPath.length == 0));
             target[key].isProxy_ = true;
           }
           return target[key];
         },
-        set: function(target, key, value) {
+        set: function (target, key, value) {
           if (enableHook && hookKeys.includes(key)) {
-            function hook_() {
+            const hook_ = function () {
               if (window.btDispatched) return value.apply(null, arguments);
               else window.addEventListener('blockTubeReady', value.bind(null, arguments));
-            }
+            };
             target[key] = hook_;
-          }
-          else {
+          } else {
             target[key] = value;
           }
           return true;
-      }
+        },
       };
     }
 
@@ -56,7 +60,7 @@
     '/youtubei/v1/browse',
     '/youtubei/v1/next',
     '/youtubei/v1/player',
-    '/youtubei/v1/get_watch'
+    '/youtubei/v1/get_watch',
   ];
 
   const hooks = {
@@ -100,23 +104,24 @@
 
   function isUrlMatch(url) {
     if (!(url instanceof URL)) url = new URL(url);
-    return spf_uris.some(uri => uri === url.pathname) || url.searchParams.has('pbj');
+    return spf_uris.some((uri) => uri === url.pathname) || url.searchParams.has('pbj');
   }
 
   function onPart(url, next) {
-    return function(resp) {
-      if(window.btDispatched) {
+    return function (resp) {
+      if (window.btDispatched) {
         window.btExports.spfFilter(url, resp);
         next(resp);
-      } else window.addEventListener('blockTubeReady', () => {
-        window.btExports.spfFilter(url, resp);
-        next(resp);
-      });
-    }
+      } else
+        window.addEventListener('blockTubeReady', () => {
+          window.btExports.spfFilter(url, resp);
+          next(resp);
+        });
+    };
   }
 
   function spfRequest(cb) {
-    return function(...args) {
+    return function (...args) {
       if (args.length < 2) return cb.apply(null, args);
       let url = new URL(args[0], document.location.origin);
       if (isUrlMatch(url)) {
@@ -124,7 +129,7 @@
         args[1].onPartDone = onPart(url, args[1].onPartDone);
       }
       return cb.apply(null, args);
-    }
+    };
   }
 
   // Start
@@ -136,39 +141,48 @@
   // Youtube started using vanilla "fetch" for some endpoints (search and guide for now) :\
   // I'm forced to hook that one too
   const org_fetch = window.fetch;
-  window.fetch = function(resource, init=undefined) {
-    if (!(resource instanceof Request) || !fetch_uris.some(u => resource.url.includes(u))) {
+  window.fetch = function (resource, init = undefined) {
+    if (!(resource instanceof Request) || !fetch_uris.some((u) => resource.url.includes(u))) {
       return org_fetch(resource, init);
     }
 
     return new Promise((resolve, reject) => {
-      org_fetch(resource, init=init).then(function(resp) {
+      org_fetch(resource, init)
+        .then(function (resp) {
           const url = new URL(resource.url);
-          resp.json().then(function (jsonResp) {
-            if(window.btDispatched) {
-              window.btExports.fetchFilter(url, jsonResp);
-              resolve(new Response(JSON.stringify(jsonResp)));
-            } else window.addEventListener('blockTubeReady', () => {
-              window.btExports.fetchFilter(url, jsonResp);
-              resolve(new Response(JSON.stringify(jsonResp)));
-            });
-          }).catch(reject);
-      }).catch(reject);
+          resp
+            .json()
+            .then(function (jsonResp) {
+              if (window.btDispatched) {
+                window.btExports.fetchFilter(url, jsonResp);
+                resolve(new Response(JSON.stringify(jsonResp)));
+              } else
+                window.addEventListener('blockTubeReady', () => {
+                  window.btExports.fetchFilter(url, jsonResp);
+                  resolve(new Response(JSON.stringify(jsonResp)));
+                });
+            })
+            .catch(reject);
+        })
+        .catch(reject);
     });
-  }
+  };
 
   if (window.location.pathname.startsWith('/embed/')) {
-    const XMLHttpRequestResponse = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+    const XMLHttpRequestResponse = Object.getOwnPropertyDescriptor(
+      XMLHttpRequest.prototype,
+      'response',
+    );
     Object.defineProperty(XMLHttpRequest.prototype, 'response', {
-      get: function() {
-        if(!fetch_uris.some(u => this.responseURL.includes(u))) {
+      get: function () {
+        if (!fetch_uris.some((u) => this.responseURL.includes(u))) {
           return XMLHttpRequestResponse.get.call(this);
         }
-        let res = JSON.parse(XMLHttpRequestResponse.get.call(this).replace(')]}\'', ''));
+        let res = JSON.parse(XMLHttpRequestResponse.get.call(this).replace(")]}'", ''));
         window.btExports.fetchFilter(new URL(this.responseURL), res);
         return JSON.stringify(res);
       },
-      configurable: true
+      configurable: true,
     });
   }
 
@@ -209,7 +223,7 @@
       this.loadInitialData_ = (a1) => {
         if (window.btDispatched) return v(a1);
         else window.addEventListener('blockTubeReady', v.bind(this, a1));
-      }
+      };
     },
   });
 
@@ -217,15 +231,15 @@
   window.yt = createProxyHook('player.Application', ['create', 'createAlternate']);
 
   // spfjs is responsible for XHR requests
-  document.addEventListener('spfready', function(e) {
-      Object.defineProperty(window.spf, 'request', {
-        get() {
-          return this.request_;
-        },
-        set(v) {
-          this.request_ = spfRequest(v);
-        },
-      });
+  document.addEventListener('spfready', function (e) {
+    Object.defineProperty(window.spf, 'request', {
+      get() {
+        return this.request_;
+      },
+      set(v) {
+        this.request_ = spfRequest(v);
+      },
+    });
   });
 
   if (isMobileInterface) {
@@ -236,14 +250,10 @@
         this.ondblclick = hooks.menuOnTapMobile;
       }
     }
-    class ButtonRendererHook extends ElementHook {
-    }
-    class MenuServiceItemHook extends ElementHook {
-    }
-    class MenuNavigationItemHook extends ElementHook {
-    }
-    class MenuItemHook extends ElementHook {
-    }
+    class ButtonRendererHook extends ElementHook {}
+    class MenuServiceItemHook extends ElementHook {}
+    class MenuNavigationItemHook extends ElementHook {}
+    class MenuItemHook extends ElementHook {}
     customElements.define('ytm-button-renderer', ButtonRendererHook);
     customElements.define('ytm-menu-service-item-renderer', MenuServiceItemHook);
     customElements.define('ytm-menu-navigation-item-renderer', MenuNavigationItemHook);
@@ -252,15 +262,19 @@
 
   if (!isMobileInterface) {
     let customElementsRegistryDefine = window.customElements.define;
-    Object.defineProperty(window.customElements, "define", { configurable: true, enumerable: false, value: function(name, constructor) { 
-      if (name === 'ytd-menu-service-item-renderer' || name === 'yt-list-item-view-model') {
-        let origCallback = constructor.prototype.connectedCallback;
-        constructor.prototype.connectedCallback = function() {
-          this.onclick = hooks.menuOnTap;
-          if (origCallback) origCallback.call(this);
+    Object.defineProperty(window.customElements, 'define', {
+      configurable: true,
+      enumerable: false,
+      value: function (name, constructor) {
+        if (name === 'ytd-menu-service-item-renderer' || name === 'yt-list-item-view-model') {
+          let origCallback = constructor.prototype.connectedCallback;
+          constructor.prototype.connectedCallback = function () {
+            this.onclick = hooks.menuOnTap;
+            if (origCallback) origCallback.call(this);
+          };
         }
-      }
-      customElementsRegistryDefine.call(window.customElements, name, constructor);
-    }})
+        customElementsRegistryDefine.call(window.customElements, name, constructor);
+      },
+    });
   }
-}());
+})();

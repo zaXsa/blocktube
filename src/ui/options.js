@@ -25,15 +25,15 @@
 
   const textAreas = ['title', 'channelName', 'channelId', 'videoId', 'comment'];
 
-  function detectColorScheme(){
-    let theme="light";
+  function detectColorScheme() {
+    let theme = 'light';
 
-    if(storageData.uiTheme){
+    if (storageData.uiTheme) {
       theme = storageData.uiTheme;
-    } else if(!window.matchMedia) {
-      theme = "light";
-    } else if(window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      theme = "dark";
+    } else if (!window.matchMedia) {
+      theme = 'light';
+    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      theme = 'dark';
     }
 
     if (!storageData.uiTheme) {
@@ -41,15 +41,14 @@
       saveData();
     }
 
-    document.documentElement.setAttribute("data-theme", theme);
-    document.querySelectorAll(".CodeMirror").forEach((area) => {
-      if (theme === "dark") {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.querySelectorAll('.CodeMirror').forEach((area) => {
+      if (theme === 'dark') {
         area.classList.add('cm-darktheme');
       } else {
         area.classList.remove('cm-darktheme');
       }
     });
-
   }
 
   function loadData() {
@@ -77,8 +76,8 @@
     const vidLenMin = parseInt($('vidLength_0').value, 10);
     const vidLenMax = parseInt($('vidLength_1').value, 10);
 
-    storageData.filterData.vidLength   = [vidLenMin, vidLenMax];
-    storageData.filterData.javascript  = jsEditors['javascript'].getValue();
+    storageData.filterData.vidLength = [vidLenMin, vidLenMax];
+    storageData.filterData.javascript = jsEditors['javascript'].getValue();
 
     storageData.uiTheme = $('ui_theme').value;
 
@@ -136,35 +135,35 @@
     });
 
     const vidLength = get('filterData.vidLength', [NaN, NaN], obj);
-    $('vidLength_0').value         = vidLength[0];
-    $('vidLength_1').value         = vidLength[1];
-    $('vidLength_type').value      = get('options.vidLength_type', 'allow', obj);
+    $('vidLength_0').value = vidLength[0];
+    $('vidLength_1').value = vidLength[1];
+    $('vidLength_type').value = get('options.vidLength_type', 'allow', obj);
 
-    $('ui_theme').value                = get('uiTheme', 'light', obj);
-    $('pass_save').value               = get('uiPass', '', obj);
-    $('disable_trending').checked      = get('options.trending', false, obj);
-    $('disable_shorts').checked        = get('options.shorts', false, obj);
-    $('disable_movies').checked        = get('options.movies', false, obj);
-    $('disable_mixes').checked         = get('options.mixes', false, obj);
+    $('ui_theme').value = get('uiTheme', 'light', obj);
+    $('pass_save').value = get('uiPass', '', obj);
+    $('disable_trending').checked = get('options.trending', false, obj);
+    $('disable_shorts').checked = get('options.shorts', false, obj);
+    $('disable_movies').checked = get('options.movies', false, obj);
+    $('disable_mixes').checked = get('options.mixes', false, obj);
     $('disable_chips_shelves').checked = get('options.chips_shelves', false, obj);
-    $('autoplay').checked              = get('options.autoplay', false, obj);
-    $('disable_db_normalize').checked  = get('options.disable_db_normalize', false, obj);
-    $('disable_on_history').checked    = get('options.disable_on_history', false, obj);
-    $('disable_you_there').checked     = get('options.disable_you_there', false, obj);
-    $('suggestions_only').checked      = get('options.suggestions_only', false, obj);
-    $('block_feedback').checked        = get('options.block_feedback', false, obj);
-    $('enable_javascript').checked     = get('options.enable_javascript', false, obj);
-    $('block_message').value           = get('options.block_message', '', obj);
-    $('percent_watched_hide').value    = get('options.percent_watched_hide', NaN, obj);
+    $('autoplay').checked = get('options.autoplay', false, obj);
+    $('disable_db_normalize').checked = get('options.disable_db_normalize', false, obj);
+    $('disable_on_history').checked = get('options.disable_on_history', false, obj);
+    $('disable_you_there').checked = get('options.disable_you_there', false, obj);
+    $('suggestions_only').checked = get('options.suggestions_only', false, obj);
+    $('block_feedback').checked = get('options.block_feedback', false, obj);
+    $('enable_javascript').checked = get('options.enable_javascript', false, obj);
+    $('block_message').value = get('options.block_message', '', obj);
+    $('percent_watched_hide').value = get('options.percent_watched_hide', NaN, obj);
 
     const jsContent = get('filterData.javascript', defaultJSFunction, obj);
     jsEditors['javascript'].setValue(jsContent);
 
     if ($('enable_javascript').checked) {
-      $('advanced_tab').style.removeProperty("display");
+      $('advanced_tab').style.removeProperty('display');
     }
 
-    setTimeout(_=>Object.values(jsEditors).forEach((v) => v.refresh()), 1); // https://stackoverflow.com/a/19970695
+    setTimeout((_) => Object.values(jsEditors).forEach((v) => v.refresh()), 1); // https://stackoverflow.com/a/19970695
     $('save_btn').classList.add('disabled-btn');
   }
 
@@ -174,16 +173,19 @@
   }
 
   function multilineToArray(text) {
-    return text.replace(/\r\n/g, '\n').split('\n').map(x => x.trim());
+    return text
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((x) => x.trim());
   }
 
   function get(path, def = undefined, obj = undefined) {
-    const paths = (path instanceof Array) ? path : path.split('.');
+    const paths = path instanceof Array ? path : path.split('.');
     let nextObj = obj || storageData;
 
     const exist = paths.every((v) => {
       if (nextObj instanceof Array) {
-        const found = nextObj.find(o => has.call(o, v));
+        const found = nextObj.find((o) => has.call(o, v));
         if (found === undefined) return false;
         nextObj = found[v];
       } else {
@@ -242,25 +244,25 @@
     const MIN_HEIGHT = 220;
 
     function heightOf(element) {
-      return parseInt(window.getComputedStyle(element).height.replace(/px$/, ""));
+      return parseInt(window.getComputedStyle(element).height.replace(/px$/, ''));
     }
 
     function onDrag(e) {
-      cm.display.scroller.style.maxHeight = "100%";
-      cm.setSize(null, Math.max(MIN_HEIGHT, (cm.start_h + e.y - cm.start_y)) + "px");
+      cm.display.scroller.style.maxHeight = '100%';
+      cm.setSize(null, Math.max(MIN_HEIGHT, cm.start_h + e.y - cm.start_y) + 'px');
     }
 
     function onRelease(e) {
-      document.body.removeEventListener("mousemove", onDrag);
-      window.removeEventListener("mouseup", onRelease);
+      document.body.removeEventListener('mousemove', onDrag);
+      window.removeEventListener('mouseup', onRelease);
     }
 
-    resizer.addEventListener("mousedown", function (e) {
+    resizer.addEventListener('mousedown', function (e) {
       cm.start_y = e.y;
       cm.start_h = heightOf(cm.display.wrapper);
 
-      document.body.addEventListener("mousemove", onDrag);
-      window.addEventListener("mouseup", onRelease);
+      document.body.addEventListener('mousemove', onDrag);
+      window.addEventListener('mouseup', onRelease);
     });
   }
 
@@ -273,24 +275,24 @@
       styleActiveLine: true,
       lineWrapping: true,
       extraKeys: {
-        F11: function(cm) {
-          if (cm.getOption("fullScreen")) {
-            cm.display.scroller.style.maxHeight = cm.start_h || "200px";
+        F11: function (cm) {
+          if (cm.getOption('fullScreen')) {
+            cm.display.scroller.style.maxHeight = cm.start_h || '200px';
           } else {
-            cm.display.scroller.style.maxHeight = "100%";
+            cm.display.scroller.style.maxHeight = '100%';
           }
-          cm.setOption("fullScreen", !cm.getOption("fullScreen"));
+          cm.setOption('fullScreen', !cm.getOption('fullScreen'));
         },
-        Esc: function(cm) {
-          if (cm.getOption("fullScreen")) {
-            cm.display.scroller.style.maxHeight = cm.start_h || "200px";
-            cm.setOption("fullScreen", false);
+        Esc: function (cm) {
+          if (cm.getOption('fullScreen')) {
+            cm.display.scroller.style.maxHeight = cm.start_h || '200px';
+            cm.setOption('fullScreen', false);
           }
-        }
-      }
+        },
+      },
     });
     cmResizer(jsEditors[v], $(v + '_resizer'));
-    jsEditors[v].on("change",() => {
+    jsEditors[v].on('change', () => {
       $('options').dispatchEvent(new Event('change', { bubbles: true }));
     });
   });
@@ -303,7 +305,7 @@
   });
 
   $('save_btn').addEventListener('click', (evt) => {
-    if(evt.target.classList.contains('disabled-btn')) return;
+    if (evt.target.classList.contains('disabled-btn')) return;
     saveForm();
   });
 
@@ -329,13 +331,12 @@
 
   $('enable_javascript').addEventListener('change', (v) => {
     if (v.target.checked) {
-      $('advanced_tab').style.removeProperty("display");
-      setTimeout(_ => jsEditors['javascript'].refresh(), 1);
+      $('advanced_tab').style.removeProperty('display');
+      setTimeout((_) => jsEditors['javascript'].refresh(), 1);
+    } else {
+      $('advanced_tab').style.display = 'none';
     }
-    else {
-      $('advanced_tab').style.display = "none";
-    }
-  })
+  });
 
   $('options').addEventListener('change', (evt) => {
     if (evt.target.tagName === 'INPUT' && evt.target.getAttribute('type') === 'radio') return;
@@ -347,7 +348,7 @@
     element.querySelectorAll("input[type='radio']").forEach((box) => {
       box.addEventListener('click', (e) => {
         element.querySelectorAll('section').forEach((tab) => {
-          tab.style.display = "none";
+          tab.style.display = 'none';
         });
 
         const tabName = e.target.getAttribute('aria-controls');
@@ -357,10 +358,9 @@
         tab.querySelectorAll('textarea').forEach((txtarea) => {
           const areaName = txtarea.getAttribute('id');
           if (has.call(jsEditors, areaName)) {
-            jsEditors[areaName].refresh()
+            jsEditors[areaName].refresh();
           }
         });
-
       });
 
       if (box.checked) {
@@ -370,5 +370,4 @@
   }
 
   initTabs('tabbed-filters-parent');
-
-}());
+})();

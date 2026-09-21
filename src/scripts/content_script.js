@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  
+
   let port;
   let globalStorage;
   let compiledStorage;
@@ -8,19 +8,25 @@
 
   const utils = {
     sendStorage() {
-      window.postMessage({
-        from: 'BLOCKTUBE_CONTENT',
-        type: 'storageData',
-        data: enabled ? (compiledStorage || globalStorage) : undefined,
-      }, document.location.origin);
+      window.postMessage(
+        {
+          from: 'BLOCKTUBE_CONTENT',
+          type: 'storageData',
+          data: enabled ? compiledStorage || globalStorage : undefined,
+        },
+        document.location.origin,
+      );
     },
     sendReload(msg, duration) {
-      window.postMessage({
-        from: 'BLOCKTUBE_CONTENT',
-        type: 'reloadRequired',
-        data: {msg, duration}
-      }, document.location.origin);
-    }
+      window.postMessage(
+        {
+          from: 'BLOCKTUBE_CONTENT',
+          type: 'reloadRequired',
+          data: { msg, duration },
+        },
+        document.location.origin,
+      );
+    },
   };
 
   const events = {
@@ -28,20 +34,20 @@
       if (!data.info.id) return;
 
       const options = {
-        year: "numeric",
-        month: "numeric",
-        day: "numeric",
-        hour: "numeric",
-        minute: "numeric",
-        second: "numeric"
-      }
-      let now = new Intl.DateTimeFormat(undefined, options).format(new Date())
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+      };
+      let now = new Intl.DateTimeFormat(undefined, options).format(new Date());
       const entries = [`// Blocked by context menu (${data.info.text}) (${now})`];
       const id = Array.isArray(data.info.id) ? data.info.id : [data.info.id];
       entries.push(...id);
       entries.push('');
-      port.postMessage({'type': 'contextBlock', 'data': {'type': data.type, 'entries': entries}})
-    }
+      port.postMessage({ type: 'contextBlock', data: { type: data.type, entries: entries } });
+    },
   };
 
   function connectToPort() {
@@ -69,28 +75,31 @@
 
     port.onDisconnect.addListener(() => {
       connectToPort();
-      
     });
   }
 
   connectToPort();
 
   // Listen for messages from injected page script
-  window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
-    if (!event.data.from || event.data.from !== 'BLOCKTUBE_PAGE') return;
+  window.addEventListener(
+    'message',
+    (event) => {
+      if (event.source !== window) return;
+      if (!event.data.from || event.data.from !== 'BLOCKTUBE_PAGE') return;
 
-    switch (event.data.type) {
-      case 'contextBlockData': {
-        events.contextBlock(event.data.data);
-        break;
+      switch (event.data.type) {
+        case 'contextBlockData': {
+          events.contextBlock(event.data.data);
+          break;
+        }
+        case 'ready': {
+          utils.sendStorage();
+          break;
+        }
+        default:
+          break;
       }
-      case 'ready': {
-        utils.sendStorage();
-      }
-      default:
-        break;
-    }
-  }, true);
-
-}());
+    },
+    true,
+  );
+})();

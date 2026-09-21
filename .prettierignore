@@ -1,0 +1,8 @@
+# Vendored third-party code - never reformat
+src/ui/cm/**
+
+# Historical performance baseline snapshot - keep byte-identical to upstream
+tools/bench/baseline/**
+
+# Build artifacts
+dist/

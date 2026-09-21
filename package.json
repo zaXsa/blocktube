@@ -1,0 +1,17 @@
+{
+  "name": "blocktube",
+  "version": "4.8.4",
+  "private": true,
+  "description": "BlockTube extension sources and dev tooling",
+  "scripts": {
+    "fmt": "prettier --write \"src/**/*.js\"",
+    "fmt:check": "prettier --check \"src/**/*.js\"",
+    "lint": "eslint src --ext .js",
+    "lint:fix": "eslint src --ext .js --fix"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3"
+  }
+}

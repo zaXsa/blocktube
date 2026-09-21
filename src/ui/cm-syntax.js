@@ -1,16 +1,17 @@
 'use strict';
 
-CodeMirror.defineSimpleMode("blocktube", {
+CodeMirror.defineSimpleMode('blocktube', {
   start: [
-    { regex: /\/\/.*/, token: "comment", sol: true },
+    { regex: /\/\/.*/, token: 'comment', sol: true },
     {
       regex: /\/.+\/(.*)/,
-      token: "keyword", sol: true
+      token: 'keyword',
+      sol: true,
     },
   ],
   comment: [],
   meta: {
-    dontIndentStates: ["comment"],
-    lineComment: "//"
-  }
+    dontIndentStates: ['comment'],
+    lineComment: '//',
+  },
 });

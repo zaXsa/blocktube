@@ -3,98 +3,110 @@
   const has = Object.prototype.hasOwnProperty;
 
   // Thanks to uBlock origin
-  const defineProperty = function(chain, cValue, middleware = undefined) {
+  const defineProperty = function (chain, cValue, middleware = undefined) {
     let aborted = false;
-    const mustAbort = function(v) {
-      if ( aborted ) { return true; }
+    const mustAbort = function (v) {
+      if (aborted) {
+        return true;
+      }
       aborted =
-            (v !== undefined && v !== null) &&
-            (cValue !== undefined && cValue !== null) &&
-            (typeof v !== typeof cValue);
+        v !== undefined &&
+        v !== null &&
+        cValue !== undefined &&
+        cValue !== null &&
+        typeof v !== typeof cValue;
       return aborted;
     };
     // https://github.com/uBlockOrigin/uBlock-issues/issues/156
     //   Support multiple trappers for the same property.
-    const trapProp = function(owner, prop, configurable, handler) {
-      if ( handler.init(owner[prop]) === false ) { return; }
+    const trapProp = function (owner, prop, configurable, handler) {
+      if (handler.init(owner[prop]) === false) {
+        return;
+      }
       const odesc = Object.getOwnPropertyDescriptor(owner, prop);
       let prevGetter, prevSetter;
-      if ( odesc instanceof Object ) {
-        if ( odesc.configurable === false ) { return; }
-        if ( odesc.get instanceof Function ) {
+      if (odesc instanceof Object) {
+        if (odesc.configurable === false) {
+          return;
+        }
+        if (odesc.get instanceof Function) {
           prevGetter = odesc.get;
         }
-        if ( odesc.set instanceof Function ) {
+        if (odesc.set instanceof Function) {
           prevSetter = odesc.set;
         }
       }
       Object.defineProperty(owner, prop, {
         configurable,
         get() {
-          if ( prevGetter !== undefined ) {
+          if (prevGetter !== undefined) {
             prevGetter();
           }
           return handler.getter(); // cValue
         },
         set(a) {
-          if ( prevSetter !== undefined ) {
+          if (prevSetter !== undefined) {
             prevSetter(a);
           }
           handler.setter(a);
-        }
+        },
       });
     };
-    const trapChain = function(owner, chain) {
-      const pos = chain.indexOf('.');
-      if ( pos === -1 ) {
-        trapProp(owner, chain, true, {
+    const trapChain = function (owner, path) {
+      const pos = path.indexOf('.');
+      if (pos === -1) {
+        trapProp(owner, path, true, {
           v: undefined,
-          init: function(v) {
-            if ( mustAbort(v) ) { return false; }
+          init: function (v) {
+            if (mustAbort(v)) {
+              return false;
+            }
             this.v = v;
             return true;
           },
-          getter: function() {
+          getter: function () {
             return cValue;
           },
-          setter: function(a) {
+          setter: function (a) {
             if (middleware instanceof Function) {
               cValue = a;
               middleware(a);
             } else {
-              if ( mustAbort(a) === false ) { return; }
+              if (mustAbort(a) === false) {
+                return;
+              }
               cValue = a;
             }
-          }
+          },
         });
         return;
       }
-      const prop = chain.slice(0, pos);
+      const prop = path.slice(0, pos);
       const v = owner[prop];
-      chain = chain.slice(pos + 1);
-      if ( v instanceof Object || typeof v === 'object' && v !== null ) {
-        trapChain(v, chain);
+      path = path.slice(pos + 1);
+      if (v instanceof Object || (typeof v === 'object' && v !== null)) {
+        trapChain(v, path);
         return;
       }
       trapProp(owner, prop, true, {
         v: undefined,
-        init: function(v) {
-          this.v = v;
+        init: function (newVal) {
+          this.v = newVal;
           return true;
         },
-        getter: function() {
+        getter: function () {
           return this.v;
         },
-        setter: function(a) {
+        setter: function (a) {
           this.v = a;
-          if ( a instanceof Object ) {
+          if (a instanceof Object) {
             trapChain(a, chain);
           }
-        }
+        },
       });
     };
     trapChain(window, chain);
-  }
+  };
 
   // !! Globals
 
@@ -128,7 +140,7 @@
     // Mobile
     'reelItemRenderer',
     'slimVideoMetadataSectionRenderer',
-    'videoWithContextRenderer'
+    'videoWithContextRenderer',
   ];
   const contextMenuObjectsSet = new Set(contextMenuObjects);
 
@@ -145,18 +157,12 @@
     'comment',
     'commentThreadRenderer',
     'reelShelfRenderer',
-    'richSectionRenderer'
+    'richSectionRenderer',
   ];
   const deleteAllowedSet = new Set(deleteAllowed);
 
   // those filter properties require RegExp checking
-  const regexProps = [
-    'videoId',
-    'channelId',
-    'channelName',
-    'title',
-    'comment',
-  ];
+  const regexProps = ['videoId', 'channelId', 'channelName', 'title', 'comment'];
   const regexPropsSet = new Set(regexProps);
 
   // TODO: add rules descriptions
@@ -165,29 +171,25 @@
     videoId: 'videoId',
     channelId: 'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
     channelBadges: 'ownerBadges',
-    channelName: [
-      'shortBylineText',
-      'longBylineText',
-    ],
+    channelName: ['shortBylineText', 'longBylineText'],
     title: ['title'],
     vidLength: ['thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text'],
-    viewCount: [
-        'viewCountText'
-    ],
+    viewCount: ['viewCountText'],
     badges: 'badges',
     publishTimeText: ['publishedTimeText'],
-    percentWatched: 'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched'
+    percentWatched:
+      'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched',
   };
 
   const BADGE_MAP = {
-    "BADGE_STYLE_TYPE_VERIFIED": "verified",
-    "BADGE_STYLE_TYPE_VERIFIED_ARTIST": "artist",
-    "BADGE_STYLE_TYPE_LIVE_NOW": "live",
-    "BADGE_STYLE_TYPE_MEMBERS_ONLY": "members",
-    "BADGE_VERIFIED": "verified",
-    "BADGE_VERIFIED_ARTIST": "artist",
-    "BADGE_LIVE_NOW": "live",
-    "BADGE_MEMBERS_ONLY": "members"
+    BADGE_STYLE_TYPE_VERIFIED: 'verified',
+    BADGE_STYLE_TYPE_VERIFIED_ARTIST: 'artist',
+    BADGE_STYLE_TYPE_LIVE_NOW: 'live',
+    BADGE_STYLE_TYPE_MEMBERS_ONLY: 'members',
+    BADGE_VERIFIED: 'verified',
+    BADGE_VERIFIED_ARTIST: 'artist',
+    BADGE_LIVE_NOW: 'live',
+    BADGE_MEMBERS_ONLY: 'members',
   };
 
   const filterRules = {
@@ -197,14 +199,16 @@
         title: ['title'],
         vidLength: 'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text',
         badges: 'badges',
-        percentWatched: 'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched'
+        percentWatched:
+          'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched',
       },
       movieRenderer: {
         videoId: 'videoId',
         title: ['title'],
         vidLength: 'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text',
         badges: 'badges',
-        percentWatched: 'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched'
+        percentWatched:
+          'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched',
       },
       gridVideoRenderer: baseRules,
       videoRenderer: baseRules,
@@ -219,11 +223,11 @@
       gridPlaylistRenderer: baseRules,
       postRenderer: {
         channelId: 'authorEndpoint.browseEndpoint.browseId',
-        channelName: ['authorText']
+        channelName: ['authorText'],
       },
       backstagePostRenderer: {
         channelId: 'authorEndpoint.browseEndpoint.browseId',
-        channelName: ['authorText']
+        channelName: ['authorText'],
       },
 
       watchCardCompactVideoRenderer: {
@@ -242,8 +246,8 @@
       },
 
       channelRenderer: {
-        properties: {...baseRules, title: undefined},
-        related: 'shelfRenderer'
+        properties: { ...baseRules, title: undefined },
+        related: 'shelfRenderer',
       },
 
       playlistPanelVideoRenderer: {
@@ -294,7 +298,8 @@
 
       universalWatchCardRenderer: {
         properties: {
-          channelId: 'header.watchCardRichHeaderRenderer.titleNavigationEndpoint.browseEndpoint.browseId',
+          channelId:
+            'header.watchCardRichHeaderRenderer.titleNavigationEndpoint.browseEndpoint.browseId',
           channelName: 'header.watchCardRichHeaderRenderer.title',
         },
       },
@@ -330,28 +335,31 @@
       reelItemRenderer: {
         properties: {
           videoId: 'videoId',
-          channelId: 'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelNavigationEndpoint.browseEndpoint.browseId',
-          channelName: 'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelTitleText',
+          channelId:
+            'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelNavigationEndpoint.browseEndpoint.browseId',
+          channelName:
+            'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelTitleText',
           title: ['headline'],
-          publishTimeText: 'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.timestampText'
-        }
+          publishTimeText:
+            'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.timestampText',
+        },
       },
 
       shortsLockupViewModel: {
         properties: {
           videoId: 'onTap.innertubeCommand.reelWatchEndpoint.videoId',
           title: 'overlayMetadata.primaryText.content',
-          viewCount: 'overlayMetadata.secondaryText.content'
-        }
+          viewCount: 'overlayMetadata.secondaryText.content',
+        },
       },
 
       richShelfRenderer: {
-        channelId: 'endpoint.browseEndpoint.browseId'
+        channelId: 'endpoint.browseEndpoint.browseId',
       },
 
       channelFeaturedVideoRenderer: {
         ...baseRules,
-        vidLength: 'lengthText'
+        vidLength: 'lengthText',
       },
 
       videoWithContextRenderer: {
@@ -370,16 +378,24 @@
       lockupViewModel: {
         videoId: 'contentId',
         title: 'metadata.lockupMetadataViewModel.title.content',
-        channelName: 'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.metadataParts.text.content',
-        badges: 'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].badges',
-        vidLength: 'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
-        viewCount: 'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].metadataParts.text.content',
-        channelId: ['metadata.lockupMetadataViewModel.image.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId', 
-                    'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
-                    'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
-                    'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId'],
-        percentWatched: 'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
-        publishTimeText: 'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].metadataParts[1].text.content'
+        channelName:
+          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.metadataParts.text.content',
+        badges:
+          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].badges',
+        vidLength:
+          'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
+        viewCount:
+          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].metadataParts.text.content',
+        channelId: [
+          'metadata.lockupMetadataViewModel.image.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
+          'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+          'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+        ],
+        percentWatched:
+          'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
+        publishTimeText:
+          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].metadataParts[1].text.content',
       },
 
       videoCardRenderer: {
@@ -389,12 +405,13 @@
         vidLength: 'lengthText.simpleText',
         viewCount: 'metadataText.simpleText',
         channelId: ['bylineText.runs.navigationEndpoint.browseEndpoint.browseId'],
-        percentWatched: 'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent'
+        percentWatched:
+          'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
       },
 
       // Mobile top chips
       chipCloudChipRenderer: {
-        channelId: 'icon.iconType'
+        channelId: 'icon.iconType',
       },
 
       // Mobile Video page data
@@ -403,21 +420,19 @@
           videoId: 'videoId',
           title: 'contents.slimVideoInformationRenderer.title',
           channelId: 'contents.slimOwnerRenderer.navigationEndpoint.browseEndpoint.browseId',
-          channelName: 'contents.slimOwnerRenderer.title'
+          channelName: 'contents.slimOwnerRenderer.title',
         },
         customFunc: redirectToNextMobile,
       },
 
       tabRenderer: {
-        channelId: 'endpoint.commandMetadata.webCommandMetadata.url'
+        channelId: 'endpoint.commandMetadata.webCommandMetadata.url',
       },
 
       // Empty for blocking short headers
-      gridShelfViewModel: {
-      },
+      gridShelfViewModel: {},
 
-      richSectionRenderer: {
-      },
+      richSectionRenderer: {},
 
       // Wholesale-blocked when the chips_shelves option is enabled
       // (see isExtendedMatched); these entries only make the renderer keys
@@ -425,7 +440,7 @@
       chipsShelfWithVideoShelfRenderer: {},
       brandVideoSingletonRenderer: {},
       brandVideoShelfRenderer: {},
-      statementBannerRenderer: {}
+      statementBannerRenderer: {},
     },
     ytPlayer: {
       args: {
@@ -434,7 +449,7 @@
           channelId: ['ucid', 'raw_player_response.videoDetails.channelId'],
           channelName: ['author', 'raw_player_response.videoDetails.author'],
           title: ['title', 'raw_player_response.videoDetails.title'],
-          vidLength: ['length_seconds', 'raw_player_response.videoDetails.lengthSeconds']
+          vidLength: ['length_seconds', 'raw_player_response.videoDetails.lengthSeconds'],
         },
         customFunc: disableEmbedPlayer,
       },
@@ -451,13 +466,19 @@
       PLAYER_VARS: {
         properties: {
           videoId: ['video_id'],
-          channelId: ['raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDetails.embeddedPlayerOverlayVideoDetailsRenderer.expandedRenderer.embeddedPlayerOverlayVideoDetailsExpandedRenderer.subscribeButton.subscribeButtonRenderer.channelId'],
-          channelName: ['raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDetails.embeddedPlayerOverlayVideoDetailsRenderer.expandedRenderer.embeddedPlayerOverlayVideoDetailsExpandedRenderer.title'],
+          channelId: [
+            'raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDetails.embeddedPlayerOverlayVideoDetailsRenderer.expandedRenderer.embeddedPlayerOverlayVideoDetailsExpandedRenderer.subscribeButton.subscribeButtonRenderer.channelId',
+          ],
+          channelName: [
+            'raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDetails.embeddedPlayerOverlayVideoDetailsRenderer.expandedRenderer.embeddedPlayerOverlayVideoDetailsExpandedRenderer.title',
+          ],
           title: ['raw_player_response.embedPreview.thumbnailPreviewRenderer.title'],
-          vidLength: ['raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDurationSeconds']
+          vidLength: [
+            'raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDurationSeconds',
+          ],
         },
-        customFunc: disableEmbedPlayer
-      }
+        customFunc: disableEmbedPlayer,
+      },
     },
     guide: {
       // sidemenu subscribed channels
@@ -469,14 +490,14 @@
       },
       // Mobile buttom navigation bar
       pivotBarItemRenderer: {
-          channelId: 'icon.iconType'
+        channelId: 'icon.iconType',
       },
     },
     comments: {
       commentEntityPayload: {
         channelId: ['author.channelId'],
         channelName: ['author.displayName'],
-        comment: ['properties.content.content']
+        comment: ['properties.content.content'],
       },
       commentThreadRenderer: {},
       commentViewModel: {},
@@ -490,29 +511,29 @@
         channelName: ['authorName'],
         comment: 'message',
       },
-    }
-  }
+    },
+  };
 
   const mergedFilterRules = Object.assign({}, filterRules.main, filterRules.comments);
 
   // !! ObjectFilter
-  function ObjectFilter(object, filterRules, postActions = [], contextMenus = false) {
+  function ObjectFilter(object, ruleConfig, postActions = [], contextMenus = false) {
     if (!(this instanceof ObjectFilter))
-      return new ObjectFilter(object, filterRules, postActions, contextMenus);
+      return new ObjectFilter(object, ruleConfig, postActions, contextMenus);
 
     this.object = object;
-    this.filterRules = filterRules;
+    this.filterRules = ruleConfig;
     // Precomputed rule-name table so matchFilterRule can scan the object's
     // own (few) keys instead of iterating every rule key per visited node.
-    this.ruleNamesSet = new Set(Object.keys(filterRules));
+    this.ruleNamesSet = new Set(Object.keys(ruleConfig));
     this.contextMenus = contextMenus;
     this.blockedComments = [];
 
     this.filter();
     try {
-      postActions.forEach(x => x.call(this));
-    } catch(e) {
-      console.error("postActions Exception");
+      postActions.forEach((x) => x.call(this));
+    } catch (e) {
+      console.error('postActions Exception');
       console.error(e);
     }
     return this;
@@ -524,11 +545,17 @@
   let dataEmpty = false;
 
   function computeDataEmpty() {
-    if (storageData.options.shorts || storageData.options.movies || storageData.options.mixes || storageData.options.chips_shelves) return false;
+    if (
+      storageData.options.shorts ||
+      storageData.options.movies ||
+      storageData.options.mixes ||
+      storageData.options.chips_shelves
+    )
+      return false;
     if (!isNaN(storageData.options.percent_watched_hide)) return false;
 
-    if (!isNaN(storageData.filterData.vidLength[0]) ||
-        !isNaN(storageData.filterData.vidLength[1])) return false;
+    if (!isNaN(storageData.filterData.vidLength[0]) || !isNaN(storageData.filterData.vidLength[1]))
+      return false;
 
     for (let idx = 0; idx < regexProps.length; idx += 1) {
       if (storageData.filterData[regexProps[idx]].length > 0) return false;
@@ -540,30 +567,40 @@
   ObjectFilter.prototype.matchFilterData = function (filters, obj, objectType) {
     const friendlyVideoObj = {};
 
-    if (document.location.pathname === '/feed/history' && storageData.options.disable_on_history) return false;
+    if (document.location.pathname === '/feed/history' && storageData.options.disable_on_history)
+      return false;
 
     let doBlock = Object.keys(filters).some((h) => {
       const filterPath = filters[h];
       if (filterPath === undefined) return false;
 
       const properties = storageData.filterData[h];
-      if (regexPropsSet.has(h) && (properties === undefined || properties.length === 0 && !jsFilterEnabled)) return false;
+      if (
+        regexPropsSet.has(h) &&
+        (properties === undefined || (properties.length === 0 && !jsFilterEnabled))
+      )
+        return false;
 
       let value = getFlattenByPath(obj, filterPath);
       if (value === undefined) return false;
 
-      if (h === 'percentWatched' && storageData.options.percent_watched_hide && objectType != 'playlistPanelVideoRenderer'
-           && !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname)
-           && parseInt(value) >= storageData.options.percent_watched_hide) return true;
+      if (
+        h === 'percentWatched' &&
+        storageData.options.percent_watched_hide &&
+        objectType != 'playlistPanelVideoRenderer' &&
+        !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
+        parseInt(value) >= storageData.options.percent_watched_hide
+      )
+        return true;
 
-      if (regexPropsSet.has(h) && properties.some(prop => prop && prop.test(value))) return true;
+      if (regexPropsSet.has(h) && properties.some((prop) => prop && prop.test(value))) return true;
 
       // Collab videos (avatar stack): a blocked collaborator other than the
       // first creator isn't caught by the single channelId above, so test
       // every collaborator in the stack as well.
       if (h === 'channelId' && objectType === 'lockupViewModel' && properties.length > 0) {
         const collabIds = getCollaboratorChannelIds(obj);
-        if (collabIds.some(id => properties.some(prop => prop && prop.test(id)))) return true;
+        if (collabIds.some((id) => properties.some((prop) => prop && prop.test(id)))) return true;
       }
 
       if (h === 'vidLength') {
@@ -573,9 +610,19 @@
         }
         if (vidLen > 0 && properties.length === 2) {
           if (storageData.options.vidLength_type === 'block') {
-            if ((properties[0] !== null && vidLen >= properties[0]) && (properties[1] !== null && vidLen <= properties[1])) return true;
+            if (
+              properties[0] !== null &&
+              vidLen >= properties[0] &&
+              properties[1] !== null &&
+              vidLen <= properties[1]
+            )
+              return true;
           } else {
-            if ((properties[0] !== null && vidLen < properties[0]) || (properties[1] !== null && vidLen > properties[1])) return true;
+            if (
+              (properties[0] !== null && vidLen < properties[0]) ||
+              (properties[1] !== null && vidLen > properties[1])
+            )
+              return true;
           }
         }
         value = vidLen;
@@ -587,7 +634,7 @@
         } else if (h === 'channelBadges' || h === 'badges') {
           const badges = [];
           if (Array.isArray(value)) {
-            value.forEach(br => {
+            value.forEach((br) => {
               const rawStyle = br?.badgeViewModel?.badgeStyle || br?.metadataBadgeRenderer?.style;
               const mapped = BADGE_MAP[rawStyle];
               if (mapped) badges.push(mapped);
@@ -606,7 +653,14 @@
       try {
         doBlock = !!jsFilter(friendlyVideoObj, objectType);
       } catch (e) {
-        console.error("Custom function exception", e, "friendlyVideoObj: ", friendlyVideoObj, "objectType: ", objectType);
+        console.error(
+          'Custom function exception',
+          e,
+          'friendlyVideoObj: ',
+          friendlyVideoObj,
+          'objectType: ',
+          objectType,
+        );
       }
     }
     if (doBlock && objectType === 'commentEntityPayload') {
@@ -615,23 +669,52 @@
     return doBlock;
   };
 
-  ObjectFilter.prototype.isExtendedMatched = function(filteredObject, h) {
+  ObjectFilter.prototype.isExtendedMatched = function (filteredObject, h) {
     if (storageData.options.movies) {
       if (h === 'movieRenderer' || h === 'compactMovieRenderer') return true;
-      if (h === 'videoRenderer' && !getObjectByPath(filteredObject, "shortBylineText.runs.navigationEndpoint.browseEndpoint") && filteredObject.longBylineText && filteredObject.badges) return true;
+      if (
+        h === 'videoRenderer' &&
+        !getObjectByPath(
+          filteredObject,
+          'shortBylineText.runs.navigationEndpoint.browseEndpoint',
+        ) &&
+        filteredObject.longBylineText &&
+        filteredObject.badges
+      )
+        return true;
     }
-    if (storageData.options.shorts && (h === 'shortsLockupViewModel' || h === 'reelItemRenderer' || h === 'gridShelfViewModel') ) return true;
-    if (storageData.options.chips_shelves && (h === 'richShelfRenderer' || h === 'chipsShelfWithVideoShelfRenderer' || h === 'brandVideoSingletonRenderer' || h === 'brandVideoShelfRenderer' || h === 'statementBannerRenderer')) return true;
-    if (storageData.options.mixes && (h === 'radioRenderer' || h === 'compactRadioRenderer')) return true;
+    if (
+      storageData.options.shorts &&
+      (h === 'shortsLockupViewModel' || h === 'reelItemRenderer' || h === 'gridShelfViewModel')
+    )
+      return true;
+    if (
+      storageData.options.chips_shelves &&
+      (h === 'richShelfRenderer' ||
+        h === 'chipsShelfWithVideoShelfRenderer' ||
+        h === 'brandVideoSingletonRenderer' ||
+        h === 'brandVideoShelfRenderer' ||
+        h === 'statementBannerRenderer')
+    )
+      return true;
+    if (storageData.options.mixes && (h === 'radioRenderer' || h === 'compactRadioRenderer'))
+      return true;
     if (storageData.options.mixes && h === 'lockupViewModel') {
-      let imgName = getObjectByPath(filteredObject, 'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName');
+      let imgName = getObjectByPath(
+        filteredObject,
+        'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName',
+      );
       if (imgName === 'MIX') {
         return true;
       }
     }
 
     if (h === 'commentThreadRenderer') {
-      if (this.blockedComments.includes(getObjectByPath(filteredObject, 'commentViewModel.commentViewModel.commentId'))) {
+      if (
+        this.blockedComments.includes(
+          getObjectByPath(filteredObject, 'commentViewModel.commentViewModel.commentId'),
+        )
+      ) {
         return true;
       }
     }
@@ -639,11 +722,11 @@
     if (h === 'commentViewModel') {
       if (this.blockedComments.includes(getObjectByPath(filteredObject, 'commentId'))) {
         return true;
-      } 
+      }
     }
 
     return false;
-  }
+  };
 
   ObjectFilter.prototype.matchFilterRule = function (obj, objKeys = Object.keys(obj)) {
     if (dataEmpty) return [];
@@ -670,7 +753,9 @@
         related = undefined;
       }
 
-      const isMatch = this.isExtendedMatched(filteredObject, h) || this.matchFilterData(properties, filteredObject, h);
+      const isMatch =
+        this.isExtendedMatched(filteredObject, h) ||
+        this.matchFilterData(properties, filteredObject, h);
       if (isMatch) {
         res.push({
           name: h,
@@ -723,12 +808,12 @@
       // filter next child (skip primitives: they can never match a renderer)
       // also if current object is an array, splice child
       const child = obj[idx];
-      const childDel = (typeof child === 'object' && child !== null) ? this.filter(child) : undefined;
+      const childDel = typeof child === 'object' && child !== null ? this.filter(child) : undefined;
       if (childDel && keys === undefined) {
         deletePrev = true;
         obj.splice(idx, 1);
         // Hack for deleting related objects with missing data
-        if (typeof childDel === "string" && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
+        if (typeof childDel === 'string' && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
           obj.splice(idx, 1);
         }
       }
@@ -743,7 +828,8 @@
       }
     }
 
-    if (this.contextMenus) !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+    if (this.contextMenus)
+      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
     return deletePrev;
   };
 
@@ -763,11 +849,11 @@
       return false;
     }
 
-    const message = (storageData.options.block_message) || '';
+    const message = storageData.options.block_message || '';
     for (const prop of Object.getOwnPropertyNames(ytData)) {
       try {
         delete ytData[prop];
-      } catch (e) { }
+      } catch (e) {}
     }
     ytData.playabilityStatus = {
       status: 'ERROR',
@@ -778,17 +864,19 @@
             simpleText: message,
           },
           thumbnail: {
-            thumbnails: [{
-              url: '//s.ytimg.com/yts/img/meh7-vflGevej7.png',
-              width: 140,
-              height: 100,
-            }]
+            thumbnails: [
+              {
+                url: '//s.ytimg.com/yts/img/meh7-vflGevej7.png',
+                width: 140,
+                height: 100,
+              },
+            ],
           },
           icon: {
             iconType: 'ERROR_OUTLINE',
-          }
-        }
-      }
+          },
+        },
+      },
     };
 
     currentBlock = true;
@@ -796,7 +884,7 @@
 
   function blockPlaylistVid(pl) {
     const vid = pl.playlistPanelVideoRenderer;
-    const message = (storageData.options.block_message) || '';
+    const message = storageData.options.block_message || '';
 
     vid.videoId = 'undefined';
 
@@ -805,9 +893,11 @@
     };
 
     vid.thumbnail = {
-      thumbnails: [{
-        url: 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png',
-      }],
+      thumbnails: [
+        {
+          url: 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png',
+        },
+      ],
     };
 
     delete vid.title;
@@ -834,7 +924,7 @@
     const index = document.location.search.indexOf('&list=');
     if (index !== -1) {
       const value = document.location.search.substring(0, index);
-      document.location = document.location.pathname + value
+      document.location = document.location.pathname + value;
     } else {
       document.location = '/';
     }
@@ -853,16 +943,24 @@
   }
 
   function fixAutoPlayMobile() {
-
-    const playerOverlay = getObjectByPath(this.object, "playerOverlays.playerOverlayRenderer.autoplay.playerOverlayAutoplayRenderer");
+    const playerOverlay = getObjectByPath(
+      this.object,
+      'playerOverlays.playerOverlayRenderer.autoplay.playerOverlayAutoplayRenderer',
+    );
     if (!playerOverlay._deleted) return;
 
-    const nextResults = getObjectByPath(this.object, 'contents.singleColumnWatchNextResults.results.results.contents');
+    const nextResults = getObjectByPath(
+      this.object,
+      'contents.singleColumnWatchNextResults.results.results.contents',
+    );
     if (!nextResults) return;
 
     let nextSection;
-    for (const [i, v] of nextResults.entries()) {
-      if (has.call(v, 'itemSectionRenderer') && v.itemSectionRenderer.targetId === 'watch-next-feed') {
+    for (const [, v] of nextResults.entries()) {
+      if (
+        has.call(v, 'itemSectionRenderer') &&
+        v.itemSectionRenderer.targetId === 'watch-next-feed'
+      ) {
         nextSection = v.itemSectionRenderer;
       }
     }
@@ -873,12 +971,16 @@
     playerOverlay.videoTitle = nextVideoRenderer.headline;
     playerOverlay.byline = nextVideoRenderer.shortBylineText;
     playerOverlay.background = nextVideoRenderer.thumbnail;
-    playerOverlay.nextButton.buttonRenderer.navigationEndpoint = nextVideoRenderer.navigationEndpoint;
+    playerOverlay.nextButton.buttonRenderer.navigationEndpoint =
+      nextVideoRenderer.navigationEndpoint;
     playerOverlay.thumbnailOverlays = nextVideoRenderer.thumbnailOverlays;
     playerOverlay.videoId = nextVideoRenderer.videoId;
     playerOverlay.shortViewCountText = nextVideoRenderer.shortViewCountText;
 
-    const autoplaySet = getObjectByPath(this.object, 'contents.singleColumnWatchNextResults.autoplay.autoplay.sets.autoplayVideo');
+    const autoplaySet = getObjectByPath(
+      this.object,
+      'contents.singleColumnWatchNextResults.autoplay.autoplay.sets.autoplayVideo',
+    );
     if (!autoplaySet) return;
 
     autoplaySet.commandMetadata = nextVideoRenderer.navigationEndpoint.commandMetadata;
@@ -895,7 +997,10 @@
     const isPlaylist = new URL(document.location).searchParams.has('list');
     if (isPlaylist) return;
 
-    const nextResults = getObjectByPath(this.object, 'contents.singleColumnWatchNextResults.results.results.contents');
+    const nextResults = getObjectByPath(
+      this.object,
+      'contents.singleColumnWatchNextResults.results.results.contents',
+    );
     if (!nextResults) return;
 
     if (storageData.options.autoplay !== true) {
@@ -904,8 +1009,11 @@
     }
 
     let nextSection;
-    for (const [i, v] of nextResults.entries()) {
-      if (has.call(v, 'itemSectionRenderer') && v.itemSectionRenderer.targetId === 'watch-next-feed') {
+    for (const [, v] of nextResults.entries()) {
+      if (
+        has.call(v, 'itemSectionRenderer') &&
+        v.itemSectionRenderer.targetId === 'watch-next-feed'
+      ) {
         nextSection = v.itemSectionRenderer;
       }
     }
@@ -960,13 +1068,15 @@
   function flattenRuns(arr) {
     if (arr.simpleText !== undefined) return arr.simpleText;
     if (!(arr.runs instanceof Array)) return arr;
-    return arr.runs.reduce((res, v) => {
-      if (has.call(v, 'text')) {
-        res.push(v.text);
-      }
-      return res;
-    }, []).join(' ');
-  };
+    return arr.runs
+      .reduce((res, v) => {
+        if (has.call(v, 'text')) {
+          res.push(v.text);
+        }
+        return res;
+      }, [])
+      .join(' ');
+  }
 
   function getFlattenByPath(obj, filterPath) {
     if (filterPath === undefined) return;
@@ -982,11 +1092,17 @@
   // Collab videos render one card per creator, and getFlattenByPath only
   // returns the first channelId it resolves.
   function getCollaboratorChannelIds(obj) {
-    const listItems = getObjectByPath(obj, 'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems');
+    const listItems = getObjectByPath(
+      obj,
+      'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems',
+    );
     const ids = [];
     if (Array.isArray(listItems)) {
       for (let i = 0; i < listItems.length; i += 1) {
-        const id = getObjectByPath(listItems[i], 'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId');
+        const id = getObjectByPath(
+          listItems[i],
+          'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+        );
         if (id !== undefined) ids.push(id);
       }
     }
@@ -1008,7 +1124,7 @@
     const re = /\[(\d+)\]/g;
     let m;
     while ((m = re.exec(v)) !== null) indices.push(parseInt(m[1], 10));
-    const baseMatch = v.match(/^([^\[]+)/);
+    const baseMatch = v.match(/^([^[]+)/);
     return { key: baseMatch && baseMatch[1] ? baseMatch[1] : undefined, indices };
   }
 
@@ -1037,7 +1153,7 @@
         // segment is a plain token (no bracket)
         if (nextObj instanceof Array) {
           // when we have an array of objects, find an element that contains the key v
-          const found = nextObj.find(o => has.call(o, seg.key));
+          const found = nextObj.find((o) => has.call(o, seg.key));
           if (found === undefined) return def;
           nextObj = found[seg.key];
         } else {
@@ -1066,13 +1182,15 @@
     if (timeStr === 'SHORTS') {
       return -2;
     }
-    const parts = String(timeStr).split(':').map(x => parseInt(x, 10));
+    const parts = String(timeStr)
+      .split(':')
+      .map((x) => parseInt(x, 10));
     switch (parts.length) {
       case 3: {
-        return (parts[0] * 60 * 60) + (parts[1] * 60) + parts[2];
+        return parts[0] * 60 * 60 + parts[1] * 60 + parts[2];
       }
       case 2: {
-        return (parts[0] * 60) + parts[1];
+        return parts[0] * 60 + parts[1];
       }
       case 1: {
         return parts[0];
@@ -1084,29 +1202,29 @@
   }
 
   function parseViewCount(viewCount) {
-    const parts = viewCount.split(" ");
-    if (parts[1] !== "views" && parts[1] !== "view") return undefined; // Fail if not english formatting
+    const parts = viewCount.split(' ');
+    if (parts[1] !== 'views' && parts[1] !== 'view') return undefined; // Fail if not english formatting
     let views = parts[0];
-    
+
     // Handle abbreviated formats (K, M, B)
     const multipliers = {
-      'K': 1000,
-      'M': 1000000,
-      'B': 1000000000
+      K: 1000,
+      M: 1000000,
+      B: 1000000000,
     };
-    
+
     // Check if it ends with a multiplier
     const lastChar = views.slice(-1).toUpperCase();
     let multiplier = 1;
     let numericPart = views.replace(',', '');
-    
+
     if (multipliers[lastChar]) {
       multiplier = multipliers[lastChar];
       numericPart = views.slice(0, -1); // Remove the letter
     }
-    
+
     // Return the final count
-    return (numericPart * multiplier);
+    return numericPart * multiplier;
   }
 
   function transformToRegExp(data) {
@@ -1127,7 +1245,7 @@
 
   function playerMiscFilters() {
     let start_obj = getObjectByPath(this.object, 'args.raw_player_response');
-    start_obj = (start_obj) ? start_obj : this.object;
+    start_obj = start_obj ? start_obj : this.object;
 
     if (storageData.options.disable_you_there === true) {
       const playerMessages = getObjectByPath(start_obj, 'messages', []);
@@ -1147,10 +1265,10 @@
       }
       const streamConfig = getObjectByPath(start_obj, 'streamingData.adaptiveFormats', []);
       streamConfig.forEach((conf) => {
-          if (conf.loudnessDb !== undefined) {
-            conf.loudnessDb = 0.0;
-          }
-      })
+        if (conf.loudnessDb !== undefined) {
+          conf.loudnessDb = 0.0;
+        }
+      });
     }
   }
 
@@ -1159,10 +1277,9 @@
 
     if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
       ObjectFilter(resp, filterRules.main, [], true);
-    }
-    else if (url.pathname === '/youtubei/v1/get_watch') {
+    } else if (url.pathname === '/youtubei/v1/get_watch') {
       if (!(resp instanceof Array)) return;
-      resp.forEach((o => {
+      resp.forEach((o) => {
         if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
           ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
         } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
@@ -1170,17 +1287,14 @@
           if (currentBlock) postActions.push(redirectToNext);
           ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
         }
-      }))
-    }
-    else if (['/youtubei/v1/next'].includes(url.pathname)) {
+      });
+    } else if (['/youtubei/v1/next'].includes(url.pathname)) {
       const postActions = [fixAutoplay];
       if (currentBlock) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
-    }
-    else if (url.pathname === '/youtubei/v1/guide') {
+    } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
-    }
-    else if (url.pathname === '/youtubei/v1/player') {
+    } else if (url.pathname === '/youtubei/v1/player') {
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
     }
   }
@@ -1189,14 +1303,14 @@
     if (storageData === undefined) return;
 
     let ytDataArr = resp.part || resp.response.parts || resp.response;
-    ytDataArr = (ytDataArr instanceof Array) ? ytDataArr : [ytDataArr];
+    ytDataArr = ytDataArr instanceof Array ? ytDataArr : [ytDataArr];
 
     ytDataArr.forEach((obj) => {
       if (has.call(obj, 'player')) {
         try {
           const player_resp = getObjectByPath(obj.player, 'args.player_response');
           obj.player.args.raw_player_response = JSON.parse(player_resp);
-        } catch (e) { }
+        } catch (e) {}
         ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
       }
 
@@ -1218,6 +1332,8 @@
           case '/watch':
             postActions = [fixAutoplay];
             if (currentBlock) postActions.push(redirectToNext);
+          // the watch page uses the same catch-all rule set below
+          // falls through
           default:
             rules = filterRules.main;
         }
@@ -1231,7 +1347,10 @@
   }
 
   function blockTrending(data) {
-    if (document.location.pathname === '/feed/trending' || document.location.pathname === '/feed/explore') {
+    if (
+      document.location.pathname === '/feed/trending' ||
+      document.location.pathname === '/feed/explore'
+    ) {
       redirectToIndex();
     }
 
@@ -1255,7 +1374,9 @@
     if (!this?.object?.playerOverlays) return;
     if (isMobileInterface) return fixAutoPlayMobile.call(this);
 
-    if (getObjectByPath(this.object, 'playerOverlays.playerOverlayRenderer.autoplay') === undefined) {
+    if (
+      getObjectByPath(this.object, 'playerOverlays.playerOverlayRenderer.autoplay') === undefined
+    ) {
       return;
     }
 
@@ -1265,19 +1386,23 @@
     );
     if (autoplayOverlay !== undefined) return;
 
-    let autoPlay = getObjectByPath(this.object, 'contents.twoColumnWatchNextResults.autoplay.autoplay.sets');
+    let autoPlay = getObjectByPath(
+      this.object,
+      'contents.twoColumnWatchNextResults.autoplay.autoplay.sets',
+    );
     if (autoPlay === undefined) return;
     autoPlay = autoPlay[0].autoplayVideo;
     if (autoPlay === undefined) return;
     try {
       const videoId = findNextVideo(this.object);
       if (videoId !== false) {
-        autoPlay.videoId = videoId
-        autoPlay.watchEndpoint.videoId = videoId
+        autoPlay.videoId = videoId;
+        autoPlay.watchEndpoint.videoId = videoId;
       } else {
         delete this.object.contents.twoColumnWatchNextResults.autoplay;
       }
-      this.object.responseContext.webResponseContextExtensionData.webPrefetchData.navigationEndpoints = [];
+      this.object.responseContext.webResponseContextExtensionData.webPrefetchData.navigationEndpoints =
+        [];
     } catch (e) {
       delete this.object.contents.twoColumnWatchNextResults.autoplay;
     }
@@ -1290,19 +1415,22 @@
     );
     if (secondaryResults === undefined) return false;
 
-    const chipSection = secondaryResults.findIndex(x => has.call(x, 'itemSectionRenderer'));
+    const chipSection = secondaryResults.findIndex((x) => has.call(x, 'itemSectionRenderer'));
     if (chipSection !== -1) {
-      secondaryResults = getObjectByPath(secondaryResults[chipSection], 'itemSectionRenderer.contents');
+      secondaryResults = getObjectByPath(
+        secondaryResults[chipSection],
+        'itemSectionRenderer.contents',
+      );
       if (secondaryResults === undefined) return false;
     }
 
-    const regularVid = secondaryResults.findIndex(x => has.call(x, 'compactVideoRenderer'));
-    if (regularVid > -1) {
-      const vidObj = secondaryResults[regularVid].compactVideoRenderer;
+    const compactVid = secondaryResults.findIndex((x) => has.call(x, 'compactVideoRenderer'));
+    if (compactVid > -1) {
+      const vidObj = secondaryResults[compactVid].compactVideoRenderer;
       return vidObj.videoId;
     } else {
-      const regularVid = secondaryResults.findIndex(x => has.call(x, 'lockupViewModel'));
-      const vidObj = secondaryResults[regularVid].lockupViewModel;
+      const lockupVid = secondaryResults.findIndex((x) => has.call(x, 'lockupViewModel'));
+      const vidObj = secondaryResults[lockupVid].lockupViewModel;
       return vidObj.contentId;
     }
   }
@@ -1312,26 +1440,42 @@
     if (keys !== undefined) {
       for (let i = 0; i < keys.length; i += 1) {
         // same live-ownership guard as findAndExtractMenuItems
-        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) { attr = keys[i]; break; }
+        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) {
+          attr = keys[i];
+          break;
+        }
       }
     }
     if (attr === undefined) return;
 
     const parentData = obj[attr];
     const attrKey = attr;
-    const searchIn = mergedFilterRules[attrKey].properties ? mergedFilterRules[attrKey].properties : mergedFilterRules[attrKey];
+    const searchIn = mergedFilterRules[attrKey].properties
+      ? mergedFilterRules[attrKey].properties
+      : mergedFilterRules[attrKey];
 
     const channelData = {
       id: getFlattenByPath(parentData, searchIn.channelId),
       text: getFlattenByPath(parentData, searchIn.channelName),
-    }
+    };
 
     const videoData = {
       id: getFlattenByPath(parentData, searchIn.videoId),
       text: getFlattenByPath(parentData, searchIn.title),
-    }
+    };
 
-    if (['videoWithContextRenderer', 'compactVideoRenderer', 'movieRenderer', 'compactMovieRenderer', 'playlistVideoRenderer', 'reelItemRenderer', 'commentRenderer'].includes(attr)) { // Mobile Up Next videos
+    if (
+      [
+        'videoWithContextRenderer',
+        'compactVideoRenderer',
+        'movieRenderer',
+        'compactMovieRenderer',
+        'playlistVideoRenderer',
+        'reelItemRenderer',
+        'commentRenderer',
+      ].includes(attr)
+    ) {
+      // Mobile Up Next videos
       let items;
       if (has.call(obj[attr], 'menu')) {
         items = getObjectByPath(obj[attr], 'menu.menuRenderer.items');
@@ -1339,179 +1483,195 @@
       if (has.call(obj[attr], 'actionMenu')) {
         items = obj[attr].actionMenu.menuRenderer.items;
       } else if (attr === 'commentRenderer') {
-        obj[attr].actionMenu = {menuRenderer: {items: [] } };
+        obj[attr].actionMenu = { menuRenderer: { items: [] } };
         items = obj[attr].actionMenu.menuRenderer.items;
       }
 
-      if(!items) return;
-      const blockCh = { menuServiceItemRenderer: { _btOriginalAttr: attr, _btMenuAction: "block_channel", _btOriginalData: channelData, "text": { "runs": [ { "text": "Block Channel" } ]},
-        "icon": {
-          "iconType": "NOT_INTERESTED"
-        },
-        "trackingParams": "Cg==",
-        "serviceEndpoint": {
-        "commandMetadata": {
-          "webCommandMetadata": {
-            "sendPost": true,
-            "apiUrl": "data:text/plain;base64,Cg=="
-          }
-        },
-        "feedbackEndpoint": {
-          "uiActions": {
-            "hideEnclosingContainer": true
+      if (!items) return;
+      const blockCh = {
+        menuServiceItemRenderer: {
+          _btOriginalAttr: attr,
+          _btMenuAction: 'block_channel',
+          _btOriginalData: channelData,
+          text: { runs: [{ text: 'Block Channel' }] },
+          icon: {
+            iconType: 'NOT_INTERESTED',
           },
-          "actions": [
-            {
-              "replaceEnclosingAction": {
-                "item": {
-                  "notificationMultiActionRenderer": {
-                    "responseText": {
-                      "runs": [
-                        {
-                          "text": "Channel blocked"
-                        }
-                      ],
-                      "accessibility": {
-                        "accessibilityData": {
-                          "label": "Channel blocked"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        }
-      } } };
-      const blockVid = { menuServiceItemRenderer: { _btOriginalAttr: attr, _btMenuAction: "block_video", _btOriginalData: videoData, "text": { "runs": [ { "text": "Block Video" } ]},
-        "icon": {
-          "iconType": "NOT_INTERESTED"
-        },
-        "trackingParams": "Cg==",
-        "serviceEndpoint": {
-        "commandMetadata": {
-          "webCommandMetadata": {
-            "sendPost": true,
-            "apiUrl": "data:text/plain;base64,Cg=="
-          }
-        },
-        "feedbackEndpoint": {
-          "uiActions": {
-            "hideEnclosingContainer": true
+          trackingParams: 'Cg==',
+          serviceEndpoint: {
+            commandMetadata: {
+              webCommandMetadata: {
+                sendPost: true,
+                apiUrl: 'data:text/plain;base64,Cg==',
+              },
+            },
+            feedbackEndpoint: {
+              uiActions: {
+                hideEnclosingContainer: true,
+              },
+              actions: [
+                {
+                  replaceEnclosingAction: {
+                    item: {
+                      notificationMultiActionRenderer: {
+                        responseText: {
+                          runs: [
+                            {
+                              text: 'Channel blocked',
+                            },
+                          ],
+                          accessibility: {
+                            accessibilityData: {
+                              label: 'Channel blocked',
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
           },
-          "actions": [
-            {
-              "replaceEnclosingAction": {
-                "item": {
-                  "notificationMultiActionRenderer": {
-                    "responseText": {
-                      "runs": [
-                        {
-                          "text": "Video blocked"
-                        }
-                      ],
-                      "accessibility": {
-                        "accessibilityData": {
-                          "label": "Video blocked"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        }
-      } } };
+        },
+      };
+      const blockVid = {
+        menuServiceItemRenderer: {
+          _btOriginalAttr: attr,
+          _btMenuAction: 'block_video',
+          _btOriginalData: videoData,
+          text: { runs: [{ text: 'Block Video' }] },
+          icon: {
+            iconType: 'NOT_INTERESTED',
+          },
+          trackingParams: 'Cg==',
+          serviceEndpoint: {
+            commandMetadata: {
+              webCommandMetadata: {
+                sendPost: true,
+                apiUrl: 'data:text/plain;base64,Cg==',
+              },
+            },
+            feedbackEndpoint: {
+              uiActions: {
+                hideEnclosingContainer: true,
+              },
+              actions: [
+                {
+                  replaceEnclosingAction: {
+                    item: {
+                      notificationMultiActionRenderer: {
+                        responseText: {
+                          runs: [
+                            {
+                              text: 'Video blocked',
+                            },
+                          ],
+                          accessibility: {
+                            accessibilityData: {
+                              label: 'Video blocked',
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      };
       if (channelData.id) items.push(blockCh);
       if (videoData.id) items.push(blockVid);
-    } else if (attr === 'slimVideoMetadataSectionRenderer') { // Mobile Video page
+    } else if (attr === 'slimVideoMetadataSectionRenderer') {
+      // Mobile Video page
       let items = obj[attr].contents;
       if (!items) return;
       let mobileVideoMenu = {
-        "slimVideoActionBarRenderer": {
-          "buttons": [
+        slimVideoActionBarRenderer: {
+          buttons: [
             {
-              "slimMetadataButtonRenderer": {
-                "button": {
-                  "buttonRenderer": {
-                    "_btOriginalData": videoData,
-                    "_btOriginalAttr": "slimVideoMetadataSectionRenderer",
-                    "_btMenuAction": "block_video",
-                    "style": "STYLE_DEFAULT",
-                    "size": "SIZE_DEFAULT",
-                    "isDisabled": false,
-                    "text": {
-                      "runs": [
+              slimMetadataButtonRenderer: {
+                button: {
+                  buttonRenderer: {
+                    _btOriginalData: videoData,
+                    _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
+                    _btMenuAction: 'block_video',
+                    style: 'STYLE_DEFAULT',
+                    size: 'SIZE_DEFAULT',
+                    isDisabled: false,
+                    text: {
+                      runs: [
                         {
-                          "text": "Block Video"
-                        }
-                      ]
+                          text: 'Block Video',
+                        },
+                      ],
                     },
-                    "accessibility": {
-                      "label": "Block Video"
+                    accessibility: {
+                      label: 'Block Video',
                     },
-                    "accessibilityData": {
-                      "accessibilityData": {
-                        "label": "Block Video"
-                      }
+                    accessibilityData: {
+                      accessibilityData: {
+                        label: 'Block Video',
+                      },
                     },
-                    "navigationEndpoint": {}
-                  }
-                }
-              }
+                    navigationEndpoint: {},
+                  },
+                },
+              },
             },
             {
-              "slimMetadataButtonRenderer":  {
-                "button": {
-                  "buttonRenderer": {
-                    "_btOriginalData": channelData,
-                    "_btOriginalAttr": "slimVideoMetadataSectionRenderer",
-                    "_btMenuAction": "block_channel",
-                    "style": "STYLE_DEFAULT",
-                    "size": "SIZE_DEFAULT",
-                    "isDisabled": false,
-                    "text": {
-                      "runs": [
+              slimMetadataButtonRenderer: {
+                button: {
+                  buttonRenderer: {
+                    _btOriginalData: channelData,
+                    _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
+                    _btMenuAction: 'block_channel',
+                    style: 'STYLE_DEFAULT',
+                    size: 'SIZE_DEFAULT',
+                    isDisabled: false,
+                    text: {
+                      runs: [
                         {
-                          "text": "Block Channel"
-                        }
-                      ]
+                          text: 'Block Channel',
+                        },
+                      ],
                     },
-                    "accessibility": {
-                      "label": "Block Channel"
+                    accessibility: {
+                      label: 'Block Channel',
                     },
-                    "accessibilityData": {
-                      "accessibilityData": {
-                        "label": "Block Channel"
-                      }
+                    accessibilityData: {
+                      accessibilityData: {
+                        label: 'Block Channel',
+                      },
                     },
-                    "navigationEndpoint": {"commandMetadata": {"webCommandMetadata": {"ignoreNavigation": true}}, "urlEndpoint": {}}
-                  }
-                }
-              }
-            }
+                    navigationEndpoint: {
+                      commandMetadata: { webCommandMetadata: { ignoreNavigation: true } },
+                      urlEndpoint: {},
+                    },
+                  },
+                },
+              },
+            },
           ],
-          "overflowMenuText": {
-            "runs": [
+          overflowMenuText: {
+            runs: [
               {
-                "text": "More"
-              }
-            ]
+                text: 'More',
+              },
+            ],
           },
-          "overflowAccessibilityData": {
-            "label": "More"
-          }
-        }
-      }
+          overflowAccessibilityData: {
+            label: 'More',
+          },
+        },
+      };
       items.splice(2, 0, mobileVideoMenu);
     }
   }
 
   function extractMenuItems(obj, attr) {
-    const has = Object.prototype.hasOwnProperty;
-
     let items = null;
     let hasChannel = false;
     let hasVideo = false;
@@ -1531,10 +1691,13 @@
     } else if (attr === 'lockupViewModel') {
       items = extractFromLockupViewModel(obj[attr]);
       if (!items) return null;
-      let imgName = getObjectByPath(obj[attr], 'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName');
+      let imgName = getObjectByPath(
+        obj[attr],
+        'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName',
+      );
       if (imgName !== 'MIX') {
-          hasChannel = true;
-          hasVideo = true;
+        hasChannel = true;
+        hasVideo = true;
       }
 
       isLockupViewModel = true;
@@ -1543,7 +1706,11 @@
       hasVideo = true;
 
       // Determine channel presence
-      if (attr === 'movieRenderer' || attr === 'compactMovieRenderer' || attr === 'reelItemRenderer') {
+      if (
+        attr === 'movieRenderer' ||
+        attr === 'compactMovieRenderer' ||
+        attr === 'reelItemRenderer'
+      ) {
         hasChannel = false;
       } else if (
         has.call(obj[attr], 'shortBylineText') &&
@@ -1563,7 +1730,8 @@
 
   // Specific extractor for lockupViewModel
   function extractFromLockupViewModel(renderer) {
-    const path = 'metadata.lockupMetadataViewModel.menuButton.buttonViewModel.onTap.innertubeCommand.showSheetCommand.panelLoadingStrategy.inlineContent.sheetViewModel';
+    const path =
+      'metadata.lockupMetadataViewModel.menuButton.buttonViewModel.onTap.innertubeCommand.showSheetCommand.panelLoadingStrategy.inlineContent.sheetViewModel';
     const sheetmodel = getObjectByPath(renderer, path);
     if (!sheetmodel) return null;
 
@@ -1576,19 +1744,21 @@
     const videoId = getFlattenByPath(renderer, searchIn.videoId);
     const videoName = getFlattenByPath(renderer, searchIn.title);
 
-    const metadataBlock = { metadata: { 
-      channelId, 
-      channelName, 
-      videoId, 
-      videoName, 
-      removeObject: true
-    } };
+    const metadataBlock = {
+      metadata: {
+        channelId,
+        channelName,
+        videoId,
+        videoName,
+        removeObject: true,
+      },
+    };
 
     Object.defineProperty(sheetmodel, 'blockTube', {
       value: metadataBlock,
       writable: true,
       enumerable: true,
-      configurable: true
+      configurable: true,
     });
 
     return items;
@@ -1617,7 +1787,10 @@
       for (let i = 0; i < keys.length; i += 1) {
         // has.call(obj, key) is the LIVE check: keys is a snapshot taken before
         // rule deletion, so a key may have been deleted since it was captured.
-        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) { attr = keys[i]; break; }
+        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) {
+          attr = keys[i];
+          break;
+        }
       }
     }
     if (!attr) return null;
@@ -1628,19 +1801,19 @@
     return { ...result, attr };
   }
 
-  function injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, currentObj, storageData) {
+  function injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, currentObj, store) {
     if (isLockupViewModel) {
-      return injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj,  storageData);
+      return injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store);
     } else {
-      return injectStandardMenuButtons(items, hasChannel, hasVideo, storageData);
+      return injectStandardMenuButtons(items, hasChannel, hasVideo, store);
     }
   }
 
-  function injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, storageData) {
+  function injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store) {
     if (!items.length) return;
 
-    const cleanChannelContext = createCleanContext(items, storageData, true, currentObj);
-    const cleanVideoContext = createCleanContext(items, storageData, false, currentObj);
+    const cleanChannelContext = createCleanContext(items, store, true, currentObj);
+    const cleanVideoContext = createCleanContext(items, store, false, currentObj);
 
     const blockChannelItem = createLockupButtonItem('Block Channel', cleanChannelContext);
     const blockVideoItem = createLockupButtonItem('Block Video', cleanVideoContext);
@@ -1651,13 +1824,16 @@
     return true;
   }
 
-  function createCleanContext(items, storageData, isChannel, currentObj) {
-    if (storageData.options.block_feedback && items.length > 0) {
+  function createCleanContext(items, store, isChannel, currentObj) {
+    if (store.options.block_feedback && items.length > 0) {
       const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
       let item;
       for (const icon of targetIcons) {
-        item = items.find(i => {
-          const imageName = getObjectByPath(i, 'listItemViewModel.leadingImage.sources.clientResource.imageName');
+        item = items.find((i) => {
+          const imageName = getObjectByPath(
+            i,
+            'listItemViewModel.leadingImage.sources.clientResource.imageName',
+          );
           return imageName === icon;
         });
         if (item) break;
@@ -1669,51 +1845,50 @@
 
     const baseContext = items[0]?.listItemViewModel?.rendererContext;
     if (!baseContext) return null;
-  
+
     const msg = isChannel ? 'Channel Blocked' : 'Video Blocked';
     const cleanContext = deepClone(baseContext);
-  
+
     if (cleanContext.commandContext?.onTap) {
       let onTap = cleanContext.commandContext?.onTap;
       onTap.innertubeCommand = {
-        "clickTrackingParams": "",
-        "commandMetadata": {
-          "webCommandMetadata": {
-            "sendPost": false,
-            "apiUrl": ""
-          }
-        },
-        "feedbackEndpoint": {
-          "feedbackToken": "",
-          "uiActions": {
-            "hideEnclosingContainer": true
+        clickTrackingParams: '',
+        commandMetadata: {
+          webCommandMetadata: {
+            sendPost: false,
+            apiUrl: '',
           },
-          "actions": [
+        },
+        feedbackEndpoint: {
+          feedbackToken: '',
+          uiActions: {
+            hideEnclosingContainer: true,
+          },
+          actions: [
             {
-              "clickTrackingParams": "",
-              "replaceEnclosingAction": {
-                "item": {
-                  "notificationMultiActionRenderer": {
-                    "responseText": {
-                      "accessibility": {
-                        "accessibilityData": {
-                          "label": msg
-                        }
+              clickTrackingParams: '',
+              replaceEnclosingAction: {
+                item: {
+                  notificationMultiActionRenderer: {
+                    responseText: {
+                      accessibility: {
+                        accessibilityData: {
+                          label: msg,
+                        },
                       },
-                      "simpleText": msg
+                      simpleText: msg,
                     },
-                    "buttons": [
-                    ],
-                    "trackingParams": "",
-                    "dismissalViewStyle": "DISMISSAL_VIEW_STYLE_COMPACT_TALL"
-                  }
-                }
-              }
-            }
+                    buttons: [],
+                    trackingParams: '',
+                    dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
+                  },
+                },
+              },
+            },
           ],
-          "contentId": currentObj.contentId
-        }
-      }
+          contentId: currentObj.contentId,
+        },
+      };
     }
 
     return cleanContext;
@@ -1724,20 +1899,20 @@
       listItemViewModel: {
         title: { content: title },
         leadingImage: {
-          sources: [{ clientResource: { imageName: "NOT_INTERESTED" } }]
+          sources: [{ clientResource: { imageName: 'NOT_INTERESTED' } }],
         },
-        rendererContext
-      }
+        rendererContext,
+      },
     };
 
     return item;
   }
 
-  function injectStandardMenuButtons(items, hasChannel, hasVideo, storageData) {
+  function injectStandardMenuButtons(items, hasChannel, hasVideo, store) {
     const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
 
-    if (storageData.options.block_feedback) {
+    if (store.options.block_feedback) {
       for (const item of items) {
         const endpoint = item?.menuServiceItemRenderer?.serviceEndpoint;
         if (!endpoint) continue;
@@ -1761,8 +1936,8 @@
     return {
       menuServiceItemRenderer: {
         text: { runs: [{ text }] },
-        icon: { iconType: "NOT_INTERESTED" }
-      }
+        icon: { iconType: 'NOT_INTERESTED' },
+      },
     };
   }
 
@@ -1790,17 +1965,21 @@
       const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
       if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
         try {
-          ytConfigPlayerConfig.raw_player_response = JSON.parse(ytConfigPlayerConfig.embedded_player_response);
-        } catch (e) { }
+          ytConfigPlayerConfig.raw_player_response = JSON.parse(
+            ytConfigPlayerConfig.embedded_player_response,
+          );
+        } catch (e) {}
         ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
       } else {
         defineProperty('yt.config_', undefined, (v) => {
           try {
             if (has.call(v, 'PLAYER_VARS')) {
-              v.PLAYER_VARS.raw_player_response = JSON.parse(v.PLAYER_VARS.embedded_player_response);
+              v.PLAYER_VARS.raw_player_response = JSON.parse(
+                v.PLAYER_VARS.embedded_player_response,
+              );
             }
-          } catch (e) { }
-          ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters])
+          } catch (e) {}
+          ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
         });
       }
     }
@@ -1814,9 +1993,9 @@
         if (playerResp) {
           try {
             v.args.raw_player_response = JSON.parse(playerResp);
-          } catch (e) { }
+          } catch (e) {}
         }
-        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters])
+        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
       });
     }
 
@@ -1826,18 +2005,35 @@
       defineProperty('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
     }
 
-    if (typeof window.ytInitialPlayerResponse === 'object' && window.ytInitialPlayerResponse !== null) {
+    if (
+      typeof window.ytInitialPlayerResponse === 'object' &&
+      window.ytInitialPlayerResponse !== null
+    ) {
       ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
     } else {
-      defineProperty('ytInitialPlayerResponse', undefined, (v) => ObjectFilter(v, filterRules.ytPlayer));
+      defineProperty('ytInitialPlayerResponse', undefined, (v) =>
+        ObjectFilter(v, filterRules.ytPlayer),
+      );
     }
 
     const postActions = [fixAutoplay];
     if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
-      ObjectFilter(window.ytInitialData, mergedFilterRules, (window.ytInitialData.contents && currentBlock) ? postActions.concat(redirectToNext) : postActions, true);
+      ObjectFilter(
+        window.ytInitialData,
+        mergedFilterRules,
+        window.ytInitialData.contents && currentBlock
+          ? postActions.concat(redirectToNext)
+          : postActions,
+        true,
+      );
     } else {
       defineProperty('ytInitialData', undefined, (v) => {
-        ObjectFilter(v, mergedFilterRules, (v.contents && currentBlock) ? postActions.concat(redirectToNext) : postActions, true)
+        ObjectFilter(
+          v,
+          mergedFilterRules,
+          v.contents && currentBlock ? postActions.concat(redirectToNext) : postActions,
+          true,
+        );
       });
     }
 
@@ -1856,7 +2052,7 @@
     if (data.options.mixes) blockMixes(data);
     if (data.options.shorts) blockShorts(data);
 
-    const shouldStartHook = (storageData === undefined);
+    const shouldStartHook = storageData === undefined;
     storageData = data;
 
     // Enable JS filtering only if function has something in it
@@ -1865,19 +2061,19 @@
         try {
           if (window.trustedTypes && window.trustedTypes.createPolicy) {
             window.trustedTypes.createPolicy('default', {
-              createHTML: string => string,
-              createScriptURL: string => string,
-              createScript: string => string,
+              createHTML: (string) => string,
+              createScriptURL: (string) => string,
+              createScript: (string) => string,
             });
           }
         } catch (e) {}
         jsFilter = window.eval(storageData.filterData.javascript);
         if (!(jsFilter instanceof Function)) {
-          throw Error("Function not found");
+          throw Error('Function not found');
         }
         jsFilterEnabled = storageData.options.enable_javascript;
       } catch (e) {
-        console.error("Custom function syntax error", e);
+        console.error('Custom function syntax error', e);
         jsFilterEnabled = false;
       }
     } else {
@@ -1907,21 +2103,24 @@
               popup: {
                 notificationActionRenderer: {
                   responseText: {
-                    runs: [{
-                      text: msg
-                    }]
-                  }
-                }
+                    runs: [
+                      {
+                        text: msg,
+                      },
+                    ],
+                  },
+                },
               },
-              popupType: 'TOAST'
-            }
+              popupType: 'TOAST',
+            },
           },
           ytdApp,
-          undefined],
+          undefined,
+        ],
         returnValue: [],
         disableBroadcast: false,
-        optionalAction: true
-      }
+        optionalAction: true,
+      },
     });
     ytdApp.dispatchEvent(ytEvent);
   }
@@ -1930,7 +2129,10 @@
     if (storageData === undefined) return;
 
     if (window.btReloadRequired) {
-      window.btExports.openToast("BlockTube was updated, this tab needs to be reloaded to use this function", 5000);
+      window.btExports.openToast(
+        'BlockTube was updated, this tab needs to be reloaded to use this function',
+        5000,
+      );
       return;
     }
 
@@ -1956,10 +2158,10 @@
     postMessage('contextBlockData', { type, info: data._btOriginalData });
     if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
       document.getElementById('movie_player').stopVideo();
-      alert( (type === 'videoId' ? 'Video' : 'Channel') + ' Blocked');
+      alert((type === 'videoId' ? 'Video' : 'Channel') + ' Blocked');
     }
     if (data._btOriginalAttr === 'commentRenderer') {
-      let comments = document.querySelector('ytm-section-list-renderer')
+      let comments = document.querySelector('ytm-section-list-renderer');
       storageData.filterData.channelId.push(RegExp('^' + data._btOriginalData.id + '$'));
       dataEmpty = computeDataEmpty();
       ObjectFilter(comments.data, filterRules.comments, [], false);
@@ -1967,16 +2169,16 @@
   }
 
   function getActionMenuData(context) {
-    let menuAction = "";
+    let menuAction = '';
     let isDataFromRightHandSide = false;
 
     const string = context.getElementsByTagName('yt-formatted-string');
 
     if (string && string.length == 1) {
-        menuAction = string[0]?.getRawText() || "";
+      menuAction = string[0]?.getRawText() || '';
     } else {
       isDataFromRightHandSide = true;
-      menuAction = context.innerText || "";
+      menuAction = context.innerText || '';
     }
 
     return { isDataFromRightHandSide, menuAction };
@@ -1988,7 +2190,10 @@
     let stopPlayer = false;
 
     // Video player context menu
-    if (parentDom.tagName === 'YTD-VIDEO-PRIMARY-INFO-RENDERER' || parentDom.tagName === 'YTD-WATCH-METADATA') {
+    if (
+      parentDom.tagName === 'YTD-VIDEO-PRIMARY-INFO-RENDERER' ||
+      parentDom.tagName === 'YTD-WATCH-METADATA'
+    ) {
       const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
       const playerData = pageManager.data || pageManager.getCurrentData();
       const player = playerData.playerResponse;
@@ -1996,7 +2201,10 @@
       const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
       const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
 
-      const ownerUCID = getObjectByPath(owner, 'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId');
+      const ownerUCID = getObjectByPath(
+        owner,
+        'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+      );
       let playerUCID = player.videoDetails.channelId;
       if (ownerUCID && ownerUCID !== playerUCID) {
         playerUCID = [playerUCID, ownerUCID];
@@ -2023,8 +2231,8 @@
         text: parentData.blockTube?.metadata?.videoName,
       };
 
-      removeParent = false
-      stopPlayer = false
+      removeParent = false;
+      stopPlayer = false;
     } else {
       const attrKey = parentData._btOriginalAttr;
       const searchIn = mergedFilterRules[attrKey]?.properties || mergedFilterRules[attrKey];
@@ -2055,7 +2263,7 @@
     return {
       ...result,
       removeParent,
-      stopPlayer
+      stopPlayer,
     };
   }
 
@@ -2088,7 +2296,10 @@
     } else {
       // Try to find eventSink in multiple paths without using intermediate variable
       const eventSink =
-        getObjectByPath(element.parentElement?.parentElement, 'polymerController.forwarder_.eventSink') ||
+        getObjectByPath(
+          element.parentElement?.parentElement,
+          'polymerController.forwarder_.eventSink',
+        ) ||
         getObjectByPath(element.parentElement, '__dataHost.eventSink_') ||
         getObjectByPath(element.parentElement, '__dataHost.forwarder_.eventSink') ||
         getObjectByPath(element.parentElement, '__dataHost.hostElement.inst.eventSink_');
@@ -2098,7 +2309,10 @@
         return {};
       }
 
-      parentDom = eventSink.parentComponent || eventSink.parentElement.__dataHost?.hostElement || eventSink.parentElement?.parentElement;
+      parentDom =
+        eventSink.parentComponent ||
+        eventSink.parentElement.__dataHost?.hostElement ||
+        eventSink.parentElement?.parentElement;
       parentData = parentDom?.data;
 
       if (!parentDom || !parentData) {
@@ -2113,7 +2327,9 @@
   function removeParentHelper(isDataFromRightHandSide, parentDom) {
     if (['YTD-BACKSTAGE-POST-RENDERER', 'YTD-POST-RENDERER'].includes(parentDom.tagName)) {
       parentDom.parentNode.remove();
-    } else if (['YTD-PLAYLIST-PANEL-VIDEO-RENDERER', 'YTD-MOVIE-RENDERER'].includes(parentDom.tagName)) {
+    } else if (
+      ['YTD-PLAYLIST-PANEL-VIDEO-RENDERER', 'YTD-MOVIE-RENDERER'].includes(parentDom.tagName)
+    ) {
       parentDom.remove();
     } else if ('YTD-COMMENT-RENDERER' === parentDom.tagName) {
       if (parentDom.parentNode.tagName === 'YTD-COMMENT-THREAD-RENDERER') {
@@ -2124,8 +2340,8 @@
     } else {
       parentDom.dismissedRenderer = {
         notificationMultiActionRenderer: {
-          responseText: {simpleText: 'Blocked'},
-        }
+          responseText: { simpleText: 'Blocked' },
+        },
       };
       parentDom.setAttribute('is-dismissed', '');
     }
@@ -2142,22 +2358,30 @@
     }
 
     if (window.btReloadRequired) {
-      window.btExports.openToast("BlockTube was updated, this tab needs to be reloaded to use this function", 5000);
+      window.btExports.openToast(
+        'BlockTube was updated, this tab needs to be reloaded to use this function',
+        5000,
+      );
       return;
     }
 
     // Get the parent dom and data from this
-    const {parentDom, parentData} = getParentDomAndData(isDataFromRightHandSide, this);
+    const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
     // Get the data and type which is used for blocking the video
-    const {type, data, removeParent, stopPlayer} = getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction)
+    const { type, data, removeParent, stopPlayer } = getBlockData(
+      parentDom,
+      parentData,
+      isDataFromRightHandSide,
+      menuAction,
+    );
 
     // Notify system what data should be added to the block list
     postMessage('contextBlockData', { type, info: data });
 
     if (removeParent) {
       // Remove correct component based on parentDom
-      removeParentHelper(isDataFromRightHandSide, parentDom)
+      removeParentHelper(isDataFromRightHandSide, parentDom);
     } else if (stopPlayer) {
       document.getElementById('movie_player').stopVideo();
     }
@@ -2174,29 +2398,33 @@
   const isMobileInterface = document.location.hostname.startsWith('m.');
 
   // listen for messages from content script
-  window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
-    if (!event.data.from || event.data.from !== 'BLOCKTUBE_CONTENT') return;
+  window.addEventListener(
+    'message',
+    (event) => {
+      if (event.source !== window) return;
+      if (!event.data.from || event.data.from !== 'BLOCKTUBE_CONTENT') return;
 
-    switch (event.data.type) {
-      case 'storageData': {
-        storageReceived(event.data.data);
-        break;
+      switch (event.data.type) {
+        case 'storageData': {
+          storageReceived(event.data.data);
+          break;
+        }
+        case 'reloadRequired':
+          window.btReloadRequired = true;
+          openToast('BlockTube was updated, Please reload this tab to reactivate it', 15000);
+          break;
+        default:
+          break;
       }
-      case 'reloadRequired':
-        window.btReloadRequired = true;
-        openToast("BlockTube was updated, Please reload this tab to reactivate it", 15000);
-        break;
-      default:
-        break;
-    }
-  }, true);
+    },
+    true,
+  );
 
   window.btExports = {
     spfFilter,
     fetchFilter,
     openToast,
     menuOnTap,
-    menuOnTapMobile
-  }
-}());
+    menuOnTapMobile,
+  };
+})();
