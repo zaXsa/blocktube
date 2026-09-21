@@ -1,126 +1,37 @@
+/*
+ * GENERATED FILE - DO NOT EDIT.
+ *
+ * Source fragments: src/scripts/consts.js + src/scripts/inject/*.js (see
+ * MODULES in tools/build-inject.js).
+ * Rebuild with: npm run build:inject    |    Drift-check with: npm run check:inject
+ */
+
 (function blockTube() {
   'use strict';
-  const has = Object.prototype.hasOwnProperty;
 
-  // Thanks to uBlock origin
-  const defineProperty = function (chain, cValue, middleware = undefined) {
-    let aborted = false;
-    const mustAbort = function (v) {
-      if (aborted) {
-        return true;
-      }
-      aborted =
-        v !== undefined &&
-        v !== null &&
-        cValue !== undefined &&
-        cValue !== null &&
-        typeof v !== typeof cValue;
-      return aborted;
-    };
-    // https://github.com/uBlockOrigin/uBlock-issues/issues/156
-    //   Support multiple trappers for the same property.
-    const trapProp = function (owner, prop, configurable, handler) {
-      if (handler.init(owner[prop]) === false) {
-        return;
-      }
-      const odesc = Object.getOwnPropertyDescriptor(owner, prop);
-      let prevGetter, prevSetter;
-      if (odesc instanceof Object) {
-        if (odesc.configurable === false) {
-          return;
-        }
-        if (odesc.get instanceof Function) {
-          prevGetter = odesc.get;
-        }
-        if (odesc.set instanceof Function) {
-          prevSetter = odesc.set;
-        }
-      }
-      Object.defineProperty(owner, prop, {
-        configurable,
-        get() {
-          if (prevGetter !== undefined) {
-            prevGetter();
-          }
-          return handler.getter(); // cValue
-        },
-        set(a) {
-          if (prevSetter !== undefined) {
-            prevSetter(a);
-          }
-          handler.setter(a);
-        },
-      });
-    };
-    const trapChain = function (owner, path) {
-      const pos = path.indexOf('.');
-      if (pos === -1) {
-        trapProp(owner, path, true, {
-          v: undefined,
-          init: function (v) {
-            if (mustAbort(v)) {
-              return false;
-            }
-            this.v = v;
-            return true;
-          },
-          getter: function () {
-            return cValue;
-          },
-          setter: function (a) {
-            if (middleware instanceof Function) {
-              cValue = a;
-              middleware(a);
-            } else {
-              if (mustAbort(a) === false) {
-                return;
-              }
-              cValue = a;
-            }
-          },
-        });
-        return;
-      }
-      const prop = path.slice(0, pos);
-      const v = owner[prop];
-      path = path.slice(pos + 1);
-      if (v instanceof Object || (typeof v === 'object' && v !== null)) {
-        trapChain(v, path);
-        return;
-      }
-      trapProp(owner, prop, true, {
-        v: undefined,
-        init: function (newVal) {
-          this.v = newVal;
-          return true;
-        },
-        getter: function () {
-          return this.v;
-        },
-        setter: function (a) {
-          this.v = a;
-          if (a instanceof Object) {
-            trapChain(a, chain);
-          }
-        },
-      });
-    };
-    trapChain(window, chain);
-  };
+  // ================== src/scripts/consts.js ==================
 
-  // !! Globals
+  const BLOCKTUBE_CONSTS = Object.freeze({
+    MESSAGES: Object.freeze({
+      // chrome.storage.local keys
+      STORAGE_KEY: 'storageData',
+      ENABLED_KEY: 'enabled',
 
-  window.btReloadRequired = false;
+      // window.postMessage framing
+      FROM_PAGE: 'blockTubePage', // page -> content: postMessage from the inject bundle
+      FROM_CONTENT: 'blockTubeContent', // content -> page: sendStorage / sendReload
+      STORAGE: 'storageData', // content -> page: compiled storage snapshot
+      RELOAD: 'reloadRequired', // bg->content (port) or content->page: extension updated, hard-reload
+      FILTERS: 'filtersData', // bg -> content (port): {storage, compiledStorage, enabled}
+      CONTEXT_BLOCK_DATA: 'contextBlockData', // page -> content: block from context menu
+      CONTEXT_BLOCK: 'contextBlock', // content -> bg (port): {type, entries}
+      READY: 'ready', // page -> content: hooks booted, re-send storage
+    }),
+  });
 
-  // extension storageData
-  let storageData;
+  globalThis.BLOCKTUBE_CONSTS = BLOCKTUBE_CONSTS;
 
-  // JavaScript filtering
-  let jsFilter;
-  let jsFilterEnabled = false;
-
-  // TODO: hack for blocking data in other objects
-  let currentBlock = false;
+  // ================== src/scripts/inject/rules.js ==================
 
   // add context menu to following objects
   const contextMenuObjects = [
@@ -144,8 +55,9 @@
   ];
   const contextMenuObjectsSet = new Set(contextMenuObjects);
 
-  // those properties can be safely deleted when one of thier child got filtered
-  const deleteAllowed = [
+  // Wrapper renderers that are safe to delete as a whole when every one of
+  // their children was filtered out (they contribute no layout of their own).
+  const collapseableContainers = [
     'richItemRenderer',
     'content',
     'horizontalListRenderer',
@@ -159,14 +71,24 @@
     'reelShelfRenderer',
     'richSectionRenderer',
   ];
-  const deleteAllowedSet = new Set(deleteAllowed);
+  const collapseableContainersSet = new Set(collapseableContainers);
 
   // those filter properties require RegExp checking
   const regexProps = ['videoId', 'channelId', 'channelName', 'title', 'comment'];
   const regexPropsSet = new Set(regexProps);
 
-  // TODO: add rules descriptions
+  // Every renderer entry maps to a normalized
+  //   { properties: { <filter-prop> -> path(s) }, customFunc?, related? }
+  // object, so the matcher never has to sniff which shape a rule uses. The
+  // builder below trims the wrapper noise for the two common cases. 'related'
+  // names a wrapper renderer (e.g. 'shelfRenderer') to delete alongside.
   // !! Filter Rules definitions
+  const paths = (properties, customFunc = undefined, related = undefined) => ({
+    properties,
+    customFunc,
+    related,
+  });
+
   const baseRules = {
     videoId: 'videoId',
     channelId: 'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
@@ -192,136 +114,139 @@
     BADGE_MEMBERS_ONLY: 'members',
   };
 
+  // lockupViewModel (new grid) deep path fragments. The channelId rule falls
+  // back across avatar -> first metadata row -> avatar stack; these prefixes
+  // keep that intent readable in the big rule below.
+  const lockupAvatarMedia = 'metadata.lockupMetadataViewModel.image';
+  const lockupMetadataContent =
+    'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
+
   const filterRules = {
     main: {
-      compactMovieRenderer: {
+      // Feed and watch-page video cards
+      compactMovieRenderer: paths({
         videoId: 'videoId',
         title: ['title'],
         vidLength: 'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text',
         badges: 'badges',
         percentWatched:
           'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched',
-      },
-      movieRenderer: {
+      }),
+      movieRenderer: paths({
         videoId: 'videoId',
         title: ['title'],
         vidLength: 'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text',
         badges: 'badges',
         percentWatched:
           'thumbnailOverlays.thumbnailOverlayResumePlaybackRenderer.percentDurationWatched',
-      },
-      gridVideoRenderer: baseRules,
-      videoRenderer: baseRules,
-      radioRenderer: baseRules,
-      playlistRenderer: baseRules,
-      gridRadioRenderer: baseRules,
-      compactVideoRenderer: baseRules,
-      compactRadioRenderer: baseRules,
-      playlistVideoRenderer: baseRules,
-      endScreenVideoRenderer: baseRules,
-      endScreenPlaylistRenderer: baseRules,
-      gridPlaylistRenderer: baseRules,
-      postRenderer: {
-        channelId: 'authorEndpoint.browseEndpoint.browseId',
-        channelName: ['authorText'],
-      },
-      backstagePostRenderer: {
-        channelId: 'authorEndpoint.browseEndpoint.browseId',
-        channelName: ['authorText'],
-      },
+      }),
+      gridVideoRenderer: paths(baseRules),
+      videoRenderer: paths(baseRules),
+      radioRenderer: paths(baseRules),
+      playlistRenderer: paths(baseRules),
+      gridRadioRenderer: paths(baseRules),
+      compactVideoRenderer: paths(baseRules),
+      compactRadioRenderer: paths(baseRules),
+      playlistVideoRenderer: paths(baseRules),
+      endScreenVideoRenderer: paths(baseRules),
+      endScreenPlaylistRenderer: paths(baseRules),
+      gridPlaylistRenderer: paths(baseRules),
 
-      watchCardCompactVideoRenderer: {
+      // Community posts
+      postRenderer: paths({
+        channelId: 'authorEndpoint.browseEndpoint.browseId',
+        channelName: ['authorText'],
+      }),
+      backstagePostRenderer: paths({
+        channelId: 'authorEndpoint.browseEndpoint.browseId',
+        channelName: ['authorText'],
+      }),
+
+      // Watch page right rail
+      watchCardCompactVideoRenderer: paths({
         title: 'title',
         channelId: 'subtitles.runs.navigationEndpoint.browseEndpoint.browseId',
         channelName: 'subtitles',
         videoId: 'navigationEndpoint.watchEndpoint.videoId',
-      },
+      }),
 
-      shelfRenderer: {
+      shelfRenderer: paths({
         channelId: 'endpoint.browseEndpoint.browseId',
-      },
+      }),
 
-      channelVideoPlayerRenderer: {
+      channelVideoPlayerRenderer: paths({
         title: 'title',
-      },
+      }),
 
-      channelRenderer: {
-        properties: { ...baseRules, title: undefined },
-        related: 'shelfRenderer',
-      },
+      // channel page header
+      channelRenderer: paths({ ...baseRules, title: undefined }, undefined, 'shelfRenderer'),
 
-      playlistPanelVideoRenderer: {
-        properties: baseRules,
-        customFunc: blockPlaylistVid,
-      },
+      // watch page playlist panel
+      playlistPanelVideoRenderer: paths(baseRules, blockPlaylistVid),
 
-      videoPrimaryInfoRenderer: {
-        properties: {
+      videoPrimaryInfoRenderer: paths(
+        {
           title: 'title',
         },
-        customFunc: redirectToNext,
-      },
+        redirectToNext,
+      ),
 
-      videoSecondaryInfoRenderer: {
-        properties: {
+      videoSecondaryInfoRenderer: paths(
+        {
           channelId: 'owner.videoOwnerRenderer.navigationEndpoint.browseEndpoint.browseId',
           channelName: 'owner.videoOwnerRenderer.title',
         },
-        customFunc: redirectToNext,
-      },
+        redirectToNext,
+      ),
 
       // channel page header
-      channelMetadataRenderer: {
-        properties: {
+      channelMetadataRenderer: paths(
+        {
           channelId: 'externalId',
           channelName: 'title',
         },
-        customFunc: redirectToIndex,
-      },
+        redirectToIndex,
+      ),
 
       // related channels
-      gridChannelRenderer: {
+      gridChannelRenderer: paths({
         channelId: 'channelId',
         channelName: 'title',
-      },
+      }),
 
-      miniChannelRenderer: {
+      miniChannelRenderer: paths({
         channelId: 'channelId',
         channelName: 'title',
-      },
+      }),
 
       // sidemenu subscribed channels
-      guideEntryRenderer: {
+      guideEntryRenderer: paths({
         channelId: 'navigationEndpoint.browseEndpoint.browseId',
         channelName: ['title', 'formattedTitle'],
-      },
+      }),
 
-      universalWatchCardRenderer: {
-        properties: {
-          channelId:
-            'header.watchCardRichHeaderRenderer.titleNavigationEndpoint.browseEndpoint.browseId',
-          channelName: 'header.watchCardRichHeaderRenderer.title',
-        },
-      },
+      universalWatchCardRenderer: paths({
+        channelId:
+          'header.watchCardRichHeaderRenderer.titleNavigationEndpoint.browseEndpoint.browseId',
+        channelName: 'header.watchCardRichHeaderRenderer.title',
+      }),
 
-      playlist: {
-        properties: {
+      playlist: paths(
+        {
           channelId: 'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
           channelName: ['shortBylineText'],
           title: 'title',
         },
-        customFunc: redirectToIndex,
-      },
+        redirectToIndex,
+      ),
 
-      compactChannelRecommendationCardRenderer: {
-        properties: {
-          channelId: 'channelEndpoint.browseEndpoint.browseId',
-          channelName: ['channelTitle'],
-        },
-      },
+      compactChannelRecommendationCardRenderer: paths({
+        channelId: 'channelEndpoint.browseEndpoint.browseId',
+        channelName: ['channelTitle'],
+      }),
 
-      playerOverlayAutoplayRenderer: {
-        properties: {
+      playerOverlayAutoplayRenderer: paths(
+        {
           videoId: 'videoId',
           channelId: 'byline.runs.navigationEndpoint.browseEndpoint.browseId',
           channelName: 'byline',
@@ -329,76 +254,69 @@
           publishTimeText: 'publishedTimeText',
           vidLength: 'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text',
         },
-        customFunc: markAutoplay,
-      },
+        markAutoplay,
+      ),
 
-      reelItemRenderer: {
-        properties: {
-          videoId: 'videoId',
-          channelId:
-            'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelNavigationEndpoint.browseEndpoint.browseId',
-          channelName:
-            'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelTitleText',
-          title: ['headline'],
-          publishTimeText:
-            'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.timestampText',
-        },
-      },
+      // Shorts
+      reelItemRenderer: paths({
+        videoId: 'videoId',
+        channelId:
+          'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelNavigationEndpoint.browseEndpoint.browseId',
+        channelName:
+          'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.channelTitleText',
+        title: ['headline'],
+        publishTimeText:
+          'navigationEndpoint.reelWatchEndpoint.overlay.reelPlayerOverlayRenderer.reelPlayerHeaderSupportedRenderers.reelPlayerHeaderRenderer.timestampText',
+      }),
 
-      shortsLockupViewModel: {
-        properties: {
-          videoId: 'onTap.innertubeCommand.reelWatchEndpoint.videoId',
-          title: 'overlayMetadata.primaryText.content',
-          viewCount: 'overlayMetadata.secondaryText.content',
-        },
-      },
+      shortsLockupViewModel: paths({
+        videoId: 'onTap.innertubeCommand.reelWatchEndpoint.videoId',
+        title: 'overlayMetadata.primaryText.content',
+        viewCount: 'overlayMetadata.secondaryText.content',
+      }),
 
-      richShelfRenderer: {
+      richShelfRenderer: paths({
         channelId: 'endpoint.browseEndpoint.browseId',
-      },
+      }),
 
-      channelFeaturedVideoRenderer: {
+      channelFeaturedVideoRenderer: paths({
         ...baseRules,
         vidLength: 'lengthText',
-      },
+      }),
 
-      videoWithContextRenderer: {
+      videoWithContextRenderer: paths({
         ...baseRules,
         title: 'headline',
         vidLength: ['thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text'],
         viewCount: 'shortViewCountText',
-      },
+      }),
 
-      compactChannelRenderer: {
+      compactChannelRenderer: paths({
         channelId: 'channelId',
         channelName: 'displayName',
         channelBadges: 'ownerBadges',
-      },
+      }),
 
-      lockupViewModel: {
+      lockupViewModel: paths({
         videoId: 'contentId',
         title: 'metadata.lockupMetadataViewModel.title.content',
-        channelName:
-          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.metadataParts.text.content',
-        badges:
-          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].badges',
+        channelName: `${lockupMetadataContent}.metadataParts.text.content`,
+        badges: `${lockupMetadataContent}[1].badges`,
         vidLength:
           'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
-        viewCount:
-          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].metadataParts.text.content',
+        viewCount: `${lockupMetadataContent}[1].metadataParts.text.content`,
         channelId: [
-          'metadata.lockupMetadataViewModel.image.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
-          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
-          'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
-          'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+          `${lockupAvatarMedia}.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
         ],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
-        publishTimeText:
-          'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows[1].metadataParts[1].text.content',
-      },
+        publishTimeText: `${lockupMetadataContent}[1].metadataParts[1].text.content`,
+      }),
 
-      videoCardRenderer: {
+      videoCardRenderer: paths({
         videoId: 'videoId',
         title: 'title',
         channelName: 'bylineText',
@@ -407,64 +325,64 @@
         channelId: ['bylineText.runs.navigationEndpoint.browseEndpoint.browseId'],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
-      },
+      }),
 
       // Mobile top chips
-      chipCloudChipRenderer: {
+      chipCloudChipRenderer: paths({
         channelId: 'icon.iconType',
-      },
+      }),
 
       // Mobile Video page data
-      slimVideoMetadataSectionRenderer: {
-        properties: {
+      slimVideoMetadataSectionRenderer: paths(
+        {
           videoId: 'videoId',
           title: 'contents.slimVideoInformationRenderer.title',
           channelId: 'contents.slimOwnerRenderer.navigationEndpoint.browseEndpoint.browseId',
           channelName: 'contents.slimOwnerRenderer.title',
         },
-        customFunc: redirectToNextMobile,
-      },
+        redirectToNextMobile,
+      ),
 
-      tabRenderer: {
+      tabRenderer: paths({
         channelId: 'endpoint.commandMetadata.webCommandMetadata.url',
-      },
+      }),
 
       // Empty for blocking short headers
-      gridShelfViewModel: {},
+      gridShelfViewModel: paths({}),
 
-      richSectionRenderer: {},
+      richSectionRenderer: paths({}),
 
       // Wholesale-blocked when the chips_shelves option is enabled
       // (see isExtendedMatched); these entries only make the renderer keys
       // recognizable during matching.
-      chipsShelfWithVideoShelfRenderer: {},
-      brandVideoSingletonRenderer: {},
-      brandVideoShelfRenderer: {},
-      statementBannerRenderer: {},
+      chipsShelfWithVideoShelfRenderer: paths({}),
+      brandVideoSingletonRenderer: paths({}),
+      brandVideoShelfRenderer: paths({}),
+      statementBannerRenderer: paths({}),
     },
     ytPlayer: {
-      args: {
-        properties: {
+      args: paths(
+        {
           videoId: ['video_id', 'raw_player_response.videoDetails.videoId'],
           channelId: ['ucid', 'raw_player_response.videoDetails.channelId'],
           channelName: ['author', 'raw_player_response.videoDetails.author'],
           title: ['title', 'raw_player_response.videoDetails.title'],
           vidLength: ['length_seconds', 'raw_player_response.videoDetails.lengthSeconds'],
         },
-        customFunc: disableEmbedPlayer,
-      },
-      videoDetails: {
-        properties: {
+        disableEmbedPlayer,
+      ),
+      videoDetails: paths(
+        {
           videoId: 'videoId',
           channelId: 'channelId',
           channelName: 'author',
           title: 'title',
           vidLength: 'lengthSeconds',
         },
-        customFunc: disablePlayer,
-      },
-      PLAYER_VARS: {
-        properties: {
+        disablePlayer,
+      ),
+      PLAYER_VARS: paths(
+        {
           videoId: ['video_id'],
           channelId: [
             'raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDetails.embeddedPlayerOverlayVideoDetailsRenderer.expandedRenderer.embeddedPlayerOverlayVideoDetailsExpandedRenderer.subscribeButton.subscribeButtonRenderer.channelId',
@@ -477,44 +395,224 @@
             'raw_player_response.embedPreview.thumbnailPreviewRenderer.videoDurationSeconds',
           ],
         },
-        customFunc: disableEmbedPlayer,
-      },
+        disableEmbedPlayer,
+      ),
     },
     guide: {
       // sidemenu subscribed channels
-      guideEntryRenderer: {
-        properties: {
-          channelId: ['navigationEndpoint.browseEndpoint.browseId', 'icon.iconType'],
-          channelName: ['title', 'formattedTitle'],
-        },
-      },
+      guideEntryRenderer: paths({
+        channelId: ['navigationEndpoint.browseEndpoint.browseId', 'icon.iconType'],
+        channelName: ['title', 'formattedTitle'],
+      }),
       // Mobile buttom navigation bar
-      pivotBarItemRenderer: {
+      pivotBarItemRenderer: paths({
         channelId: 'icon.iconType',
-      },
+      }),
     },
     comments: {
-      commentEntityPayload: {
+      commentEntityPayload: paths({
         channelId: ['author.channelId'],
         channelName: ['author.displayName'],
         comment: ['properties.content.content'],
-      },
-      commentThreadRenderer: {},
-      commentViewModel: {},
-      commentRenderer: {
+      }),
+      commentThreadRenderer: paths({}),
+      commentViewModel: paths({}),
+      commentRenderer: paths({
         channelId: 'authorEndpoint.browseEndpoint.browseId',
         channelName: ['authorText'],
         comment: ['contentText'],
-      },
-      liveChatTextMessageRenderer: {
+      }),
+      liveChatTextMessageRenderer: paths({
         channelId: 'authorExternalChannelId',
         channelName: ['authorName'],
         comment: 'message',
-      },
+      }),
     },
   };
 
   const mergedFilterRules = Object.assign({}, filterRules.main, filterRules.comments);
+
+  // ================== src/scripts/inject/paths.js ==================
+
+  const has = Object.prototype.hasOwnProperty;
+  // !! Utils
+
+  function flattenRuns(arr) {
+    if (arr.simpleText !== undefined) return arr.simpleText;
+    if (!(arr.runs instanceof Array)) return arr;
+    return arr.runs
+      .reduce((res, v) => {
+        if (has.call(v, 'text')) {
+          res.push(v.text);
+        }
+        return res;
+      }, [])
+      .join(' ');
+  }
+
+  function getFlattenByPath(obj, filterPath) {
+    if (filterPath === undefined) return;
+    const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
+    let value;
+    for (let idx = 0; idx < filterPathArr.length; idx += 1) {
+      value = getObjectByPath(obj, filterPathArr[idx]);
+      if (value !== undefined) return flattenRuns(value);
+    }
+  }
+
+  // Collect every collaborator channel id from a lockupViewModel avatar stack.
+  // Collab videos render one card per creator, and getFlattenByPath only
+  // returns the first channelId it resolves.
+  function getCollaboratorChannelIds(obj) {
+    const listItems = getObjectByPath(
+      obj,
+      'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems',
+    );
+    const ids = [];
+    if (Array.isArray(listItems)) {
+      for (let i = 0; i < listItems.length; i += 1) {
+        const id = getObjectByPath(
+          listItems[i],
+          'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+        );
+        if (id !== undefined) ids.push(id);
+      }
+    }
+    return ids;
+  }
+
+  const pathCache = new Map();
+
+  function compilePathSegment(v) {
+    if (!/\[.*\]/.test(v)) return { key: v };
+    const indices = [];
+    const re = /\[(\d+)\]/g;
+    let m;
+    while ((m = re.exec(v)) !== null) indices.push(parseInt(m[1], 10));
+    const baseMatch = v.match(/^([^[]+)/);
+    return { key: baseMatch && baseMatch[1] ? baseMatch[1] : undefined, indices };
+  }
+
+  function compiledPath(path) {
+    if (path instanceof Array) {
+      const out = [];
+      for (let i = 0; i < path.length; i += 1) out.push(compilePathSegment(path[i]));
+      return out;
+    }
+    let compiled = pathCache.get(path);
+    if (compiled === undefined) {
+      compiled = path.split('.').map(compilePathSegment);
+      pathCache.set(path, compiled);
+    }
+    return compiled;
+  }
+
+  // THE canonical dotted-path walker for this codebase (options.js `get` is a
+  // mirror for the options page — it cannot import this bundle — and MUST stay
+  // in sync). Semantics, in order per `seg`:
+  //   1. plain token     -> own-key lookup; at an ARRAY node it resolves the
+  //      FIRST element that owns the key (`[].find(has)`). Trap: on a miss it
+  //      returns `def`, so typos and shape changes fail silently; and an array
+  //      of non-objects can never match. Never evaluates past a miss.
+  //   2. token[idx..]    -> own-key lookup on the token, then numeric indices
+  //      in order; out-of-range/negative/undefined -> `def`.
+  // Passing an array of paths walks each segment list in order (used per
+  // renderer rule where one property may live at several possible paths).
+  // String paths are compiled once and cached (see compiledPath/pathCache).
+  function getObjectByPath(obj, path, def = undefined) {
+    const compiled = compiledPath(path);
+    let nextObj = obj;
+
+    for (let i = 0; i < compiled.length; i += 1) {
+      const seg = compiled[i];
+
+      if (seg.indices === undefined) {
+        // segment is a plain token (no bracket)
+        if (nextObj instanceof Array) {
+          // when we have an array of objects, find an element that contains the key v
+          const found = nextObj.find((o) => has.call(o, seg.key));
+          if (found === undefined) return def;
+          nextObj = found[seg.key];
+        } else {
+          if (!nextObj || !has.call(nextObj, seg.key)) return def;
+          nextObj = nextObj[seg.key];
+        }
+      } else {
+        // navigate to base property first (if present)
+        if (seg.key !== undefined) {
+          if (!nextObj || !has.call(nextObj, seg.key)) return def;
+          nextObj = nextObj[seg.key];
+        }
+        // then apply numeric indices in order
+        for (let k = 0; k < seg.indices.length; k += 1) {
+          const idx = seg.indices[k];
+          if (!Array.isArray(nextObj) || idx < 0 || idx >= nextObj.length) return def;
+          nextObj = nextObj[idx];
+        }
+      }
+    }
+
+    return nextObj;
+  }
+
+  // parseTime() sentinel values:
+  //   -1 = time string could not be parsed (matchFilterProperties treats any
+  //        vidLen <= 0 as "no duration constraint", so -1 just never matches)
+  //   -2 = the literal 'SHORTS' marker YouTube uses as duration text; a Short
+  //        has no real time, so the shorts option decides on its own
+  const INVALID_TIME = -1;
+  const SHORTS_TIME = -2;
+
+  function parseTime(timeStr) {
+    if (timeStr === 'SHORTS') {
+      return SHORTS_TIME;
+    }
+    const parts = String(timeStr)
+      .split(':')
+      .map((x) => parseInt(x, 10));
+    switch (parts.length) {
+      case 3: {
+        return parts[0] * 60 * 60 + parts[1] * 60 + parts[2];
+      }
+      case 2: {
+        return parts[0] * 60 + parts[1];
+      }
+      case 1: {
+        return parts[0];
+      }
+      default: {
+        return INVALID_TIME;
+      }
+    }
+  }
+
+  function parseViewCount(viewCount) {
+    const parts = viewCount.split(' ');
+    if (parts[1] !== 'views' && parts[1] !== 'view') return undefined; // Fail if not english formatting
+    const views = parts[0];
+
+    // Handle abbreviated formats (K, M, B)
+    const multipliers = {
+      K: 1000,
+      M: 1000000,
+      B: 1000000000,
+    };
+
+    // Check if it ends with a multiplier
+    const lastChar = views.slice(-1).toUpperCase();
+    let multiplier = 1;
+    let numericPart = views.replace(',', '');
+
+    if (multipliers[lastChar]) {
+      multiplier = multipliers[lastChar];
+      numericPart = views.slice(0, -1); // Remove the letter
+    }
+
+    // Return the final count
+    return numericPart * multiplier;
+  }
+
+  // ================== src/scripts/inject/object-filter.js ==================
 
   // !! ObjectFilter
   function ObjectFilter(object, ruleConfig, postActions = [], contextMenus = false) {
@@ -539,12 +637,17 @@
     return this;
   }
 
-  // Cached result of isDataEmpty: storageData + jsFilterEnabled only change
-  // between (or at) storageReceived, so this is recomputed there (and when a
-  // runtime context-menu block pushes a new entry into filterData).
-  let dataEmpty = false;
+  // Cache: matchFilterRule can bail out entirely when no user option or filter
+  // is active. storageData + jsFilterEnabled only change between (or at)
+  // storageReceived, so this is only recomputed there (and when a runtime
+  // context-menu block pushes a new entry into filterData).
+  let noActiveFilters = false;
 
-  function computeDataEmpty() {
+  // True when every rule is dormant: no extended-option renderers (shorts,
+  // movies, mixes, chips shelves), no watched-percent threshold, no vidLength
+  // range and no regex entries or custom function. Each check below maps to one
+  // of those user option groups.
+  function computeNoActiveFilters() {
     if (
       storageData.options.shorts ||
       storageData.options.movies ||
@@ -564,85 +667,107 @@
     return !jsFilterEnabled;
   }
 
-  ObjectFilter.prototype.matchFilterData = function (filters, obj, objectType) {
+  // Hide videos we already watched past the threshold (percent_watched_hide).
+  // playlist rows and history/library/playlist pages are exempt.
+  function isPercentWatchedBlocked(fieldName, value, rendererKey) {
+    return (
+      fieldName === 'percentWatched' &&
+      storageData.options.percent_watched_hide &&
+      rendererKey !== 'playlistPanelVideoRenderer' &&
+      !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
+      parseInt(value) >= storageData.options.percent_watched_hide
+    );
+  }
+
+  // Collab videos (avatar stack): a blocked collaborator other than the first
+  // creator isn't caught by the single channelId above, so test every
+  // collaborator in the stack as well.
+  function isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj) {
+    if (fieldName !== 'channelId' || rendererKey !== 'lockupViewModel') return false;
+    if (filterEntries.length === 0) return false;
+    const collabIds = getCollaboratorChannelIds(obj);
+    return collabIds.some((id) => filterEntries.some((entry) => entry && entry.test(id)));
+  }
+
+  // vidLength is a mandatory [min, max] duration range in seconds; a duration
+  // on the range means "block" (default) while the flips of the range mean
+  // "block everything outside it" (vidLength_type !== 'block').
+  function matchesDurationRange(vidLen, filterEntries) {
+    if (vidLen === SHORTS_TIME && storageData.options.shorts) {
+      return true;
+    }
+    if (vidLen > 0 && filterEntries.length === 2) {
+      if (storageData.options.vidLength_type === 'block') {
+        if (
+          filterEntries[0] !== null &&
+          vidLen >= filterEntries[0] &&
+          filterEntries[1] !== null &&
+          vidLen <= filterEntries[1]
+        )
+          return true;
+      } else if (
+        (filterEntries[0] !== null && vidLen < filterEntries[0]) ||
+        (filterEntries[1] !== null && vidLen > filterEntries[1])
+      )
+        return true;
+    }
+    return false;
+  }
+
+  // Normalize badge renderers (legacy metadataBadgeRenderer or new
+  // badgeViewModel) to the BADGE_MAP style token for the custom-function API.
+  function extractBadgeList(value) {
+    const badges = [];
+    if (Array.isArray(value)) {
+      value.forEach((br) => {
+        const rawStyle = br?.badgeViewModel?.badgeStyle || br?.metadataBadgeRenderer?.style;
+        const mapped = BADGE_MAP[rawStyle];
+        if (mapped) badges.push(mapped);
+      });
+    }
+    return badges;
+  }
+
+  ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
 
     if (document.location.pathname === '/feed/history' && storageData.options.disable_on_history)
       return false;
 
-    let doBlock = Object.keys(filters).some((h) => {
-      const filterPath = filters[h];
+    let doBlock = Object.keys(filterPaths).some((fieldName) => {
+      const filterPath = filterPaths[fieldName];
       if (filterPath === undefined) return false;
 
-      const properties = storageData.filterData[h];
+      const filterEntries = storageData.filterData[fieldName];
       if (
-        regexPropsSet.has(h) &&
-        (properties === undefined || (properties.length === 0 && !jsFilterEnabled))
+        regexPropsSet.has(fieldName) &&
+        (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
       )
         return false;
 
       let value = getFlattenByPath(obj, filterPath);
       if (value === undefined) return false;
 
-      if (
-        h === 'percentWatched' &&
-        storageData.options.percent_watched_hide &&
-        objectType != 'playlistPanelVideoRenderer' &&
-        !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
-        parseInt(value) >= storageData.options.percent_watched_hide
-      )
+      if (isPercentWatchedBlocked(fieldName, value, rendererKey)) return true;
+
+      if (regexPropsSet.has(fieldName) && filterEntries.some((entry) => entry && entry.test(value)))
         return true;
 
-      if (regexPropsSet.has(h) && properties.some((prop) => prop && prop.test(value))) return true;
+      if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) return true;
 
-      // Collab videos (avatar stack): a blocked collaborator other than the
-      // first creator isn't caught by the single channelId above, so test
-      // every collaborator in the stack as well.
-      if (h === 'channelId' && objectType === 'lockupViewModel' && properties.length > 0) {
-        const collabIds = getCollaboratorChannelIds(obj);
-        if (collabIds.some((id) => properties.some((prop) => prop && prop.test(id)))) return true;
-      }
-
-      if (h === 'vidLength') {
+      if (fieldName === 'vidLength') {
         const vidLen = parseTime(value);
-        if (vidLen === -2 && storageData.options.shorts) {
-          return true;
-        }
-        if (vidLen > 0 && properties.length === 2) {
-          if (storageData.options.vidLength_type === 'block') {
-            if (
-              properties[0] !== null &&
-              vidLen >= properties[0] &&
-              properties[1] !== null &&
-              vidLen <= properties[1]
-            )
-              return true;
-          } else {
-            if (
-              (properties[0] !== null && vidLen < properties[0]) ||
-              (properties[1] !== null && vidLen > properties[1])
-            )
-              return true;
-          }
-        }
+        if (matchesDurationRange(vidLen, filterEntries)) return true;
         value = vidLen;
       }
 
       if (jsFilterEnabled) {
-        if (h === 'viewCount') {
+        if (fieldName === 'viewCount') {
           value = parseViewCount(value);
-        } else if (h === 'channelBadges' || h === 'badges') {
-          const badges = [];
-          if (Array.isArray(value)) {
-            value.forEach((br) => {
-              const rawStyle = br?.badgeViewModel?.badgeStyle || br?.metadataBadgeRenderer?.style;
-              const mapped = BADGE_MAP[rawStyle];
-              if (mapped) badges.push(mapped);
-            });
-          }
-          value = badges;
+        } else if (fieldName === 'channelBadges' || fieldName === 'badges') {
+          value = extractBadgeList(value);
         }
-        friendlyVideoObj[h] = value;
+        friendlyVideoObj[fieldName] = value;
       }
 
       return false;
@@ -651,29 +776,34 @@
     if (!doBlock && jsFilterEnabled) {
       // force return value into boolean just in case someone tries returning something else
       try {
-        doBlock = !!jsFilter(friendlyVideoObj, objectType);
+        doBlock = !!jsFilter(friendlyVideoObj, rendererKey);
       } catch (e) {
         console.error(
           'Custom function exception',
           e,
           'friendlyVideoObj: ',
           friendlyVideoObj,
-          'objectType: ',
-          objectType,
+          'rendererKey: ',
+          rendererKey,
         );
       }
     }
-    if (doBlock && objectType === 'commentEntityPayload') {
+    if (doBlock && rendererKey === 'commentEntityPayload') {
       this.blockedComments.push(obj.properties.commentId);
     }
     return doBlock;
   };
 
-  ObjectFilter.prototype.isExtendedMatched = function (filteredObject, h) {
+  // lockupViewModel (new grid) marks a Mix with a 'MIX' overlay icon; its path
+  // is deep and used both by isExtendedMatched and the context-menu extractor.
+  const LOCKUP_MIX_ICON_PATH =
+    'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
+
+  ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
     if (storageData.options.movies) {
-      if (h === 'movieRenderer' || h === 'compactMovieRenderer') return true;
+      if (rendererKey === 'movieRenderer' || rendererKey === 'compactMovieRenderer') return true;
       if (
-        h === 'videoRenderer' &&
+        rendererKey === 'videoRenderer' &&
         !getObjectByPath(
           filteredObject,
           'shortBylineText.runs.navigationEndpoint.browseEndpoint',
@@ -685,31 +815,30 @@
     }
     if (
       storageData.options.shorts &&
-      (h === 'shortsLockupViewModel' || h === 'reelItemRenderer' || h === 'gridShelfViewModel')
+      (rendererKey === 'shortsLockupViewModel' ||
+        rendererKey === 'reelItemRenderer' ||
+        rendererKey === 'gridShelfViewModel')
     )
       return true;
     if (
       storageData.options.chips_shelves &&
-      (h === 'richShelfRenderer' ||
-        h === 'chipsShelfWithVideoShelfRenderer' ||
-        h === 'brandVideoSingletonRenderer' ||
-        h === 'brandVideoShelfRenderer' ||
-        h === 'statementBannerRenderer')
+      (rendererKey === 'richShelfRenderer' ||
+        rendererKey === 'chipsShelfWithVideoShelfRenderer' ||
+        rendererKey === 'brandVideoSingletonRenderer' ||
+        rendererKey === 'brandVideoShelfRenderer' ||
+        rendererKey === 'statementBannerRenderer')
     )
       return true;
-    if (storageData.options.mixes && (h === 'radioRenderer' || h === 'compactRadioRenderer'))
-      return true;
-    if (storageData.options.mixes && h === 'lockupViewModel') {
-      let imgName = getObjectByPath(
-        filteredObject,
-        'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName',
-      );
+    if (storageData.options.mixes && rendererKey === 'radioRenderer') return true;
+    if (storageData.options.mixes && rendererKey === 'compactRadioRenderer') return true;
+    if (storageData.options.mixes && rendererKey === 'lockupViewModel') {
+      const imgName = getObjectByPath(filteredObject, LOCKUP_MIX_ICON_PATH);
       if (imgName === 'MIX') {
         return true;
       }
     }
 
-    if (h === 'commentThreadRenderer') {
+    if (rendererKey === 'commentThreadRenderer') {
       if (
         this.blockedComments.includes(
           getObjectByPath(filteredObject, 'commentViewModel.commentViewModel.commentId'),
@@ -719,7 +848,7 @@
       }
     }
 
-    if (h === 'commentViewModel') {
+    if (rendererKey === 'commentViewModel') {
       if (this.blockedComments.includes(getObjectByPath(filteredObject, 'commentId'))) {
         return true;
       }
@@ -729,36 +858,27 @@
   };
 
   ObjectFilter.prototype.matchFilterRule = function (obj, objKeys = Object.keys(obj)) {
-    if (dataEmpty) return [];
+    if (noActiveFilters) return [];
 
     const res = [];
     for (let i = 0; i < objKeys.length; i += 1) {
-      const h = objKeys[i];
-      if (!this.ruleNamesSet.has(h)) continue;
+      const rendererKey = objKeys[i];
+      if (!this.ruleNamesSet.has(rendererKey)) continue;
 
-      const filteredObject = obj[h];
+      const filteredObject = obj[rendererKey];
       if (!filteredObject) continue;
 
-      const filterRule = this.filterRules[h];
-      let properties;
-      let customFunc;
-      let related;
-      if (has.call(filterRule, 'properties')) {
-        properties = filterRule.properties;
-        customFunc = filterRule.customFunc;
-        related = filterRule.related;
-      } else {
-        properties = filterRule;
-        customFunc = undefined;
-        related = undefined;
-      }
+      const filterRule = this.filterRules[rendererKey];
+      const filterPaths = filterRule.properties;
+      const customFunc = filterRule.customFunc;
+      const related = filterRule.related;
 
       const isMatch =
-        this.isExtendedMatched(filteredObject, h) ||
-        this.matchFilterData(properties, filteredObject, h);
+        this.isExtendedMatched(filteredObject, rendererKey) ||
+        this.matchFilterProperties(filterPaths, filteredObject, rendererKey);
       if (isMatch) {
         res.push({
-          name: h,
+          name: rendererKey,
           customFunc,
           related,
         });
@@ -766,6 +886,22 @@
     }
     return res;
   };
+
+  // (b) after the recursion, empty leftover containers are pruned: (a) arrays
+  // that got emptied by filtering, and special "collapseable" containers whose
+  // rule requires them gone once their only child is gone.
+  function collapseEmptyContainers(obj, childKey, childDel) {
+    // if next child is an empty array that we filtered, mark parent for removal.
+    if (childDel && obj[childKey] instanceof Array && obj[childKey].length === 0) {
+      return true;
+    }
+    // special childs that needs removing if they're empty
+    if (childDel && collapseableContainersSet.has(childKey)) {
+      delete obj[childKey];
+      return true;
+    }
+    return false;
+  }
 
   ObjectFilter.prototype.filter = function (obj = this.object) {
     let deletePrev = false;
@@ -819,11 +955,7 @@
       }
 
       // if next child is an empty array that we filtered, mark parent for removal.
-      if (childDel && obj[idx] instanceof Array && obj[idx].length === 0) {
-        deletePrev = true;
-      } else if (childDel && deleteAllowedSet.has(idx)) {
-        // special childs that needs removing if they're empty
-        delete obj[idx];
+      if (collapseEmptyContainers(obj, idx, childDel)) {
         deletePrev = true;
       }
     }
@@ -832,6 +964,8 @@
       !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
     return deletePrev;
   };
+
+  // ================== src/scripts/inject/custom-filters.js ==================
 
   // !! Custom filtering functions
 
@@ -879,7 +1013,7 @@
       },
     };
 
-    currentBlock = true;
+    playerHasBeenBlocked = true;
   }
 
   function blockPlaylistVid(pl) {
@@ -910,9 +1044,8 @@
     if (isMobileInterface) {
       obj.playerOverlayAutoplayRenderer._deleted = true;
       return false;
-    } else {
-      return true;
     }
+    return true;
   }
 
   function redirectToIndex() {
@@ -965,7 +1098,7 @@
       }
     }
 
-    let nextVideoRenderer = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
+    const nextVideoRenderer = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
     if (!nextVideoRenderer) return;
 
     playerOverlay.videoTitle = nextVideoRenderer.headline;
@@ -988,7 +1121,7 @@
   }
 
   function redirectToNextMobile() {
-    currentBlock = false;
+    playerHasBeenBlocked = false;
 
     if (storageData.options.suggestions_only) {
       return false;
@@ -1020,17 +1153,29 @@
 
     if (!nextSection) nextSection = nextResults;
 
-    let nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
+    const nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
     if (!nextAutoPlayObj) return;
 
     document.location = `watch?v=${nextAutoPlayObj.videoId}`;
     delete this.object.contents;
   }
 
+  // Break out of the playlist context check / navigation decision: playlists
+  // provide the next row themselves, so we must NOT redirect to a plain video.
+  function shouldRedirectToNextVideo() {
+    return !new URL(document.location).searchParams.has('list');
+  }
+
+  function redirectToNextVideo(vidId) {
+    if (vidId !== null) {
+      document.location = `watch?v=${vidId}`;
+    }
+  }
+
   function redirectToNext() {
     if (isMobileInterface) return redirectToNextMobile.call(this);
 
-    currentBlock = false;
+    playerHasBeenBlocked = false;
 
     if (storageData.options.suggestions_only) {
       return false;
@@ -1047,8 +1192,9 @@
 
     if (has.call(twoColumn, 'conversationBar')) delete twoColumn.conversationBar;
 
-    const isPlaylist = new URL(document.location).searchParams.has('list');
-    if (isPlaylist) return;
+    if (!shouldRedirectToNextVideo()) {
+      return;
+    }
 
     const secondary = getObjectByPath(twoColumn, 'secondaryResults');
     if (storageData.options.autoplay !== true) {
@@ -1056,221 +1202,50 @@
       return;
     }
 
-    const vidId = findNextVideo(this.object);
-    if (vidId !== false) {
-      document.location = `watch?v=${vidId}`;
-    }
+    redirectToNextVideo(findNextVideo(this.object));
     secondary.secondaryResults = undefined;
   }
 
-  // !! Utils
-
-  function flattenRuns(arr) {
-    if (arr.simpleText !== undefined) return arr.simpleText;
-    if (!(arr.runs instanceof Array)) return arr;
-    return arr.runs
-      .reduce((res, v) => {
-        if (has.call(v, 'text')) {
-          res.push(v.text);
-        }
-        return res;
-      }, [])
-      .join(' ');
-  }
-
-  function getFlattenByPath(obj, filterPath) {
-    if (filterPath === undefined) return;
-    const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
-    let value;
-    for (let idx = 0; idx < filterPathArr.length; idx += 1) {
-      value = getObjectByPath(obj, filterPathArr[idx]);
-      if (value !== undefined) return flattenRuns(value);
-    }
-  }
-
-  // Collect every collaborator channel id from a lockupViewModel avatar stack.
-  // Collab videos render one card per creator, and getFlattenByPath only
-  // returns the first channelId it resolves.
-  function getCollaboratorChannelIds(obj) {
-    const listItems = getObjectByPath(
-      obj,
-      'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems',
-    );
-    const ids = [];
-    if (Array.isArray(listItems)) {
-      for (let i = 0; i < listItems.length; i += 1) {
-        const id = getObjectByPath(
-          listItems[i],
-          'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
-        );
-        if (id !== undefined) ids.push(id);
-      }
-    }
-    return ids;
-  }
-
-  function postMessage(type, data) {
-    window.postMessage({ from: 'BLOCKTUBE_PAGE', type, data }, document.location.origin);
-  }
-
-  // Pre-compiled filter paths. The same path strings (from filterRules and the
-  // literals below) are resolved against thousands of objects, so split + regex
-  // parsing happens once per unique path instead of per call.
-  const pathCache = new Map();
-
-  function compilePathSegment(v) {
-    if (!/\[.*\]/.test(v)) return { key: v };
-    const indices = [];
-    const re = /\[(\d+)\]/g;
-    let m;
-    while ((m = re.exec(v)) !== null) indices.push(parseInt(m[1], 10));
-    const baseMatch = v.match(/^([^[]+)/);
-    return { key: baseMatch && baseMatch[1] ? baseMatch[1] : undefined, indices };
-  }
-
-  function compiledPath(path) {
-    if (path instanceof Array) {
-      const out = [];
-      for (let i = 0; i < path.length; i += 1) out.push(compilePathSegment(path[i]));
-      return out;
-    }
-    let compiled = pathCache.get(path);
-    if (compiled === undefined) {
-      compiled = path.split('.').map(compilePathSegment);
-      pathCache.set(path, compiled);
-    }
-    return compiled;
-  }
-
-  function getObjectByPath(obj, path, def = undefined) {
-    const compiled = compiledPath(path);
-    let nextObj = obj;
-
-    for (let i = 0; i < compiled.length; i += 1) {
-      const seg = compiled[i];
-
-      if (seg.indices === undefined) {
-        // segment is a plain token (no bracket)
-        if (nextObj instanceof Array) {
-          // when we have an array of objects, find an element that contains the key v
-          const found = nextObj.find((o) => has.call(o, seg.key));
-          if (found === undefined) return def;
-          nextObj = found[seg.key];
-        } else {
-          if (!nextObj || !has.call(nextObj, seg.key)) return def;
-          nextObj = nextObj[seg.key];
-        }
-      } else {
-        // navigate to base property first (if present)
-        if (seg.key !== undefined) {
-          if (!nextObj || !has.call(nextObj, seg.key)) return def;
-          nextObj = nextObj[seg.key];
-        }
-        // then apply numeric indices in order
-        for (let k = 0; k < seg.indices.length; k += 1) {
-          const idx = seg.indices[k];
-          if (!Array.isArray(nextObj) || idx < 0 || idx >= nextObj.length) return def;
-          nextObj = nextObj[idx];
-        }
-      }
-    }
-
-    return nextObj;
-  }
-
-  function parseTime(timeStr) {
-    if (timeStr === 'SHORTS') {
-      return -2;
-    }
-    const parts = String(timeStr)
-      .split(':')
-      .map((x) => parseInt(x, 10));
-    switch (parts.length) {
-      case 3: {
-        return parts[0] * 60 * 60 + parts[1] * 60 + parts[2];
-      }
-      case 2: {
-        return parts[0] * 60 + parts[1];
-      }
-      case 1: {
-        return parts[0];
-      }
-      default: {
-        return -1;
+  // "You there?" confirm dialogs that interrupt playback on idle.
+  function removeYouThereMessages(playerResponse) {
+    const playerMessages = getObjectByPath(playerResponse, 'messages', []);
+    for (let i = playerMessages.length - 1; i >= 0; i -= 1) {
+      if (has.call(playerMessages[i], 'youThereRenderer')) {
+        playerMessages.splice(i, 1);
       }
     }
   }
 
-  function parseViewCount(viewCount) {
-    const parts = viewCount.split(' ');
-    if (parts[1] !== 'views' && parts[1] !== 'view') return undefined; // Fail if not english formatting
-    let views = parts[0];
-
-    // Handle abbreviated formats (K, M, B)
-    const multipliers = {
-      K: 1000,
-      M: 1000000,
-      B: 1000000000,
-    };
-
-    // Check if it ends with a multiplier
-    const lastChar = views.slice(-1).toUpperCase();
-    let multiplier = 1;
-    let numericPart = views.replace(',', '');
-
-    if (multipliers[lastChar]) {
-      multiplier = multipliers[lastChar];
-      numericPart = views.slice(0, -1); // Remove the letter
+  // Strip loudness metadata so YouTube stops normalizing volume across videos.
+  function disableLoudnessNormalization(playerResponse) {
+    const audioConfig = getObjectByPath(playerResponse, 'playerConfig.audioConfig');
+    if (audioConfig !== undefined) {
+      audioConfig.loudnessDb = null;
+      audioConfig.perceptualLoudnessDb = null;
+      audioConfig.enablePerFormatLoudness = false;
     }
-
-    // Return the final count
-    return numericPart * multiplier;
-  }
-
-  function transformToRegExp(data) {
-    if (!has.call(data, 'filterData')) return;
-    regexProps.forEach((p) => {
-      if (has.call(data.filterData, p)) {
-        data.filterData[p] = data.filterData[p].map((v) => {
-          try {
-            return RegExp(v[0], v[1].replace('g', ''));
-          } catch (e) {
-            console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
-            return undefined;
-          }
-        });
+    const streamConfig = getObjectByPath(playerResponse, 'streamingData.adaptiveFormats', []);
+    streamConfig.forEach((conf) => {
+      if (conf.loudnessDb !== undefined) {
+        conf.loudnessDb = 0.0;
       }
     });
   }
 
   function playerMiscFilters() {
-    let start_obj = getObjectByPath(this.object, 'args.raw_player_response');
-    start_obj = start_obj ? start_obj : this.object;
+    let playerResponse = getObjectByPath(this.object, 'args.raw_player_response');
+    playerResponse = playerResponse ? playerResponse : this.object;
 
     if (storageData.options.disable_you_there === true) {
-      const playerMessages = getObjectByPath(start_obj, 'messages', []);
-      for (let i = playerMessages.length - 1; i >= 0; i -= 1) {
-        if (has.call(playerMessages[i], 'youThereRenderer')) {
-          playerMessages.splice(i, 1);
-        }
-      }
+      removeYouThereMessages(playerResponse);
     }
 
     if (storageData.options.disable_db_normalize === true) {
-      const audioConfig = getObjectByPath(start_obj, 'playerConfig.audioConfig');
-      if (audioConfig !== undefined) {
-        audioConfig.loudnessDb = null;
-        audioConfig.perceptualLoudnessDb = null;
-        audioConfig.enablePerFormatLoudness = false;
-      }
-      const streamConfig = getObjectByPath(start_obj, 'streamingData.adaptiveFormats', []);
-      streamConfig.forEach((conf) => {
-        if (conf.loudnessDb !== undefined) {
-          conf.loudnessDb = 0.0;
-        }
-      });
+      disableLoudnessNormalization(playerResponse);
     }
   }
+
+  // ================== src/scripts/inject/network.js ==================
 
   function fetchFilter(url, resp) {
     if (storageData === undefined) return;
@@ -1284,13 +1259,13 @@
           ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
         } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
           const postActions = [fixAutoplay];
-          if (currentBlock) postActions.push(redirectToNext);
+          if (playerHasBeenBlocked) postActions.push(redirectToNext);
           ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
         }
       });
     } else if (['/youtubei/v1/next'].includes(url.pathname)) {
       const postActions = [fixAutoplay];
-      if (currentBlock) postActions.push(redirectToNext);
+      if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
@@ -1331,7 +1306,7 @@
             break;
           case '/watch':
             postActions = [fixAutoplay];
-            if (currentBlock) postActions.push(redirectToNext);
+            if (playerHasBeenBlocked) postActions.push(redirectToNext);
           // the watch page uses the same catch-all rule set below
           // falls through
           default:
@@ -1370,32 +1345,44 @@
     data.filterData.channelId.push(/^.+\/shorts$/);
   }
 
+  // The autoplay region is present and its overlay renderer is missing (it was
+  // filtered out) → the overlay needs rebuilding from the next video row.
+  function autoplayOverlayPresent(object) {
+    if (getObjectByPath(object, 'playerOverlays.playerOverlayRenderer.autoplay') === undefined) {
+      return false;
+    }
+    return (
+      getObjectByPath(
+        object,
+        'playerOverlays.playerOverlayRenderer.autoplay.playerOverlayAutoplayRenderer',
+      ) === undefined
+    );
+  }
+
+  // The autoplay "sets" array from the right-hand column; the overlay is
+  // rebuilt from its video. Undefined when the response lacks a next row.
+  function nextVideoSet(object) {
+    let autoPlay = getObjectByPath(
+      object,
+      'contents.twoColumnWatchNextResults.autoplay.autoplay.sets',
+    );
+    if (autoPlay === undefined) return undefined;
+    autoPlay = autoPlay[0].autoplayVideo;
+    if (autoPlay === undefined) return undefined;
+    return autoPlay;
+  }
+
   function fixAutoplay() {
     if (!this?.object?.playerOverlays) return;
     if (isMobileInterface) return fixAutoPlayMobile.call(this);
 
-    if (
-      getObjectByPath(this.object, 'playerOverlays.playerOverlayRenderer.autoplay') === undefined
-    ) {
-      return;
-    }
+    if (!autoplayOverlayPresent(this.object)) return;
 
-    let autoplayOverlay = getObjectByPath(
-      this.object,
-      'playerOverlays.playerOverlayRenderer.autoplay.playerOverlayAutoplayRenderer',
-    );
-    if (autoplayOverlay !== undefined) return;
-
-    let autoPlay = getObjectByPath(
-      this.object,
-      'contents.twoColumnWatchNextResults.autoplay.autoplay.sets',
-    );
-    if (autoPlay === undefined) return;
-    autoPlay = autoPlay[0].autoplayVideo;
+    const autoPlay = nextVideoSet(this.object);
     if (autoPlay === undefined) return;
     try {
       const videoId = findNextVideo(this.object);
-      if (videoId !== false) {
+      if (videoId !== null) {
         autoPlay.videoId = videoId;
         autoPlay.watchEndpoint.videoId = videoId;
       } else {
@@ -1408,12 +1395,15 @@
     }
   }
 
+  // Resolve the video id of the "up next" row from a watchNextResponse.
+  // Returns null when no next-video renderer is present, so it can also serve
+  // as a "is there a next video?" check.
   function findNextVideo(object) {
     let secondaryResults = getObjectByPath(
       object,
       'contents.twoColumnWatchNextResults.secondaryResults.secondaryResults.results',
     );
-    if (secondaryResults === undefined) return false;
+    if (secondaryResults === undefined) return null;
 
     const chipSection = secondaryResults.findIndex((x) => has.call(x, 'itemSectionRenderer'));
     if (chipSection !== -1) {
@@ -1421,18 +1411,68 @@
         secondaryResults[chipSection],
         'itemSectionRenderer.contents',
       );
-      if (secondaryResults === undefined) return false;
+      if (secondaryResults === undefined) return null;
     }
 
-    const compactVid = secondaryResults.findIndex((x) => has.call(x, 'compactVideoRenderer'));
-    if (compactVid > -1) {
-      const vidObj = secondaryResults[compactVid].compactVideoRenderer;
-      return vidObj.videoId;
-    } else {
-      const lockupVid = secondaryResults.findIndex((x) => has.call(x, 'lockupViewModel'));
-      const vidObj = secondaryResults[lockupVid].lockupViewModel;
-      return vidObj.contentId;
+    const compactVideoIndex = secondaryResults.findIndex((x) =>
+      has.call(x, 'compactVideoRenderer'),
+    );
+    if (compactVideoIndex !== -1) {
+      return secondaryResults[compactVideoIndex].compactVideoRenderer.videoId;
     }
+
+    const lockupIndex = secondaryResults.findIndex((x) => has.call(x, 'lockupViewModel'));
+    if (lockupIndex === -1) return null;
+    return secondaryResults[lockupIndex].lockupViewModel.contentId;
+  }
+
+  // ================== src/scripts/inject/context-menu.js ==================
+
+  // Mobile "up next" cards carry no block actions, so we inject full
+  // menuServiceItemRenderer entries ourselves; YT renders the toast text
+  // ("Channel blocked") in place after the tap.
+  function buildBlockActionMenuItem(attr, menuAction, originalData, label, toastText) {
+    return {
+      menuServiceItemRenderer: {
+        _btOriginalAttr: attr,
+        _btMenuAction: menuAction,
+        _btOriginalData: originalData,
+        text: { runs: [{ text: label }] },
+        icon: { iconType: 'NOT_INTERESTED' },
+        trackingParams: 'Cg==',
+        serviceEndpoint: {
+          commandMetadata: {
+            webCommandMetadata: {
+              sendPost: true,
+              apiUrl: 'data:text/plain;base64,Cg==',
+            },
+          },
+          feedbackEndpoint: {
+            uiActions: {
+              hideEnclosingContainer: true,
+            },
+            actions: [
+              {
+                replaceEnclosingAction: {
+                  item: {
+                    notificationMultiActionRenderer: {
+                      responseText: {
+                        runs: [{ text: toastText }],
+                        accessibility: {
+                          accessibilityData: {
+                            label: toastText,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
   }
 
   function addContextMenusMobile(obj, keys) {
@@ -1450,9 +1490,7 @@
 
     const parentData = obj[attr];
     const attrKey = attr;
-    const searchIn = mergedFilterRules[attrKey].properties
-      ? mergedFilterRules[attrKey].properties
-      : mergedFilterRules[attrKey];
+    const searchIn = mergedFilterRules[attrKey].properties;
 
     const channelData = {
       id: getFlattenByPath(parentData, searchIn.channelId),
@@ -1475,7 +1513,9 @@
         'commentRenderer',
       ].includes(attr)
     ) {
-      // Mobile Up Next videos
+      // Mobile Up Next videos: same menuServiceItemRenderer type the desktop
+      // overflow menu uses, but these cards ship no block actions, so we build
+      // the full entries ourselves (see buildBlockActionMenuItem).
       let items;
       if (has.call(obj[attr], 'menu')) {
         items = getObjectByPath(obj[attr], 'menu.menuRenderer.items');
@@ -1488,107 +1528,26 @@
       }
 
       if (!items) return;
-      const blockCh = {
-        menuServiceItemRenderer: {
-          _btOriginalAttr: attr,
-          _btMenuAction: 'block_channel',
-          _btOriginalData: channelData,
-          text: { runs: [{ text: 'Block Channel' }] },
-          icon: {
-            iconType: 'NOT_INTERESTED',
-          },
-          trackingParams: 'Cg==',
-          serviceEndpoint: {
-            commandMetadata: {
-              webCommandMetadata: {
-                sendPost: true,
-                apiUrl: 'data:text/plain;base64,Cg==',
-              },
-            },
-            feedbackEndpoint: {
-              uiActions: {
-                hideEnclosingContainer: true,
-              },
-              actions: [
-                {
-                  replaceEnclosingAction: {
-                    item: {
-                      notificationMultiActionRenderer: {
-                        responseText: {
-                          runs: [
-                            {
-                              text: 'Channel blocked',
-                            },
-                          ],
-                          accessibility: {
-                            accessibilityData: {
-                              label: 'Channel blocked',
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      };
-      const blockVid = {
-        menuServiceItemRenderer: {
-          _btOriginalAttr: attr,
-          _btMenuAction: 'block_video',
-          _btOriginalData: videoData,
-          text: { runs: [{ text: 'Block Video' }] },
-          icon: {
-            iconType: 'NOT_INTERESTED',
-          },
-          trackingParams: 'Cg==',
-          serviceEndpoint: {
-            commandMetadata: {
-              webCommandMetadata: {
-                sendPost: true,
-                apiUrl: 'data:text/plain;base64,Cg==',
-              },
-            },
-            feedbackEndpoint: {
-              uiActions: {
-                hideEnclosingContainer: true,
-              },
-              actions: [
-                {
-                  replaceEnclosingAction: {
-                    item: {
-                      notificationMultiActionRenderer: {
-                        responseText: {
-                          runs: [
-                            {
-                              text: 'Video blocked',
-                            },
-                          ],
-                          accessibility: {
-                            accessibilityData: {
-                              label: 'Video blocked',
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      };
-      if (channelData.id) items.push(blockCh);
-      if (videoData.id) items.push(blockVid);
+      if (channelData.id)
+        items.push(
+          buildBlockActionMenuItem(
+            attr,
+            'block_channel',
+            channelData,
+            'Block Channel',
+            'Channel blocked',
+          ),
+        );
+      if (videoData.id)
+        items.push(
+          buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
+        );
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
-      // Mobile Video page
-      let items = obj[attr].contents;
+      // Mobile Video page: the action bar under the video uses a different
+      // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
+      const items = obj[attr].contents;
       if (!items) return;
-      let mobileVideoMenu = {
+      const mobileVideoMenu = {
         slimVideoActionBarRenderer: {
           buttons: [
             {
@@ -1691,10 +1650,7 @@
     } else if (attr === 'lockupViewModel') {
       items = extractFromLockupViewModel(obj[attr]);
       if (!items) return null;
-      let imgName = getObjectByPath(
-        obj[attr],
-        'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName',
-      );
+      const imgName = getObjectByPath(obj[attr], LOCKUP_MIX_ICON_PATH);
       if (imgName !== 'MIX') {
         hasChannel = true;
         hasVideo = true;
@@ -1738,7 +1694,7 @@
     const items = sheetmodel.content?.listViewModel?.listItems;
     if (!items) return null;
 
-    const searchIn = mergedFilterRules['lockupViewModel'];
+    const searchIn = mergedFilterRules['lockupViewModel'].properties;
     const channelId = getFlattenByPath(renderer, searchIn.channelId);
     const channelName = getFlattenByPath(renderer, searchIn.channelName);
     const videoId = getFlattenByPath(renderer, searchIn.videoId);
@@ -1804,9 +1760,8 @@
   function injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, currentObj, store) {
     if (isLockupViewModel) {
       return injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store);
-    } else {
-      return injectStandardMenuButtons(items, hasChannel, hasVideo, store);
     }
+    return injectStandardMenuButtons(items, hasChannel, hasVideo, store);
   }
 
   function injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store) {
@@ -1850,7 +1805,7 @@
     const cleanContext = deepClone(baseContext);
 
     if (cleanContext.commandContext?.onTap) {
-      let onTap = cleanContext.commandContext?.onTap;
+      const onTap = cleanContext.commandContext?.onTap;
       onTap.innertubeCommand = {
         clickTrackingParams: '',
         commandMetadata: {
@@ -1932,6 +1887,9 @@
     return false;
   }
 
+  // Desktop overflow menu: a minimal menuServiceItemRenderer entry appended to
+  // the video's existing overflow menu (endpoint cloned from a feedback item
+  // when block_feedback is on, see injectStandardMenuButtons).
   function createStandardBlockItem(text) {
     return {
       menuServiceItemRenderer: {
@@ -1959,134 +1917,6 @@
       obj[attr]._btOriginalAttr = attr;
     }
   }
-
-  function startHook() {
-    if (window.location.pathname.startsWith('/embed/')) {
-      const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
-      if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
-        try {
-          ytConfigPlayerConfig.raw_player_response = JSON.parse(
-            ytConfigPlayerConfig.embedded_player_response,
-          );
-        } catch (e) {}
-        ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
-      } else {
-        defineProperty('yt.config_', undefined, (v) => {
-          try {
-            if (has.call(v, 'PLAYER_VARS')) {
-              v.PLAYER_VARS.raw_player_response = JSON.parse(
-                v.PLAYER_VARS.embedded_player_response,
-              );
-            }
-          } catch (e) {}
-          ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
-        });
-      }
-    }
-
-    const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
-    if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
-      ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
-    } else {
-      defineProperty('ytplayer.config', undefined, (v) => {
-        const playerResp = getObjectByPath(v, 'args.player_response');
-        if (playerResp) {
-          try {
-            v.args.raw_player_response = JSON.parse(playerResp);
-          } catch (e) {}
-        }
-        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
-      });
-    }
-
-    if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
-      ObjectFilter(window.ytInitialGuideData, filterRules.guide);
-    } else {
-      defineProperty('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
-    }
-
-    if (
-      typeof window.ytInitialPlayerResponse === 'object' &&
-      window.ytInitialPlayerResponse !== null
-    ) {
-      ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
-    } else {
-      defineProperty('ytInitialPlayerResponse', undefined, (v) =>
-        ObjectFilter(v, filterRules.ytPlayer),
-      );
-    }
-
-    const postActions = [fixAutoplay];
-    if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
-      ObjectFilter(
-        window.ytInitialData,
-        mergedFilterRules,
-        window.ytInitialData.contents && currentBlock
-          ? postActions.concat(redirectToNext)
-          : postActions,
-        true,
-      );
-    } else {
-      defineProperty('ytInitialData', undefined, (v) => {
-        ObjectFilter(
-          v,
-          mergedFilterRules,
-          v.contents && currentBlock ? postActions.concat(redirectToNext) : postActions,
-          true,
-        );
-      });
-    }
-
-    window.btDispatched = true;
-    window.dispatchEvent(new Event('blockTubeReady'));
-  }
-
-  function storageReceived(data) {
-    if (data === undefined) {
-      window.btDispatched = true;
-      window.dispatchEvent(new Event('blockTubeReady'));
-      return;
-    }
-    transformToRegExp(data);
-    if (data.options.trending) blockTrending(data);
-    if (data.options.mixes) blockMixes(data);
-    if (data.options.shorts) blockShorts(data);
-
-    const shouldStartHook = storageData === undefined;
-    storageData = data;
-
-    // Enable JS filtering only if function has something in it
-    if (storageData.options.enable_javascript && storageData.filterData.javascript) {
-      try {
-        try {
-          if (window.trustedTypes && window.trustedTypes.createPolicy) {
-            window.trustedTypes.createPolicy('default', {
-              createHTML: (string) => string,
-              createScriptURL: (string) => string,
-              createScript: (string) => string,
-            });
-          }
-        } catch (e) {}
-        jsFilter = window.eval(storageData.filterData.javascript);
-        if (!(jsFilter instanceof Function)) {
-          throw Error('Function not found');
-        }
-        jsFilterEnabled = storageData.options.enable_javascript;
-      } catch (e) {
-        console.error('Custom function syntax error', e);
-        jsFilterEnabled = false;
-      }
-    } else {
-      jsFilterEnabled = false;
-    }
-
-    dataEmpty = computeDataEmpty();
-
-    if (shouldStartHook && !window.btDispatched) {
-      startHook();
-    }
-  }
-
   function openToast(msg, duration) {
     const ytdApp = document.getElementsByTagName('ytd-app')[0];
     if (ytdApp === undefined) return;
@@ -2128,15 +1958,15 @@
   function menuOnTapMobile(event) {
     if (storageData === undefined) return;
 
-    if (window.btReloadRequired) {
-      window.btExports.openToast(
+    if (window.blockTubeReloadRequired) {
+      window.blockTubeExports.openToast(
         'BlockTube was updated, this tab needs to be reloaded to use this function',
         5000,
       );
       return;
     }
 
-    let data = getObjectByPath(this, '__instance.props.data') || this.data;
+    const data = getObjectByPath(this, '__instance.props.data') || this.data;
     if (!data || !data._btOriginalData) {
       return;
     }
@@ -2155,15 +1985,15 @@
         return;
     }
 
-    postMessage('contextBlockData', { type, info: data._btOriginalData });
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
     if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
       document.getElementById('movie_player').stopVideo();
-      alert((type === 'videoId' ? 'Video' : 'Channel') + ' Blocked');
+      alert(`${type === 'videoId' ? 'Video' : 'Channel'} Blocked`);
     }
     if (data._btOriginalAttr === 'commentRenderer') {
-      let comments = document.querySelector('ytm-section-list-renderer');
-      storageData.filterData.channelId.push(RegExp('^' + data._btOriginalData.id + '$'));
-      dataEmpty = computeDataEmpty();
+      const comments = document.querySelector('ytm-section-list-renderer');
+      storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
+      noActiveFilters = computeNoActiveFilters();
       ObjectFilter(comments.data, filterRules.comments, [], false);
     }
   }
@@ -2174,7 +2004,7 @@
 
     const string = context.getElementsByTagName('yt-formatted-string');
 
-    if (string && string.length == 1) {
+    if (string && string.length === 1) {
       menuAction = string[0]?.getRawText() || '';
     } else {
       isDataFromRightHandSide = true;
@@ -2235,7 +2065,7 @@
       stopPlayer = false;
     } else {
       const attrKey = parentData._btOriginalAttr;
-      const searchIn = mergedFilterRules[attrKey]?.properties || mergedFilterRules[attrKey];
+      const searchIn = mergedFilterRules[attrKey]?.properties;
 
       channelData = {
         id: getFlattenByPath(parentData, searchIn.channelId),
@@ -2357,8 +2187,8 @@
       return;
     }
 
-    if (window.btReloadRequired) {
-      window.btExports.openToast(
+    if (window.blockTubeReloadRequired) {
+      window.blockTubeExports.openToast(
         'BlockTube was updated, this tab needs to be reloaded to use this function',
         5000,
       );
@@ -2377,7 +2207,7 @@
     );
 
     // Notify system what data should be added to the block list
-    postMessage('contextBlockData', { type, info: data });
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
 
     if (removeParent) {
       // Remove correct component based on parentDom
@@ -2392,8 +2222,298 @@
     }
   }
 
+  // ================== src/scripts/inject/hooks.js ==================
+
+  // Install a value-trap on a dotted path only YouTube owns, so we can run
+  // post-processing the moment the data becomes available (window.yt.config_,
+  // ytplayer.config, ytInitialData, ...). Adapted from uBlock Origin.
+  const trapObjectPath = function (path, replacementValue, onSet = undefined) {
+    let blocked = false;
+    // Once a value with a different type than our replacement arrives, refuse
+    // every later assignment for this property (uBlock's trapper contract).
+    const typeMismatch = function (value) {
+      if (blocked) {
+        return true;
+      }
+      blocked =
+        value !== undefined &&
+        value !== null &&
+        replacementValue !== undefined &&
+        replacementValue !== null &&
+        typeof value !== typeof replacementValue;
+      return blocked;
+    };
+    // https://github.com/uBlockOrigin/uBlock-issues/issues/156
+    //   Support multiple trappers for the same property.
+    const trapProp = function (owner, prop, configurable, handler) {
+      if (handler.init(owner[prop]) === false) {
+        return;
+      }
+      const odesc = Object.getOwnPropertyDescriptor(owner, prop);
+      let prevGetter, prevSetter;
+      if (odesc instanceof Object) {
+        if (odesc.configurable === false) {
+          return;
+        }
+        if (odesc.get instanceof Function) {
+          prevGetter = odesc.get;
+        }
+        if (odesc.set instanceof Function) {
+          prevSetter = odesc.set;
+        }
+      }
+      Object.defineProperty(owner, prop, {
+        configurable,
+        get() {
+          if (prevGetter !== undefined) {
+            prevGetter();
+          }
+          return handler.getter(); // replacementValue
+        },
+        set(a) {
+          if (prevSetter !== undefined) {
+            prevSetter(a);
+          }
+          handler.setter(a);
+        },
+      });
+    };
+    const trapChain = function (owner, remPath) {
+      const pos = remPath.indexOf('.');
+      if (pos === -1) {
+        trapProp(owner, remPath, true, {
+          v: undefined,
+          init(v) {
+            if (typeMismatch(v)) {
+              return false;
+            }
+            this.v = v;
+            return true;
+          },
+          getter() {
+            return replacementValue;
+          },
+          setter(a) {
+            if (onSet instanceof Function) {
+              replacementValue = a;
+              onSet(a);
+            } else {
+              if (typeMismatch(a) === false) {
+                return;
+              }
+              replacementValue = a;
+            }
+          },
+        });
+        return;
+      }
+      const prop = remPath.slice(0, pos);
+      const v = owner[prop];
+      // remember the path that is still not reached, it must be traversed later
+      remPath = remPath.slice(pos + 1);
+      if (v instanceof Object || (typeof v === 'object' && v !== null)) {
+        trapChain(v, remPath);
+        return;
+      }
+      trapProp(owner, prop, true, {
+        v: undefined,
+        init(newVal) {
+          this.v = newVal;
+          return true;
+        },
+        getter() {
+          return this.v;
+        },
+        setter(a) {
+          this.v = a;
+          if (a instanceof Object) {
+            // continue the remaining path from the freshly assigned object
+            trapChain(a, remPath);
+          }
+        },
+      });
+    };
+    trapChain(window, path);
+  };
+
+  // !! Globals
+
+  window.blockTubeReloadRequired = false;
+
+  // extension storageData
+  let storageData;
+
+  // JavaScript filtering
+  let jsFilter;
+  let jsFilterEnabled = false;
+
+  // Set when a playback video has been blocked on this page. startHook() reads
+  // it to know whether ytInitialData arrived before or after the block and
+  // then redirects to the next (not blocked) video once data is available.
+  let playerHasBeenBlocked = false;
+  function postMessage(type, data) {
+    window.postMessage(
+      { from: BLOCKTUBE_CONSTS.MESSAGES.FROM_PAGE, type, data },
+      document.location.origin,
+    );
+  }
+
+  // Pre-compiled filter paths. The same path strings (from filterRules and the
+  // literals below) are resolved against thousands of objects, so split + regex
+  // parsing happens once per unique path instead of per call.
+  function transformToRegExp(data) {
+    if (!has.call(data, 'filterData')) return;
+    regexProps.forEach((p) => {
+      if (has.call(data.filterData, p)) {
+        data.filterData[p] = data.filterData[p].map((v) => {
+          try {
+            return RegExp(v[0], v[1].replace('g', ''));
+          } catch (e) {
+            console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
+            return undefined;
+          }
+        });
+      }
+    });
+  }
+  function startHook() {
+    if (window.location.pathname.startsWith('/embed/')) {
+      const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
+      if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
+        try {
+          ytConfigPlayerConfig.raw_player_response = JSON.parse(
+            ytConfigPlayerConfig.embedded_player_response,
+          );
+        } catch (e) {}
+        ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
+      } else {
+        trapObjectPath('yt.config_', undefined, (v) => {
+          try {
+            if (has.call(v, 'PLAYER_VARS')) {
+              v.PLAYER_VARS.raw_player_response = JSON.parse(
+                v.PLAYER_VARS.embedded_player_response,
+              );
+            }
+          } catch (e) {}
+          ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
+        });
+      }
+    }
+
+    const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
+    if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
+      ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
+    } else {
+      trapObjectPath('ytplayer.config', undefined, (v) => {
+        const playerResp = getObjectByPath(v, 'args.player_response');
+        if (playerResp) {
+          try {
+            v.args.raw_player_response = JSON.parse(playerResp);
+          } catch (e) {}
+        }
+        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
+      });
+    }
+
+    if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
+      ObjectFilter(window.ytInitialGuideData, filterRules.guide);
+    } else {
+      trapObjectPath('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
+    }
+
+    if (
+      typeof window.ytInitialPlayerResponse === 'object' &&
+      window.ytInitialPlayerResponse !== null
+    ) {
+      ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
+    } else {
+      trapObjectPath('ytInitialPlayerResponse', undefined, (v) =>
+        ObjectFilter(v, filterRules.ytPlayer),
+      );
+    }
+
+    const postActions = [fixAutoplay];
+    if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
+      ObjectFilter(
+        window.ytInitialData,
+        mergedFilterRules,
+        window.ytInitialData.contents && playerHasBeenBlocked
+          ? postActions.concat(redirectToNext)
+          : postActions,
+        true,
+      );
+    } else {
+      trapObjectPath('ytInitialData', undefined, (v) => {
+        ObjectFilter(
+          v,
+          mergedFilterRules,
+          v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
+          true,
+        );
+      });
+    }
+
+    window.blockTubeDispatched = true;
+    window.dispatchEvent(new Event('blockTubeReady'));
+  }
+
+  // Received from the background service worker (see the storageData/filtersData
+  // contract in content_script.js). `data.options` follows the schema that
+  // background.js DEFAULT_OPTIONS defines; option reads live in
+  //   object-filter.js   shorts, movies, mixes, chips_shelves,
+  //                      percent_watched_hide, vidLength_type, disable_on_history
+  //   custom-filters.js  suggestions_only, autoplay, disable_you_there,
+  //                      disable_db_normalize, block_message
+  //   context-menu.js    block_feedback
+  //   below              trending, mixes, shorts, enable_javascript
+  // Keep option keys in sync with background.js.
+  function storageReceived(data) {
+    if (data === undefined) {
+      window.blockTubeDispatched = true;
+      window.dispatchEvent(new Event('blockTubeReady'));
+      return;
+    }
+    transformToRegExp(data);
+    if (data.options.trending) blockTrending(data);
+    if (data.options.mixes) blockMixes(data);
+    if (data.options.shorts) blockShorts(data);
+
+    const shouldStartHook = storageData === undefined;
+    storageData = data;
+
+    // Enable JS filtering only if function has something in it
+    if (storageData.options.enable_javascript && storageData.filterData.javascript) {
+      try {
+        try {
+          if (window.trustedTypes && window.trustedTypes.createPolicy) {
+            window.trustedTypes.createPolicy('default', {
+              createHTML: (string) => string,
+              createScriptURL: (string) => string,
+              createScript: (string) => string,
+            });
+          }
+        } catch (e) {}
+        jsFilter = window.eval(storageData.filterData.javascript);
+        if (!(jsFilter instanceof Function)) {
+          throw Error('Function not found');
+        }
+        jsFilterEnabled = storageData.options.enable_javascript;
+      } catch (e) {
+        console.error('Custom function syntax error', e);
+        jsFilterEnabled = false;
+      }
+    } else {
+      jsFilterEnabled = false;
+    }
+
+    noActiveFilters = computeNoActiveFilters();
+
+    if (shouldStartHook && !window.blockTubeDispatched) {
+      startHook();
+    }
+  }
   // !! Start
-  console.info('BlockTube Init');
+  console.info(`BlockTube Init OK (${BLOCKTUBE_CONSTS.MESSAGES.FROM_CONTENT})`);
 
   const isMobileInterface = document.location.hostname.startsWith('m.');
 
@@ -2402,15 +2522,15 @@
     'message',
     (event) => {
       if (event.source !== window) return;
-      if (!event.data.from || event.data.from !== 'BLOCKTUBE_CONTENT') return;
+      if (!event.data.from || event.data.from !== BLOCKTUBE_CONSTS.MESSAGES.FROM_CONTENT) return;
 
       switch (event.data.type) {
-        case 'storageData': {
+        case BLOCKTUBE_CONSTS.MESSAGES.STORAGE: {
           storageReceived(event.data.data);
           break;
         }
-        case 'reloadRequired':
-          window.btReloadRequired = true;
+        case BLOCKTUBE_CONSTS.MESSAGES.RELOAD:
+          window.blockTubeReloadRequired = true;
           openToast('BlockTube was updated, Please reload this tab to reactivate it', 15000);
           break;
         default:
@@ -2420,7 +2540,7 @@
     true,
   );
 
-  window.btExports = {
+  window.blockTubeExports = {
     spfFilter,
     fetchFilter,
     openToast,

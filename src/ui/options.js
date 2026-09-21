@@ -10,6 +10,10 @@
 
   const jsEditors = {};
   let isLoggedIn = false;
+  // Shallow placeholder for storageData while the options page boots. The
+  // full options schema lives in src/scripts/background.js (DEFAULT_OPTIONS,
+  // its source of truth); saveForm() below writes every option key into
+  // storageData.options, which background.js checkShape() vets on load.
   let storageData = {
     filterData: {
       javascript: defaultJSFunction,
@@ -163,7 +167,8 @@
       $('advanced_tab').style.removeProperty('display');
     }
 
-    setTimeout((_) => Object.values(jsEditors).forEach((v) => v.refresh()), 1); // https://stackoverflow.com/a/19970695
+    // refresh CodeMirror editors after the tab becomes visible (a/19970695)
+    setTimeout(() => Object.values(jsEditors).forEach((v) => v.refresh()), 1);
     $('save_btn').classList.add('disabled-btn');
   }
 
@@ -173,12 +178,18 @@
   }
 
   function multilineToArray(text) {
+    // .trim() per line is intentional: it also strips the trailing newline
+    // most textarea/editor values end with, so empty inputs yield [] not ['']
     return text
       .replace(/\r\n/g, '\n')
       .split('\n')
       .map((x) => x.trim());
   }
 
+  // Mirrors src/scripts/inject/paths.js#getObjectByPath for the options page
+  // (no bundle share between these two contexts): dotted-path walk with the
+  // same "at an array node, find the FIRST element that owns the key" trap.
+  // The trap is documented once, next to getObjectByPath; keep this in sync.
   function get(path, def = undefined, obj = undefined) {
     const paths = path instanceof Array ? path : path.split('.');
     let nextObj = obj || storageData;
@@ -249,7 +260,7 @@
 
     function onDrag(e) {
       cm.display.scroller.style.maxHeight = '100%';
-      cm.setSize(null, Math.max(MIN_HEIGHT, cm.start_h + e.y - cm.start_y) + 'px');
+      cm.setSize(null, `${Math.max(MIN_HEIGHT, cm.start_h + e.y - cm.start_y)}px`);
     }
 
     function onRelease(e) {
@@ -275,7 +286,7 @@
       styleActiveLine: true,
       lineWrapping: true,
       extraKeys: {
-        F11: function (cm) {
+        F11(cm) {
           if (cm.getOption('fullScreen')) {
             cm.display.scroller.style.maxHeight = cm.start_h || '200px';
           } else {
@@ -283,7 +294,7 @@
           }
           cm.setOption('fullScreen', !cm.getOption('fullScreen'));
         },
-        Esc: function (cm) {
+        Esc(cm) {
           if (cm.getOption('fullScreen')) {
             cm.display.scroller.style.maxHeight = cm.start_h || '200px';
             cm.setOption('fullScreen', false);
@@ -291,7 +302,7 @@
         },
       },
     });
-    cmResizer(jsEditors[v], $(v + '_resizer'));
+    cmResizer(jsEditors[v], $(`${v}_resizer`));
     jsEditors[v].on('change', () => {
       $('options').dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -332,7 +343,7 @@
   $('enable_javascript').addEventListener('change', (v) => {
     if (v.target.checked) {
       $('advanced_tab').style.removeProperty('display');
-      setTimeout((_) => jsEditors['javascript'].refresh(), 1);
+      setTimeout(() => jsEditors['javascript'].refresh(), 1);
     } else {
       $('advanced_tab').style.display = 'none';
     }

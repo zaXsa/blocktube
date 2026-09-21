@@ -1,8 +1,11 @@
-# Vendored third-party code - never reformat
+# Fragment files are concatenated by tools/build-inject.js into
+# src/scripts/inject.js; prettier formats that bundle (their lines are kept
+# verbatim so the bundle can be reproduced deterministically).
+src/scripts/inject/*.js
+
+# consts.js is also embedded verbatim into the bundle as fragment #0, so it is
+# authored at a 2-space base indent (fragment style) and must NOT be reflowed.
+src/scripts/consts.js
+
+# Vendored CodeMirror files (mirrors the eslint ignorePatterns entry).
 src/ui/cm/**
-
-# Historical performance baseline snapshot - keep byte-identical to upstream
-tools/bench/baseline/**
-
-# Build artifacts
-dist/

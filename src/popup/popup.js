@@ -1,10 +1,16 @@
-let enabled = true;
-
 document.addEventListener('DOMContentLoaded', () => {
+  const checkbox = document.getElementById('toggle-extension');
+  const statusText = document.getElementById('status-text');
+
+  function renderToggle(state) {
+    checkbox.checked = state;
+    statusText.textContent = state ? 'On' : 'Off';
+  }
+
   function detectColorScheme() {
-    chrome.storage.local.get('storageData', (result) => {
+    chrome.storage.local.get(BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY, (result) => {
       let uiTheme = 'light';
-      let storageTheme = result.storageData?.uiTheme;
+      const storageTheme = result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]?.uiTheme;
 
       if (storageTheme) {
         uiTheme = storageTheme;
@@ -20,37 +26,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   detectColorScheme();
 
-  const checkbox = document.getElementById('toggle-extension');
-  const statusText = document.getElementById('status-text');
-
   chrome.storage.onChanged.addListener((changes) => {
-    if (Object.hasOwn(changes, 'enabled')) {
-      enabled = !!changes.enabled.newValue;
-      checkbox.checked = enabled;
-      statusText.textContent = enabled ? 'On' : 'Off';
+    if (Object.hasOwn(changes, BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY)) {
+      renderToggle(!!changes.enabled.newValue);
     }
   });
 
   // Restore the switch state from storage
-  chrome.storage.local.get(['enabled', 'storageData'], (result) => {
-    if (result.storageData && result.storageData.uiPass) {
-      if (chrome.runtime.openOptionsPage) {
-        chrome.runtime.openOptionsPage();
-        window.close();
+  chrome.storage.local.get(
+    [BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY, BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY],
+    (result) => {
+      if (result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]?.uiPass) {
+        if (chrome.runtime.openOptionsPage) {
+          chrome.runtime.openOptionsPage();
+          window.close();
+        }
       }
-    }
 
-    if (result.enabled === undefined) {
-      result.enabled = true;
-    }
-    checkbox.checked = !!result.enabled;
-    statusText.textContent = result.enabled ? 'On' : 'Off';
-  });
+      renderToggle(
+        result[BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY] === undefined
+          ? true
+          : !!result[BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY],
+      );
+    },
+  );
 
   // Listen for changes to the switch
   checkbox.addEventListener('change', (event) => {
     if (event.target instanceof HTMLInputElement) {
-      chrome.storage.local.set({ enabled: event.target.checked });
+      chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY]: event.target.checked });
       chrome.tabs.reload(); // Reload page to apply the new state
     }
   });
