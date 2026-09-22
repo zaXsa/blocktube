@@ -118,34 +118,54 @@
 
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
+    matchedFilterField = null;
 
     if (document.location.pathname === '/feed/history' && storageData.options[OPT.DISABLE_ON_HISTORY])
       return false;
 
-    let doBlock = Object.keys(filterPaths).some((fieldName) => {
+    let doBlock = false;
+    for (const fieldName of Object.keys(filterPaths)) {
       const filterPath = filterPaths[fieldName];
-      if (filterPath === undefined) return false;
+      if (filterPath === undefined) continue;
 
       const filterEntries = storageData.filterData[fieldName];
       if (
         regexPropsSet.has(fieldName) &&
         (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
       )
-        return false;
+        continue;
 
       let value = getFlattenByPath(obj, filterPath);
-      if (value === undefined) return false;
+      if (value === undefined) continue;
 
-      if (isPercentWatchedBlocked(fieldName, value, rendererKey)) return true;
+      if (isPercentWatchedBlocked(fieldName, value, rendererKey)) {
+        matchedFilterField = { name: fieldName, value };
+        doBlock = true;
+        break;
+      }
 
-      if (regexPropsSet.has(fieldName) && filterEntries.some((entry) => entry && entry.test(value)))
-        return true;
+      if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
+        const matchedEntry = filterEntries.find((entry) => entry && entry.test(value));
+        if (matchedEntry) {
+          matchedFilterField = { name: fieldName, value: String(matchedEntry).slice(0, 40) };
+          doBlock = true;
+          break;
+        }
+      }
 
-      if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) return true;
+      if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
+        matchedFilterField = { name: fieldName, value };
+        doBlock = true;
+        break;
+      }
 
       if (fieldName === 'vidLength') {
         const vidLen = parseTime(value);
-        if (matchesDurationRange(vidLen, filterEntries)) return true;
+        if (matchesDurationRange(vidLen, filterEntries)) {
+          matchedFilterField = { name: fieldName, value: vidLen };
+          doBlock = true;
+          break;
+        }
         value = vidLen;
       }
 
@@ -157,9 +177,7 @@
         }
         friendlyVideoObj[fieldName] = value;
       }
-
-      return false;
-    });
+    }
 
     if (!doBlock && jsFilterEnabled) {
       // force return value into boolean just in case someone tries returning something else
@@ -174,6 +192,9 @@
           'rendererKey: ',
           rendererKey,
         );
+      }
+      if (doBlock) {
+        matchedFilterField = { name: 'jsFilter' };
       }
     }
     if (doBlock && rendererKey === 'commentEntityPayload') {

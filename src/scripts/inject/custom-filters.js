@@ -1,11 +1,53 @@
   // !! Custom filtering functions
 
+  // Which field matched, filled in by matchFilterProperties so the error panel
+  // can say what actually triggered the block.
+  let matchedFilterField = null;
+
+  function getMatchedFilterText() {
+    if (matchedFilterField === null) return null;
+    const value = matchedFilterField.value;
+    if (value !== undefined) {
+      return `${matchedFilterField.name}: ${String(value).slice(0, 40)}`;
+    }
+    return matchedFilterField.name;
+  }
+
+  // Keep the native error panel informative even when block_message is empty.
+  function getBlockMessage() {
+    const rule = getMatchedFilterText();
+    const message =
+      storageData.options[OPT.BLOCK_MESSAGE] || 'Video blocked by BlockTube filter';
+    return rule ? `${message} (${rule})` : message;
+  }
+
+  // Mark the player response as errored so YouTube shows a reason on screen
+  // instead of a blank/black player.
+  function setPlayerBlocked(ytData) {
+    const message = getBlockMessage();
+    try {
+      ytData.playabilityStatus = {
+        status: 'ERROR',
+        reason: message,
+        errorScreen: {
+          playerErrorMessageRenderer: {
+            reason: {
+              simpleText: message,
+            },
+          },
+        },
+      };
+    } catch (e) {}
+  }
+
   function disableEmbedPlayer(ytData) {
     if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
     censorTitle();
+    setPlayerBlocked(ytData);
+    playerHasBeenBlocked = true;
     return true;
   }
 
@@ -14,42 +56,18 @@
       return false;
     }
 
-    const message = storageData.options[OPT.BLOCK_MESSAGE] || '';
     for (const prop of Object.getOwnPropertyNames(ytData)) {
       try {
         delete ytData[prop];
       } catch (e) {}
     }
-    ytData.playabilityStatus = {
-      status: 'ERROR',
-      reason: message,
-      errorScreen: {
-        playerErrorMessageRenderer: {
-          reason: {
-            simpleText: message,
-          },
-          thumbnail: {
-            thumbnails: [
-              {
-                url: '//s.ytimg.com/yts/img/meh7-vflGevej7.png',
-                width: 140,
-                height: 100,
-              },
-            ],
-          },
-          icon: {
-            iconType: 'ERROR_OUTLINE',
-          },
-        },
-      },
-    };
-
+    setPlayerBlocked(ytData);
     playerHasBeenBlocked = true;
   }
 
   function blockPlaylistVid(pl) {
     const vid = pl.playlistPanelVideoRenderer;
-    const message = storageData.options[OPT.BLOCK_MESSAGE] || '';
+    const message = getBlockMessage();
 
     vid.videoId = 'undefined';
 
