@@ -16,26 +16,29 @@ const unicodeBoundary = '[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:\'",\\.\\/<>\\?`
 // drift here are invisible at runtime, so keep this list in sync with both
 // those files; the load-time shape check (utils.checkShape) reports any
 // mismatch.
+const OPTS = BLOCKTUBE_CONSTS.OPTIONS;
 const DEFAULT_OPTIONS = {
-  trending: false,
-  mixes: false,
-  chips_shelves: false,
-  shorts: false,
-  movies: false,
-  suggestions_only: false,
-  autoplay: false,
-  enable_javascript: false,
-  block_message: '',
-  block_feedback: false,
-  disable_db_normalize: false,
-  disable_you_there: false,
-  disable_on_history: false,
-  vidLength_type: 'allow',
-  percent_watched_hide: NaN,
+  [OPTS.TRENDING]: false,
+  [OPTS.MIXES]: false,
+  [OPTS.CHIPS_SHELVES]: false,
+  [OPTS.SHORTS]: false,
+  [OPTS.MOVIES]: false,
+  [OPTS.SUGGESTIONS_ONLY]: false,
+  [OPTS.AUTOPLAY]: false,
+  [OPTS.ENABLE_JAVASCRIPT]: false,
+  [OPTS.BLOCK_MESSAGE]: '',
+  [OPTS.BLOCK_FEEDBACK]: false,
+  [OPTS.DISABLE_DB_NORMALIZE]: false,
+  [OPTS.DISABLE_YOU_THERE]: false,
+  [OPTS.DISABLE_ON_HISTORY]: false,
+  [OPTS.VIDLENGTH_TYPE]: 'allow',
+  [OPTS.PERCENT_WATCHED_HIDE]: NaN,
 };
 
 // keyed by (contextId || frameId) of the sender -> still-open content-script port
 const ports = new Map();
+// per-key timestamp of the last accepted CONTEXT_BLOCK write (flood throttle)
+const blockTimestamps = new Map();
 let enabled = true;
 let compiledStorage;
 let storage = {
@@ -93,26 +96,54 @@ const utils = {
   // Copy a raw storageData into the shape sent to tabs: the regex props are
   // compiled above; vidLength/javascript pass through raw.
   compileAll(data) {
-    const sendData = { filterData: {}, options: data.options };
+    const filterData = (data && data.filterData) || {};
+    const sendData = {
+      filterData: {},
+      options: (data && data.options) || DEFAULT_OPTIONS,
+    };
 
     // compile regex props
     ['title', 'channelName', 'channelId', 'videoId', 'comment'].forEach((p) => {
-      const dataArr = utils.compileRegex(data.filterData[p], p);
+      const dataArr = utils.compileRegex(filterData[p], p);
       if (dataArr) {
         sendData.filterData[p] = dataArr;
       }
     });
 
-    sendData.filterData.vidLength = data.filterData.vidLength;
-    sendData.filterData.javascript = data.filterData.javascript;
+    sendData.filterData.vidLength = Array.isArray(filterData.vidLength)
+      ? filterData.vidLength
+      : [null, null];
+    sendData.filterData.javascript =
+      typeof filterData.javascript === 'string' ? filterData.javascript : '';
 
     return sendData;
   },
 
+  // Tolerate corrupt/legacy storage instead of crashing the SW; needs both
+  // filterData and options objects or `current` (defaults / last good) stays.
+  sanitizeStorage(stored, current) {
+    if (
+      stored &&
+      typeof stored === 'object' &&
+      stored.filterData &&
+      typeof stored.filterData === 'object' &&
+      stored.options &&
+      typeof stored.options === 'object'
+    ) {
+      return stored;
+    }
+    return current;
+  },
+
   initFromStorage(data) {
     if (data !== undefined && Object.keys(data).length > 0) {
-      storage = data[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY];
-      compiledStorage = utils.compileAll(data[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]);
+      const stored = data[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY];
+      const sanitized = utils.sanitizeStorage(stored, storage);
+      if (stored !== undefined && stored !== null && sanitized !== stored) {
+        console.warn('BlockTube: storage.filterData/options missing or invalid, keeping defaults');
+      }
+      storage = sanitized;
+      compiledStorage = utils.compileAll(storage);
       utils.checkShape(storage);
     }
     if (data !== undefined && Object.hasOwn(data, BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY)) {
@@ -185,7 +216,52 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((msg) => {
     switch (msg.type) {
       case BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK: {
-        storage.filterData[msg.data.type].push(...msg.data.entries);
+        // Re-validate what the content script forwarded: the page can forge
+        // CONTEXT_BLOCK_DATA, so type must be whitelisted and ids must look
+        // like real YouTube ids (a forged `.*` would match everything).
+        const blockType = msg.data && msg.data.type;
+        if (!CONTEXT_BLOCK_TYPES.includes(blockType)) break;
+        const entries = msg.data && msg.data.entries;
+        if (!(entries instanceof Array) || entries.length === 0) break;
+
+        // Comments (inert to filtering: compileRegex skips `//` lines) are the
+        // context-menu annotations users read in the block list. Keep the
+        // first one, but re-sanitize: a forged page can send arbitrary text,
+        // so strip newlines/control chars and cap length. Ids stay regex-safe
+        // via whitelist charset + 64-char cap.
+        let comment;
+        const safeEntries = [];
+        entries.forEach((entry) => {
+          if (typeof entry !== 'string' || entry.length === 0) return;
+          if (entry.startsWith('//')) {
+            const clean = entry.replace(/\s+/g, ' ').trim();
+            if (clean && comment === undefined) comment = clean.slice(0, 200);
+            return;
+          }
+          if (entry.length <= 64 && safeEntries.length < 100 && /^[A-Za-z0-9_-]+$/.test(entry)) {
+            safeEntries.push(entry);
+          }
+        });
+        if (safeEntries.length === 0 && comment === undefined) break;
+
+        const filterArr = storage.filterData[blockType];
+        if (!Array.isArray(filterArr)) break; // corrupt storage: never throw here
+
+        // Throttle per tab + dedup + bound total, so a flood can't churn
+        // storage.set / recompile / broadcast or grow storage without limit.
+        const now = Date.now();
+        if (now - (blockTimestamps.get(key) || 0) < 1000) break;
+        blockTimestamps.set(key, now);
+
+        const existing = new Set(filterArr);
+        const newEntries = safeEntries.filter((id) => !existing.has(id));
+        if (newEntries.length === 0 && comment === undefined) break;
+        if (comment !== undefined && !existing.has(comment)) newEntries.unshift(comment);
+        if (newEntries.length === 0) break;
+        filterArr.push(...newEntries);
+        // Blank line separates each context-menu group in the options editor,
+        // matching the pre-hardening stored format (compileRegex ignores '').
+        filterArr.push('');
         chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: storage });
         break;
       }
@@ -196,8 +272,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
 chrome.storage.onChanged.addListener((changes) => {
   if (has.call(changes, BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY)) {
-    storage = changes[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY].newValue;
-    compiledStorage = utils.compileAll(changes[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY].newValue);
+    storage = utils.sanitizeStorage(
+      changes[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY].newValue,
+      storage,
+    );
+    compiledStorage = utils.compileAll(storage);
     utils.checkShape(storage);
     utils.sendFiltersToAll();
   }

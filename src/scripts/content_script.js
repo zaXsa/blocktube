@@ -23,6 +23,19 @@
         document.location.origin,
       );
     },
+    // The port can be mid-reconnect when a forged message lands; don't throw
+    // out of the isolated-world message listener, just reconnect.
+    safePortPost(msg) {
+      if (!port) {
+        connectToPort();
+        return;
+      }
+      try {
+        port.postMessage(msg);
+      } catch (e) {
+        connectToPort();
+      }
+    },
     sendReload(msg, duration) {
       window.postMessage(
         {
@@ -38,8 +51,12 @@
   // Handlers for messages coming from the injected page script
   const messageHandlers = {
     handleContextBlock(data) {
-      if (!data.info.id) return;
+      const blockType = data && data.type;
+      if (!CONTEXT_BLOCK_TYPES.includes(blockType)) return;
+      if (!data.info || !data.info.id) return;
 
+      // data.info.text flows into a comment line; strip newlines so a crafted
+      // text value can't splice additional filter lines into the block list.
       const options = {
         year: 'numeric',
         month: 'numeric',
@@ -49,19 +66,32 @@
         second: 'numeric',
       };
       const now = new Intl.DateTimeFormat(undefined, options).format(new Date());
-      const entries = [`// Blocked by context menu (${data.info.text}) (${now})`];
-      const id = Array.isArray(data.info.id) ? data.info.id : [data.info.id];
-      entries.push(...id);
+      const text = String(data.info.text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 200);
+      const entries = [`// Blocked by context menu (${text}) (${now})`];
+      const ids = (Array.isArray(data.info.id) ? data.info.id : [data.info.id]).slice(0, 100);
+      ids.forEach((id) => {
+        if (typeof id === 'string' && id.length > 0 && id.length <= 255) {
+          entries.push(id);
+        }
+      });
       entries.push('');
-      port.postMessage({
+      utils.safePortPost({
         type: BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK,
-        data: { type: data.type, entries },
+        data: { type: blockType, entries },
       });
     },
   };
 
   function connectToPort() {
-    port = chrome.runtime.connect();
+    if (!chrome.runtime || !chrome.runtime.id) return;
+    try {
+      port = chrome.runtime.connect();
+    } catch (e) {
+      return;
+    }
     // Listen for messages from background page
     port.onMessage.addListener((msg) => {
       switch (msg.type) {
@@ -84,6 +114,7 @@
     });
 
     port.onDisconnect.addListener(() => {
+      if (!chrome.runtime || !chrome.runtime.id) return;
       connectToPort();
     });
   }

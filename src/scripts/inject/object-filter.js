@@ -41,11 +41,15 @@
       return false;
     if (!isNaN(storageData.options.percent_watched_hide)) return false;
 
-    if (!isNaN(storageData.filterData.vidLength[0]) || !isNaN(storageData.filterData.vidLength[1]))
+    // Array guards: a forged STORAGE message (FROM_CONTENT is spoofable) can
+    // leave these non-arrays; .[0]/.length on undefined would throw here.
+    const vidLength = storageData.filterData.vidLength;
+    if (Array.isArray(vidLength) && (!isNaN(vidLength[0]) || !isNaN(vidLength[1])))
       return false;
 
     for (let idx = 0; idx < regexProps.length; idx += 1) {
-      if (storageData.filterData[regexProps[idx]].length > 0) return false;
+      const arr = storageData.filterData[regexProps[idx]];
+      if (Array.isArray(arr) && arr.length > 0) return false;
     }
 
     return !jsFilterEnabled;

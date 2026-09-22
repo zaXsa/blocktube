@@ -241,6 +241,8 @@
       try {
         json = JSON.parse(e.target.result);
         if (json.filterData && json.options) {
+          // Importing a backup must not silently enable code execution.
+          $('enable_javascript').checked = false;
           populateForms(json);
           saveForm();
         }

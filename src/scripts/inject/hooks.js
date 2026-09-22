@@ -131,17 +131,33 @@
       document.location.origin,
     );
   }
+  // YouTube serves require-trusted-types-for 'script', so plain window.eval
+  // throws. A named createScript-only policy supplies the required TrustedScript
+  // without weakening page-wide Trusted Types (HTML/URL still enforced).
+  let ttPolicy;
+  try {
+    ttPolicy =
+      window.trustedTypes &&
+      window.trustedTypes.createPolicy &&
+      window.trustedTypes.createPolicy('blocktube', { createScript: (s) => s });
+  } catch (e) {}
+  function blocktubeEval(code) {
+    if (ttPolicy) return window.eval(ttPolicy.createScript(code));
+    return window.eval(code);
+  }
 
   // Pre-compiled filter paths. The same path strings (from filterRules and the
   // literals below) are resolved against thousands of objects, so split + regex
   // parsing happens once per unique path instead of per call.
   function transformToRegExp(data) {
-    if (!has.call(data, 'filterData')) return;
+    if (typeof data !== 'object' || data === null) return;
+    if (typeof data.filterData !== 'object' || data.filterData === null) return;
     regexProps.forEach((p) => {
-      if (has.call(data.filterData, p)) {
+      if (has.call(data.filterData, p) && Array.isArray(data.filterData[p])) {
+          if (!Array.isArray(v)) return undefined;
         data.filterData[p] = data.filterData[p].map((v) => {
           try {
-            return RegExp(v[0], v[1].replace('g', ''));
+            return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
           } catch (e) {
             console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
             return undefined;
@@ -246,6 +262,32 @@
       window.blockTubeDispatched = true;
       window.dispatchEvent(new Event('blockTubeReady'));
       return;
+    // Page-forgeable message (FROM_CONTENT is public): drop anything that
+    // isn't a real storage payload so a garbage shape can't throw or poison
+    // storageData. Genuine payloads always pass (arrays/strings below).
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      typeof data.filterData !== 'object' ||
+      data.filterData === null ||
+      typeof data.options !== 'object' ||
+      data.options === null
+    ) {
+      return;
+    }
+    // Non-array props would throw later at block*`.push`/match`.some`.
+    for (let idx = 0; idx < regexProps.length; idx += 1) {
+      const prop = data.filterData[regexProps[idx]];
+      if (prop !== undefined && !Array.isArray(prop)) return;
+    }
+    if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
+      return;
+    if (
+      data.filterData.javascript !== undefined &&
+      typeof data.filterData.javascript !== 'string'
+    ) {
+      return;
+    }
     }
     transformToRegExp(data);
     if (data.options.trending) blockTrending(data);
@@ -258,16 +300,7 @@
     // Enable JS filtering only if function has something in it
     if (storageData.options.enable_javascript && storageData.filterData.javascript) {
       try {
-        try {
-          if (window.trustedTypes && window.trustedTypes.createPolicy) {
-            window.trustedTypes.createPolicy('default', {
-              createHTML: (string) => string,
-              createScriptURL: (string) => string,
-              createScript: (string) => string,
-            });
-          }
-        } catch (e) {}
-        jsFilter = window.eval(storageData.filterData.javascript);
+        jsFilter = blocktubeEval(storageData.filterData.javascript);
         if (!(jsFilter instanceof Function)) {
           throw Error('Function not found');
         }
