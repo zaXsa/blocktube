@@ -1,3 +1,5 @@
+  // Short alias for option keys; keep in sync with BLOCKTUBE_CONSTS.OPTIONS.
+  const OPT = BLOCKTUBE_CONSTS.OPTIONS;
   // add context menu to following objects
   const contextMenuObjects = [
     'backstagePostRenderer',

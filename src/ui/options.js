@@ -1,5 +1,6 @@
 (function () {
   const has = Object.prototype.hasOwnProperty;
+  const OPT = BLOCKTUBE_CONSTS.OPTIONS;
 
   const defaultJSFunction = `(video, objectType) => {
   // Add custom conditions below
@@ -86,21 +87,21 @@
     storageData.uiTheme = $('ui_theme').value;
 
     storageData.uiPass = $('pass_save').value;
-    storageData.options.trending = $('disable_trending').checked;
-    storageData.options.shorts = $('disable_shorts').checked;
-    storageData.options.movies = $('disable_movies').checked;
-    storageData.options.mixes = $('disable_mixes').checked;
-    storageData.options.chips_shelves = $('disable_chips_shelves').checked;
-    storageData.options.autoplay = $('autoplay').checked;
-    storageData.options.suggestions_only = $('suggestions_only').checked;
-    storageData.options.disable_db_normalize = $('disable_db_normalize').checked;
-    storageData.options.disable_on_history = $('disable_on_history').checked;
-    storageData.options.disable_you_there = $('disable_you_there').checked;
-    storageData.options.block_feedback = $('block_feedback').checked;
-    storageData.options.enable_javascript = $('enable_javascript').checked;
-    storageData.options.block_message = $('block_message').value;
-    storageData.options.vidLength_type = $('vidLength_type').value;
-    storageData.options.percent_watched_hide = parseInt($('percent_watched_hide').value, 10);
+    storageData.options[OPT.TRENDING] = $('disable_trending').checked;
+    storageData.options[OPT.SHORTS] = $('disable_shorts').checked;
+    storageData.options[OPT.MOVIES] = $('disable_movies').checked;
+    storageData.options[OPT.MIXES] = $('disable_mixes').checked;
+    storageData.options[OPT.CHIPS_SHELVES] = $('disable_chips_shelves').checked;
+    storageData.options[OPT.AUTOPLAY] = $('autoplay').checked;
+    storageData.options[OPT.SUGGESTIONS_ONLY] = $('suggestions_only').checked;
+    storageData.options[OPT.DISABLE_DB_NORMALIZE] = $('disable_db_normalize').checked;
+    storageData.options[OPT.DISABLE_ON_HISTORY] = $('disable_on_history').checked;
+    storageData.options[OPT.DISABLE_YOU_THERE] = $('disable_you_there').checked;
+    storageData.options[OPT.BLOCK_FEEDBACK] = $('block_feedback').checked;
+    storageData.options[OPT.ENABLE_JAVASCRIPT] = $('enable_javascript').checked;
+    storageData.options[OPT.BLOCK_MESSAGE] = $('block_message').value;
+    storageData.options[OPT.VIDLENGTH_TYPE] = $('vidLength_type').value;
+    storageData.options[OPT.PERCENT_WATCHED_HIDE] = parseInt($('percent_watched_hide').value, 10);
 
     saveData('status_save');
     detectColorScheme();
@@ -141,24 +142,24 @@
     const vidLength = get('filterData.vidLength', [NaN, NaN], obj);
     $('vidLength_0').value = vidLength[0];
     $('vidLength_1').value = vidLength[1];
-    $('vidLength_type').value = get('options.vidLength_type', 'allow', obj);
+    $('vidLength_type').value = get(`options.${OPT.VIDLENGTH_TYPE}`, 'allow', obj);
 
     $('ui_theme').value = get('uiTheme', 'light', obj);
     $('pass_save').value = get('uiPass', '', obj);
-    $('disable_trending').checked = get('options.trending', false, obj);
-    $('disable_shorts').checked = get('options.shorts', false, obj);
-    $('disable_movies').checked = get('options.movies', false, obj);
-    $('disable_mixes').checked = get('options.mixes', false, obj);
-    $('disable_chips_shelves').checked = get('options.chips_shelves', false, obj);
-    $('autoplay').checked = get('options.autoplay', false, obj);
-    $('disable_db_normalize').checked = get('options.disable_db_normalize', false, obj);
-    $('disable_on_history').checked = get('options.disable_on_history', false, obj);
-    $('disable_you_there').checked = get('options.disable_you_there', false, obj);
-    $('suggestions_only').checked = get('options.suggestions_only', false, obj);
-    $('block_feedback').checked = get('options.block_feedback', false, obj);
-    $('enable_javascript').checked = get('options.enable_javascript', false, obj);
-    $('block_message').value = get('options.block_message', '', obj);
-    $('percent_watched_hide').value = get('options.percent_watched_hide', NaN, obj);
+    $('disable_trending').checked = get(`options.${OPT.TRENDING}`, false, obj);
+    $('disable_shorts').checked = get(`options.${OPT.SHORTS}`, false, obj);
+    $('disable_movies').checked = get(`options.${OPT.MOVIES}`, false, obj);
+    $('disable_mixes').checked = get(`options.${OPT.MIXES}`, false, obj);
+    $('disable_chips_shelves').checked = get(`options.${OPT.CHIPS_SHELVES}`, false, obj);
+    $('autoplay').checked = get(`options.${OPT.AUTOPLAY}`, false, obj);
+    $('disable_db_normalize').checked = get(`options.${OPT.DISABLE_DB_NORMALIZE}`, false, obj);
+    $('disable_on_history').checked = get(`options.${OPT.DISABLE_ON_HISTORY}`, false, obj);
+    $('disable_you_there').checked = get(`options.${OPT.DISABLE_YOU_THERE}`, false, obj);
+    $('suggestions_only').checked = get(`options.${OPT.SUGGESTIONS_ONLY}`, false, obj);
+    $('block_feedback').checked = get(`options.${OPT.BLOCK_FEEDBACK}`, false, obj);
+    $('enable_javascript').checked = get(`options.${OPT.ENABLE_JAVASCRIPT}`, false, obj);
+    $('block_message').value = get(`options.${OPT.BLOCK_MESSAGE}`, '', obj);
+    $('percent_watched_hide').value = get(`options.${OPT.PERCENT_WATCHED_HIDE}`, NaN, obj);
 
     const jsContent = get('filterData.javascript', defaultJSFunction, obj);
     jsEditors['javascript'].setValue(jsContent);
@@ -241,9 +242,9 @@
       try {
         json = JSON.parse(e.target.result);
         if (json.filterData && json.options) {
+          populateForms(json);
           // Importing a backup must not silently enable code execution.
           $('enable_javascript').checked = false;
-          populateForms(json);
           saveForm();
         }
       } catch (ex) {

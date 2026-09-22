@@ -131,6 +131,7 @@
       document.location.origin,
     );
   }
+
   // YouTube serves require-trusted-types-for 'script', so plain window.eval
   // throws. A named createScript-only policy supplies the required TrustedScript
   // without weakening page-wide Trusted Types (HTML/URL still enforced).
@@ -145,7 +146,6 @@
     if (ttPolicy) return window.eval(ttPolicy.createScript(code));
     return window.eval(code);
   }
-
   // Pre-compiled filter paths. The same path strings (from filterRules and the
   // literals below) are resolved against thousands of objects, so split + regex
   // parsing happens once per unique path instead of per call.
@@ -154,8 +154,8 @@
     if (typeof data.filterData !== 'object' || data.filterData === null) return;
     regexProps.forEach((p) => {
       if (has.call(data.filterData, p) && Array.isArray(data.filterData[p])) {
-          if (!Array.isArray(v)) return undefined;
         data.filterData[p] = data.filterData[p].map((v) => {
+          if (!Array.isArray(v)) return undefined;
           try {
             return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
           } catch (e) {
@@ -247,21 +247,14 @@
     window.dispatchEvent(new Event('blockTubeReady'));
   }
 
-  // Received from the background service worker (see the storageData/filtersData
-  // contract in content_script.js). `data.options` follows the schema that
-  // background.js DEFAULT_OPTIONS defines; option reads live in
-  //   object-filter.js   shorts, movies, mixes, chips_shelves,
-  //                      percent_watched_hide, vidLength_type, disable_on_history
-  //   custom-filters.js  suggestions_only, autoplay, disable_you_there,
-  //                      disable_db_normalize, block_message
-  //   context-menu.js    block_feedback
-  //   below              trending, mixes, shorts, enable_javascript
-  // Keep option keys in sync with background.js.
+  // Storage payload pushed by the background (via the content_script contract);
+  // `options` keys are BLOCKTUBE_CONSTS.OPTIONS (alias OPT in rules.js).
   function storageReceived(data) {
     if (data === undefined) {
       window.blockTubeDispatched = true;
       window.dispatchEvent(new Event('blockTubeReady'));
       return;
+    }
     // Page-forgeable message (FROM_CONTENT is public): drop anything that
     // isn't a real storage payload so a garbage shape can't throw or poison
     // storageData. Genuine payloads always pass (arrays/strings below).
@@ -288,23 +281,25 @@
     ) {
       return;
     }
-    }
     transformToRegExp(data);
-    if (data.options.trending) blockTrending(data);
-    if (data.options.mixes) blockMixes(data);
-    if (data.options.shorts) blockShorts(data);
+    if (data.options[OPT.TRENDING]) blockTrending(data);
+    if (data.options[OPT.MIXES]) blockMixes(data);
+    if (data.options[OPT.SHORTS]) blockShorts(data);
 
     const shouldStartHook = storageData === undefined;
     storageData = data;
 
-    // Enable JS filtering only if function has something in it
-    if (storageData.options.enable_javascript && storageData.filterData.javascript) {
+    // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
+    // is MAIN-realm, so it grants no extra capability there (page scripts can
+    // already eval); the gate exists to keep it a deliberate user opt-in.
+    const jsOptIn = storageData.options[OPT.ENABLE_JAVASCRIPT];
+    if (jsOptIn && storageData.filterData.javascript) {
       try {
         jsFilter = blocktubeEval(storageData.filterData.javascript);
         if (!(jsFilter instanceof Function)) {
           throw Error('Function not found');
         }
-        jsFilterEnabled = storageData.options.enable_javascript;
+        jsFilterEnabled = jsOptIn;
       } catch (e) {
         console.error('Custom function syntax error', e);
         jsFilterEnabled = false;

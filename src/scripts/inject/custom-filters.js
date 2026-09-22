@@ -1,7 +1,7 @@
   // !! Custom filtering functions
 
   function disableEmbedPlayer(ytData) {
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -10,11 +10,11 @@
   }
 
   function disablePlayer(ytData) {
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
-    const message = storageData.options.block_message || '';
+    const message = storageData.options[OPT.BLOCK_MESSAGE] || '';
     for (const prop of Object.getOwnPropertyNames(ytData)) {
       try {
         delete ytData[prop];
@@ -49,7 +49,7 @@
 
   function blockPlaylistVid(pl) {
     const vid = pl.playlistPanelVideoRenderer;
-    const message = storageData.options.block_message || '';
+    const message = storageData.options[OPT.BLOCK_MESSAGE] || '';
 
     vid.videoId = 'undefined';
 
@@ -80,7 +80,7 @@
   }
 
   function redirectToIndex() {
-    if (storageData && storageData.options.suggestions_only) {
+    if (storageData && storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -154,7 +154,7 @@
   function redirectToNextMobile() {
     playerHasBeenBlocked = false;
 
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -167,7 +167,7 @@
     );
     if (!nextResults) return;
 
-    if (storageData.options.autoplay !== true) {
+    if (storageData.options[OPT.AUTOPLAY] !== true) {
       delete this.object.contents;
       return;
     }
@@ -208,7 +208,7 @@
 
     playerHasBeenBlocked = false;
 
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -228,7 +228,7 @@
     }
 
     const secondary = getObjectByPath(twoColumn, 'secondaryResults');
-    if (storageData.options.autoplay !== true) {
+    if (storageData.options[OPT.AUTOPLAY] !== true) {
       secondary.secondaryResults = undefined;
       return;
     }
@@ -267,11 +267,11 @@
     let playerResponse = getObjectByPath(this.object, 'args.raw_player_response');
     playerResponse = playerResponse ? playerResponse : this.object;
 
-    if (storageData.options.disable_you_there === true) {
+    if (storageData.options[OPT.DISABLE_YOU_THERE] === true) {
       removeYouThereMessages(playerResponse);
     }
 
-    if (storageData.options.disable_db_normalize === true) {
+    if (storageData.options[OPT.DISABLE_DB_NORMALIZE] === true) {
       disableLoudnessNormalization(playerResponse);
     }
   }

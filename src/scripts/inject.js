@@ -27,6 +27,24 @@
       CONTEXT_BLOCK: 'contextBlock', // content -> bg (port): {type, entries}
       READY: 'ready', // page -> content: hooks booted, re-send storage
     }),
+    // storage.options keys referenced across realms (bg / options / inject).
+    OPTIONS: Object.freeze({
+      TRENDING: 'trending',
+      MIXES: 'mixes',
+      CHIPS_SHELVES: 'chips_shelves',
+      SHORTS: 'shorts',
+      MOVIES: 'movies',
+      SUGGESTIONS_ONLY: 'suggestions_only',
+      AUTOPLAY: 'autoplay',
+      ENABLE_JAVASCRIPT: 'enable_javascript', // custom JS filter opt-in switch
+      BLOCK_MESSAGE: 'block_message',
+      BLOCK_FEEDBACK: 'block_feedback',
+      DISABLE_DB_NORMALIZE: 'disable_db_normalize',
+      DISABLE_YOU_THERE: 'disable_you_there',
+      DISABLE_ON_HISTORY: 'disable_on_history',
+      VIDLENGTH_TYPE: 'vidLength_type',
+      PERCENT_WATCHED_HIDE: 'percent_watched_hide',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
@@ -38,6 +56,8 @@
 
   // ================== src/scripts/inject/rules.js ==================
 
+  // Short alias for option keys; keep in sync with BLOCKTUBE_CONSTS.OPTIONS.
+  const OPT = BLOCKTUBE_CONSTS.OPTIONS;
   // add context menu to following objects
   const contextMenuObjects = [
     'backstagePostRenderer',
@@ -654,13 +674,13 @@
   // of those user option groups.
   function computeNoActiveFilters() {
     if (
-      storageData.options.shorts ||
-      storageData.options.movies ||
-      storageData.options.mixes ||
-      storageData.options.chips_shelves
+      storageData.options[OPT.SHORTS] ||
+      storageData.options[OPT.MOVIES] ||
+      storageData.options[OPT.MIXES] ||
+      storageData.options[OPT.CHIPS_SHELVES]
     )
       return false;
-    if (!isNaN(storageData.options.percent_watched_hide)) return false;
+    if (!isNaN(storageData.options[OPT.PERCENT_WATCHED_HIDE])) return false;
 
     // Array guards: a forged STORAGE message (FROM_CONTENT is spoofable) can
     // leave these non-arrays; .[0]/.length on undefined would throw here.
@@ -680,10 +700,10 @@
   function isPercentWatchedBlocked(fieldName, value, rendererKey) {
     return (
       fieldName === 'percentWatched' &&
-      storageData.options.percent_watched_hide &&
+      storageData.options[OPT.PERCENT_WATCHED_HIDE] &&
       rendererKey !== 'playlistPanelVideoRenderer' &&
       !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
-      parseInt(value) >= storageData.options.percent_watched_hide
+      parseInt(value) >= storageData.options[OPT.PERCENT_WATCHED_HIDE]
     );
   }
 
@@ -701,11 +721,11 @@
   // on the range means "block" (default) while the flips of the range mean
   // "block everything outside it" (vidLength_type !== 'block').
   function matchesDurationRange(vidLen, filterEntries) {
-    if (vidLen === SHORTS_TIME && storageData.options.shorts) {
+    if (vidLen === SHORTS_TIME && storageData.options[OPT.SHORTS]) {
       return true;
     }
     if (vidLen > 0 && filterEntries.length === 2) {
-      if (storageData.options.vidLength_type === 'block') {
+      if (storageData.options[OPT.VIDLENGTH_TYPE] === 'block') {
         if (
           filterEntries[0] !== null &&
           vidLen >= filterEntries[0] &&
@@ -739,7 +759,10 @@
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
 
-    if (document.location.pathname === '/feed/history' && storageData.options.disable_on_history)
+    if (
+      document.location.pathname === '/feed/history' &&
+      storageData.options[OPT.DISABLE_ON_HISTORY]
+    )
       return false;
 
     let doBlock = Object.keys(filterPaths).some((fieldName) => {
@@ -808,7 +831,7 @@
     'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
 
   ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
-    if (storageData.options.movies) {
+    if (storageData.options[OPT.MOVIES]) {
       if (rendererKey === 'movieRenderer' || rendererKey === 'compactMovieRenderer') return true;
       if (
         rendererKey === 'videoRenderer' &&
@@ -822,14 +845,14 @@
         return true;
     }
     if (
-      storageData.options.shorts &&
+      storageData.options[OPT.SHORTS] &&
       (rendererKey === 'shortsLockupViewModel' ||
         rendererKey === 'reelItemRenderer' ||
         rendererKey === 'gridShelfViewModel')
     )
       return true;
     if (
-      storageData.options.chips_shelves &&
+      storageData.options[OPT.CHIPS_SHELVES] &&
       (rendererKey === 'richShelfRenderer' ||
         rendererKey === 'chipsShelfWithVideoShelfRenderer' ||
         rendererKey === 'brandVideoSingletonRenderer' ||
@@ -837,9 +860,9 @@
         rendererKey === 'statementBannerRenderer')
     )
       return true;
-    if (storageData.options.mixes && rendererKey === 'radioRenderer') return true;
-    if (storageData.options.mixes && rendererKey === 'compactRadioRenderer') return true;
-    if (storageData.options.mixes && rendererKey === 'lockupViewModel') {
+    if (storageData.options[OPT.MIXES] && rendererKey === 'radioRenderer') return true;
+    if (storageData.options[OPT.MIXES] && rendererKey === 'compactRadioRenderer') return true;
+    if (storageData.options[OPT.MIXES] && rendererKey === 'lockupViewModel') {
       const imgName = getObjectByPath(filteredObject, LOCKUP_MIX_ICON_PATH);
       if (imgName === 'MIX') {
         return true;
@@ -978,7 +1001,7 @@
   // !! Custom filtering functions
 
   function disableEmbedPlayer(ytData) {
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -987,11 +1010,11 @@
   }
 
   function disablePlayer(ytData) {
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
-    const message = storageData.options.block_message || '';
+    const message = storageData.options[OPT.BLOCK_MESSAGE] || '';
     for (const prop of Object.getOwnPropertyNames(ytData)) {
       try {
         delete ytData[prop];
@@ -1026,7 +1049,7 @@
 
   function blockPlaylistVid(pl) {
     const vid = pl.playlistPanelVideoRenderer;
-    const message = storageData.options.block_message || '';
+    const message = storageData.options[OPT.BLOCK_MESSAGE] || '';
 
     vid.videoId = 'undefined';
 
@@ -1057,7 +1080,7 @@
   }
 
   function redirectToIndex() {
-    if (storageData && storageData.options.suggestions_only) {
+    if (storageData && storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -1131,7 +1154,7 @@
   function redirectToNextMobile() {
     playerHasBeenBlocked = false;
 
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -1144,7 +1167,7 @@
     );
     if (!nextResults) return;
 
-    if (storageData.options.autoplay !== true) {
+    if (storageData.options[OPT.AUTOPLAY] !== true) {
       delete this.object.contents;
       return;
     }
@@ -1185,7 +1208,7 @@
 
     playerHasBeenBlocked = false;
 
-    if (storageData.options.suggestions_only) {
+    if (storageData.options[OPT.SUGGESTIONS_ONLY]) {
       return false;
     }
 
@@ -1205,7 +1228,7 @@
     }
 
     const secondary = getObjectByPath(twoColumn, 'secondaryResults');
-    if (storageData.options.autoplay !== true) {
+    if (storageData.options[OPT.AUTOPLAY] !== true) {
       secondary.secondaryResults = undefined;
       return;
     }
@@ -1244,11 +1267,11 @@
     let playerResponse = getObjectByPath(this.object, 'args.raw_player_response');
     playerResponse = playerResponse ? playerResponse : this.object;
 
-    if (storageData.options.disable_you_there === true) {
+    if (storageData.options[OPT.DISABLE_YOU_THERE] === true) {
       removeYouThereMessages(playerResponse);
     }
 
-    if (storageData.options.disable_db_normalize === true) {
+    if (storageData.options[OPT.DISABLE_DB_NORMALIZE] === true) {
       disableLoudnessNormalization(playerResponse);
     }
   }
@@ -1788,7 +1811,7 @@
   }
 
   function createCleanContext(items, store, isChannel, currentObj) {
-    if (store.options.block_feedback && items.length > 0) {
+    if (store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
       const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
       let item;
       for (const icon of targetIcons) {
@@ -1875,7 +1898,7 @@
     const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
 
-    if (store.options.block_feedback) {
+    if (store.options[OPT.BLOCK_FEEDBACK]) {
       for (const item of items) {
         const endpoint = item?.menuServiceItemRenderer?.serviceEndpoint;
         if (!endpoint) continue;
@@ -2365,6 +2388,7 @@
       document.location.origin,
     );
   }
+
   // YouTube serves require-trusted-types-for 'script', so plain window.eval
   // throws. A named createScript-only policy supplies the required TrustedScript
   // without weakening page-wide Trusted Types (HTML/URL still enforced).
@@ -2379,7 +2403,6 @@
     if (ttPolicy) return window.eval(ttPolicy.createScript(code));
     return window.eval(code);
   }
-
   // Pre-compiled filter paths. The same path strings (from filterRules and the
   // literals below) are resolved against thousands of objects, so split + regex
   // parsing happens once per unique path instead of per call.
@@ -2388,8 +2411,8 @@
     if (typeof data.filterData !== 'object' || data.filterData === null) return;
     regexProps.forEach((p) => {
       if (has.call(data.filterData, p) && Array.isArray(data.filterData[p])) {
-        if (!Array.isArray(v)) return undefined;
         data.filterData[p] = data.filterData[p].map((v) => {
+          if (!Array.isArray(v)) return undefined;
           try {
             return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
           } catch (e) {
@@ -2481,64 +2504,59 @@
     window.dispatchEvent(new Event('blockTubeReady'));
   }
 
-  // Received from the background service worker (see the storageData/filtersData
-  // contract in content_script.js). `data.options` follows the schema that
-  // background.js DEFAULT_OPTIONS defines; option reads live in
-  //   object-filter.js   shorts, movies, mixes, chips_shelves,
-  //                      percent_watched_hide, vidLength_type, disable_on_history
-  //   custom-filters.js  suggestions_only, autoplay, disable_you_there,
-  //                      disable_db_normalize, block_message
-  //   context-menu.js    block_feedback
-  //   below              trending, mixes, shorts, enable_javascript
-  // Keep option keys in sync with background.js.
+  // Storage payload pushed by the background (via the content_script contract);
+  // `options` keys are BLOCKTUBE_CONSTS.OPTIONS (alias OPT in rules.js).
   function storageReceived(data) {
     if (data === undefined) {
       window.blockTubeDispatched = true;
       window.dispatchEvent(new Event('blockTubeReady'));
       return;
-      // Page-forgeable message (FROM_CONTENT is public): drop anything that
-      // isn't a real storage payload so a garbage shape can't throw or poison
-      // storageData. Genuine payloads always pass (arrays/strings below).
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof data.filterData !== 'object' ||
-        data.filterData === null ||
-        typeof data.options !== 'object' ||
-        data.options === null
-      ) {
-        return;
-      }
-      // Non-array props would throw later at block*`.push`/match`.some`.
-      for (let idx = 0; idx < regexProps.length; idx += 1) {
-        const prop = data.filterData[regexProps[idx]];
-        if (prop !== undefined && !Array.isArray(prop)) return;
-      }
-      if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
-        return;
-      if (
-        data.filterData.javascript !== undefined &&
-        typeof data.filterData.javascript !== 'string'
-      ) {
-        return;
-      }
+    }
+    // Page-forgeable message (FROM_CONTENT is public): drop anything that
+    // isn't a real storage payload so a garbage shape can't throw or poison
+    // storageData. Genuine payloads always pass (arrays/strings below).
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      typeof data.filterData !== 'object' ||
+      data.filterData === null ||
+      typeof data.options !== 'object' ||
+      data.options === null
+    ) {
+      return;
+    }
+    // Non-array props would throw later at block*`.push`/match`.some`.
+    for (let idx = 0; idx < regexProps.length; idx += 1) {
+      const prop = data.filterData[regexProps[idx]];
+      if (prop !== undefined && !Array.isArray(prop)) return;
+    }
+    if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
+      return;
+    if (
+      data.filterData.javascript !== undefined &&
+      typeof data.filterData.javascript !== 'string'
+    ) {
+      return;
     }
     transformToRegExp(data);
-    if (data.options.trending) blockTrending(data);
-    if (data.options.mixes) blockMixes(data);
-    if (data.options.shorts) blockShorts(data);
+    if (data.options[OPT.TRENDING]) blockTrending(data);
+    if (data.options[OPT.MIXES]) blockMixes(data);
+    if (data.options[OPT.SHORTS]) blockShorts(data);
 
     const shouldStartHook = storageData === undefined;
     storageData = data;
 
-    // Enable JS filtering only if function has something in it
-    if (storageData.options.enable_javascript && storageData.filterData.javascript) {
+    // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
+    // is MAIN-realm, so it grants no extra capability there (page scripts can
+    // already eval); the gate exists to keep it a deliberate user opt-in.
+    const jsOptIn = storageData.options[OPT.ENABLE_JAVASCRIPT];
+    if (jsOptIn && storageData.filterData.javascript) {
       try {
         jsFilter = blocktubeEval(storageData.filterData.javascript);
         if (!(jsFilter instanceof Function)) {
           throw Error('Function not found');
         }
-        jsFilterEnabled = storageData.options.enable_javascript;
+        jsFilterEnabled = jsOptIn;
       } catch (e) {
         console.error('Custom function syntax error', e);
         jsFilterEnabled = false;

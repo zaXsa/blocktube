@@ -18,6 +18,24 @@
       CONTEXT_BLOCK: 'contextBlock', // content -> bg (port): {type, entries}
       READY: 'ready', // page -> content: hooks booted, re-send storage
     }),
+    // storage.options keys referenced across realms (bg / options / inject).
+    OPTIONS: Object.freeze({
+      TRENDING: 'trending',
+      MIXES: 'mixes',
+      CHIPS_SHELVES: 'chips_shelves',
+      SHORTS: 'shorts',
+      MOVIES: 'movies',
+      SUGGESTIONS_ONLY: 'suggestions_only',
+      AUTOPLAY: 'autoplay',
+      ENABLE_JAVASCRIPT: 'enable_javascript', // custom JS filter opt-in switch
+      BLOCK_MESSAGE: 'block_message',
+      BLOCK_FEEDBACK: 'block_feedback',
+      DISABLE_DB_NORMALIZE: 'disable_db_normalize',
+      DISABLE_YOU_THERE: 'disable_you_there',
+      DISABLE_ON_HISTORY: 'disable_on_history',
+      VIDLENGTH_TYPE: 'vidLength_type',
+      PERCENT_WATCHED_HIDE: 'percent_watched_hide',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the

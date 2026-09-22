@@ -350,7 +350,7 @@
   }
 
   function createCleanContext(items, store, isChannel, currentObj) {
-    if (store.options.block_feedback && items.length > 0) {
+    if (store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
       const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
       let item;
       for (const icon of targetIcons) {
@@ -437,7 +437,7 @@
     const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
 
-    if (store.options.block_feedback) {
+    if (store.options[OPT.BLOCK_FEEDBACK]) {
       for (const item of items) {
         const endpoint = item?.menuServiceItemRenderer?.serviceEndpoint;
         if (!endpoint) continue;

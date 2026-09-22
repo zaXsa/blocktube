@@ -33,13 +33,13 @@
   // of those user option groups.
   function computeNoActiveFilters() {
     if (
-      storageData.options.shorts ||
-      storageData.options.movies ||
-      storageData.options.mixes ||
-      storageData.options.chips_shelves
+      storageData.options[OPT.SHORTS] ||
+      storageData.options[OPT.MOVIES] ||
+      storageData.options[OPT.MIXES] ||
+      storageData.options[OPT.CHIPS_SHELVES]
     )
       return false;
-    if (!isNaN(storageData.options.percent_watched_hide)) return false;
+    if (!isNaN(storageData.options[OPT.PERCENT_WATCHED_HIDE])) return false;
 
     // Array guards: a forged STORAGE message (FROM_CONTENT is spoofable) can
     // leave these non-arrays; .[0]/.length on undefined would throw here.
@@ -60,10 +60,10 @@
   function isPercentWatchedBlocked(fieldName, value, rendererKey) {
     return (
       fieldName === 'percentWatched' &&
-      storageData.options.percent_watched_hide &&
+      storageData.options[OPT.PERCENT_WATCHED_HIDE] &&
       rendererKey !== 'playlistPanelVideoRenderer' &&
       !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
-      parseInt(value) >= storageData.options.percent_watched_hide
+      parseInt(value) >= storageData.options[OPT.PERCENT_WATCHED_HIDE]
     );
   }
 
@@ -81,11 +81,11 @@
   // on the range means "block" (default) while the flips of the range mean
   // "block everything outside it" (vidLength_type !== 'block').
   function matchesDurationRange(vidLen, filterEntries) {
-    if (vidLen === SHORTS_TIME && storageData.options.shorts) {
+    if (vidLen === SHORTS_TIME && storageData.options[OPT.SHORTS]) {
       return true;
     }
     if (vidLen > 0 && filterEntries.length === 2) {
-      if (storageData.options.vidLength_type === 'block') {
+      if (storageData.options[OPT.VIDLENGTH_TYPE] === 'block') {
         if (
           filterEntries[0] !== null &&
           vidLen >= filterEntries[0] &&
@@ -119,7 +119,7 @@
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
 
-    if (document.location.pathname === '/feed/history' && storageData.options.disable_on_history)
+    if (document.location.pathname === '/feed/history' && storageData.options[OPT.DISABLE_ON_HISTORY])
       return false;
 
     let doBlock = Object.keys(filterPaths).some((fieldName) => {
@@ -188,7 +188,7 @@
     'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
 
   ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
-    if (storageData.options.movies) {
+    if (storageData.options[OPT.MOVIES]) {
       if (rendererKey === 'movieRenderer' || rendererKey === 'compactMovieRenderer') return true;
       if (
         rendererKey === 'videoRenderer' &&
@@ -202,14 +202,14 @@
         return true;
     }
     if (
-      storageData.options.shorts &&
+      storageData.options[OPT.SHORTS] &&
       (rendererKey === 'shortsLockupViewModel' ||
         rendererKey === 'reelItemRenderer' ||
         rendererKey === 'gridShelfViewModel')
     )
       return true;
     if (
-      storageData.options.chips_shelves &&
+      storageData.options[OPT.CHIPS_SHELVES] &&
       (rendererKey === 'richShelfRenderer' ||
         rendererKey === 'chipsShelfWithVideoShelfRenderer' ||
         rendererKey === 'brandVideoSingletonRenderer' ||
@@ -217,9 +217,9 @@
         rendererKey === 'statementBannerRenderer')
     )
       return true;
-    if (storageData.options.mixes && rendererKey === 'radioRenderer') return true;
-    if (storageData.options.mixes && rendererKey === 'compactRadioRenderer') return true;
-    if (storageData.options.mixes && rendererKey === 'lockupViewModel') {
+    if (storageData.options[OPT.MIXES] && rendererKey === 'radioRenderer') return true;
+    if (storageData.options[OPT.MIXES] && rendererKey === 'compactRadioRenderer') return true;
+    if (storageData.options[OPT.MIXES] && rendererKey === 'lockupViewModel') {
       const imgName = getObjectByPath(filteredObject, LOCKUP_MIX_ICON_PATH);
       if (imgName === 'MIX') {
         return true;
