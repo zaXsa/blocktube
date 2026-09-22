@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const prettier = require('prettier');
 
 const ROOT = path.join(__dirname, '..');
 const INJECT_DIR = path.join(ROOT, 'src', 'scripts', 'inject');
@@ -56,29 +57,35 @@ function stripDocHeader(text) {
   return rest.replace(/\n{3,}/g, '\n\n').replace(/^\n/, '');
 }
 
-function build() {
+async function build() {
   const body = MODULES.map(({ path: p, stripDoc }) => {
     const file = path.join(ROOT, p);
     let text = fs.readFileSync(file, 'utf8').replace(/^\n+|\n+$/g, '');
     if (stripDoc) text = stripDocHeader(text);
     return `  // ================== ${p} ==================\n\n${text}`;
   }).join('\n\n');
-  return HEADER + body + FOOTER;
+  // Format through Prettier so the generated file satisfies `npm run fmt:check`
+  // (and thus agrees with `npm run check:inject`). The node API does NOT
+  // auto-discover config from filepath — resolveConfig must be merged in.
+  const config = (await prettier.resolveConfig(OUT)) || {};
+  return prettier.format(HEADER + body + FOOTER, { filepath: OUT, ...config });
 }
 
-const generated = build();
+(async () => {
+  const generated = await build();
 
-if (process.argv.includes('--check')) {
-  const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : undefined;
-  if (current !== generated) {
-    console.error(
-      'MISMATCH: src/scripts/inject.js is stale vs src/scripts/inject/*.js\n' +
-        'Run `npm run build:inject` and commit the regenerated file.',
-    );
-    process.exit(1);
+  if (process.argv.includes('--check')) {
+    const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : undefined;
+    if (current !== generated) {
+      console.error(
+        'MISMATCH: src/scripts/inject.js is stale vs src/scripts/inject/*.js\n' +
+          'Run `npm run build:inject` and commit the regenerated file.',
+      );
+      process.exit(1);
+    }
+    console.log('OK: src/scripts/inject.js matches the fragments');
+  } else {
+    fs.writeFileSync(OUT, generated);
+    console.log(`built ${path.relative(ROOT, OUT)}`);
   }
-  console.log('OK: src/scripts/inject.js matches the fragments');
-} else {
-  fs.writeFileSync(OUT, generated);
-  console.log(`built ${path.relative(ROOT, OUT)}`);
-}
+})();
