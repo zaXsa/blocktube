@@ -464,7 +464,7 @@
 
   function flattenRuns(arr) {
     if (arr.simpleText !== undefined) return arr.simpleText;
-    if (!(arr.runs instanceof Array)) return arr;
+    if (!Array.isArray(arr.runs)) return arr;
     return arr.runs
       .reduce((res, v) => {
         if (has.call(v, 'text')) {
