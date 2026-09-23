@@ -236,11 +236,13 @@
         typeof window.ytInitialPlayerResponse === 'object' &&
         window.ytInitialPlayerResponse !== null
       ) {
+        playerHasBeenBlocked = false;
         ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
       } else {
-        trapObjectPath('ytInitialPlayerResponse', undefined, (v) =>
-          ObjectFilter(v, filterRules.ytPlayer),
-        );
+        trapObjectPath('ytInitialPlayerResponse', undefined, (v) => {
+          playerHasBeenBlocked = false;
+          ObjectFilter(v, filterRules.ytPlayer);
+        });
       }
 
       const postActions = [fixAutoplay];
@@ -344,6 +346,10 @@
   console.info(`BlockTube Init OK (${BLOCKTUBE_CONSTS.MESSAGES.FROM_CONTENT})`);
 
   const isMobileInterface = document.location.hostname.startsWith('m.');
+
+  window.addEventListener('yt-navigate-start', () => {
+    playerHasBeenBlocked = false;
+  });
 
   // listen for messages from content script
   window.addEventListener(

@@ -246,6 +246,7 @@
     }
 
     const secondary = getObjectByPath(twoColumn, 'secondaryResults');
+    if (secondary === undefined) return;
     if (storageData.options[OPT.AUTOPLAY] !== true) {
       secondary.secondaryResults = undefined;
       return;

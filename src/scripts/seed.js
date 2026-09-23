@@ -110,14 +110,16 @@
 
   function onPart(url, next) {
     return function (resp) {
-      if (window.blockTubeDispatched) {
-        window.blockTubeExports.spfFilter(url, resp);
-        next(resp);
-      } else
-        window.addEventListener('blockTubeReady', () => {
+      const run = function () {
+        try {
           window.blockTubeExports.spfFilter(url, resp);
-          next(resp);
-        });
+        } catch (e) {
+          console.error('BlockTube spfFilter exception (passing data through)', e);
+        }
+        next(resp);
+      };
+      if (window.blockTubeDispatched) run();
+      else window.addEventListener('blockTubeReady', run, { once: true });
     };
   }
 
@@ -190,7 +192,11 @@
             .json()
             .then(function (jsonResp) {
               const sendFiltered = function () {
-                window.blockTubeExports.fetchFilter(url, jsonResp);
+                try {
+                  window.blockTubeExports.fetchFilter(url, jsonResp);
+                } catch (e) {
+                  console.error('BlockTube fetchFilter exception (passing data through)', e);
+                }
                 // Re-serialize with the original status and content-type while
                 // dropping length/encoding headers (the body bytes changed).
                 const headers = new Headers(resp.headers);
@@ -199,7 +205,7 @@
                 resolve(new Response(JSON.stringify(jsonResp), { status: resp.status, headers }));
               };
               if (window.blockTubeDispatched) sendFiltered();
-              else window.addEventListener('blockTubeReady', sendFiltered);
+              else window.addEventListener('blockTubeReady', sendFiltered, { once: true });
             })
             // A body that claims JSON but fails to parse shouldn't take down
             // YouTube's caller either — pass the raw response through.

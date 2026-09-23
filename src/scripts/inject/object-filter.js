@@ -11,13 +11,20 @@
     this.contextMenus = contextMenus;
     this.blockedComments = [];
 
-    this.filter();
     try {
-      postActions.forEach((x) => x.call(this));
+      this.filter();
     } catch (e) {
-      console.error('postActions Exception');
+      console.error('ObjectFilter exception (data left partially filtered)');
       console.error(e);
     }
+    postActions.forEach((x) => {
+      try {
+        x.call(this);
+      } catch (e) {
+        console.error('postActions Exception');
+        console.error(e);
+      }
+    });
     return this;
   }
 
@@ -332,11 +339,23 @@
       len = keys.length;
 
       // object filtering
-      const matchedRules = this.matchFilterRule(obj, keys);
+      let matchedRules = [];
+      try {
+        matchedRules = this.matchFilterRule(obj, keys);
+      } catch (e) {
+        console.error('matchFilterRule Exception (renderer left in place)');
+        console.error(e);
+      }
       matchedRules.forEach((r) => {
         let customRet = true;
         if (r.customFunc !== undefined) {
-          customRet = r.customFunc.call(this, obj, r.name);
+          try {
+            customRet = r.customFunc.call(this, obj, r.name);
+          } catch (e) {
+            console.error('customFunc Exception (renderer left in place)');
+            console.error(e);
+            customRet = false;
+          }
         }
         if (customRet) {
           delete obj[r.name];
@@ -353,7 +372,18 @@
       // filter next child (skip primitives: they can never match a renderer)
       // also if current object is an array, splice child
       const child = obj[idx];
-      const childDel = typeof child === 'object' && child !== null ? this.filter(child) : undefined;
+      let childDel;
+      if (typeof child === 'object' && child !== null) {
+        try {
+          childDel = this.filter(child);
+        } catch (e) {
+          console.error('ObjectFilter child exception (subtree left in place)');
+          console.error(e);
+          childDel = false;
+        }
+      } else {
+        childDel = undefined;
+      }
       if (childDel && keys === undefined) {
         deletePrev = true;
         obj.splice(idx, 1);
@@ -369,7 +399,13 @@
       }
     }
 
-    if (this.contextMenus)
-      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+    if (this.contextMenus) {
+      try {
+        !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+      } catch (e) {
+        console.error('addContextMenus Exception');
+        console.error(e);
+      }
+    }
     return deletePrev;
   };

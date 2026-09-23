@@ -463,6 +463,7 @@
   // !! Utils
 
   function flattenRuns(arr) {
+    if (arr === null || arr === undefined) return undefined;
     if (arr.simpleText !== undefined) return arr.simpleText;
     if (!Array.isArray(arr.runs)) return arr;
     return arr.runs
@@ -652,13 +653,20 @@
     this.contextMenus = contextMenus;
     this.blockedComments = [];
 
-    this.filter();
     try {
-      postActions.forEach((x) => x.call(this));
+      this.filter();
     } catch (e) {
-      console.error('postActions Exception');
+      console.error('ObjectFilter exception (data left partially filtered)');
       console.error(e);
     }
+    postActions.forEach((x) => {
+      try {
+        x.call(this);
+      } catch (e) {
+        console.error('postActions Exception');
+        console.error(e);
+      }
+    });
     return this;
   }
 
@@ -975,11 +983,23 @@
       len = keys.length;
 
       // object filtering
-      const matchedRules = this.matchFilterRule(obj, keys);
+      let matchedRules = [];
+      try {
+        matchedRules = this.matchFilterRule(obj, keys);
+      } catch (e) {
+        console.error('matchFilterRule Exception (renderer left in place)');
+        console.error(e);
+      }
       matchedRules.forEach((r) => {
         let customRet = true;
         if (r.customFunc !== undefined) {
-          customRet = r.customFunc.call(this, obj, r.name);
+          try {
+            customRet = r.customFunc.call(this, obj, r.name);
+          } catch (e) {
+            console.error('customFunc Exception (renderer left in place)');
+            console.error(e);
+            customRet = false;
+          }
         }
         if (customRet) {
           delete obj[r.name];
@@ -996,7 +1016,18 @@
       // filter next child (skip primitives: they can never match a renderer)
       // also if current object is an array, splice child
       const child = obj[idx];
-      const childDel = typeof child === 'object' && child !== null ? this.filter(child) : undefined;
+      let childDel;
+      if (typeof child === 'object' && child !== null) {
+        try {
+          childDel = this.filter(child);
+        } catch (e) {
+          console.error('ObjectFilter child exception (subtree left in place)');
+          console.error(e);
+          childDel = false;
+        }
+      } else {
+        childDel = undefined;
+      }
       if (childDel && keys === undefined) {
         deletePrev = true;
         obj.splice(idx, 1);
@@ -1012,8 +1043,14 @@
       }
     }
 
-    if (this.contextMenus)
-      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+    if (this.contextMenus) {
+      try {
+        !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+      } catch (e) {
+        console.error('addContextMenus Exception');
+        console.error(e);
+      }
+    }
     return deletePrev;
   };
 
@@ -1266,6 +1303,7 @@
     }
 
     const secondary = getObjectByPath(twoColumn, 'secondaryResults');
+    if (secondary === undefined) return;
     if (storageData.options[OPT.AUTOPLAY] !== true) {
       secondary.secondaryResults = undefined;
       return;
@@ -1325,6 +1363,7 @@
       if (!(resp instanceof Array)) return;
       resp.forEach((o) => {
         if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
+          playerHasBeenBlocked = false;
           ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
         } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
           const postActions = [fixAutoplay];
@@ -1339,6 +1378,7 @@
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {
+      playerHasBeenBlocked = false;
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
     }
   }
@@ -1355,10 +1395,12 @@
           const player_resp = getObjectByPath(obj.player, 'args.player_response');
           obj.player.args.raw_player_response = JSON.parse(player_resp);
         } catch (e) {}
+        playerHasBeenBlocked = false;
         ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
       }
 
       if (has.call(obj, 'playerResponse')) {
+        playerHasBeenBlocked = false;
         ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
       }
 
@@ -1441,7 +1483,7 @@
       'contents.twoColumnWatchNextResults.autoplay.autoplay.sets',
     );
     if (autoPlay === undefined) return undefined;
-    autoPlay = autoPlay[0].autoplayVideo;
+    autoPlay = autoPlay[0]?.autoplayVideo;
     if (autoPlay === undefined) return undefined;
     return autoPlay;
   }
@@ -2536,11 +2578,13 @@
         typeof window.ytInitialPlayerResponse === 'object' &&
         window.ytInitialPlayerResponse !== null
       ) {
+        playerHasBeenBlocked = false;
         ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
       } else {
-        trapObjectPath('ytInitialPlayerResponse', undefined, (v) =>
-          ObjectFilter(v, filterRules.ytPlayer),
-        );
+        trapObjectPath('ytInitialPlayerResponse', undefined, (v) => {
+          playerHasBeenBlocked = false;
+          ObjectFilter(v, filterRules.ytPlayer);
+        });
       }
 
       const postActions = [fixAutoplay];
@@ -2644,6 +2688,10 @@
   console.info(`BlockTube Init OK (${BLOCKTUBE_CONSTS.MESSAGES.FROM_CONTENT})`);
 
   const isMobileInterface = document.location.hostname.startsWith('m.');
+
+  window.addEventListener('yt-navigate-start', () => {
+    playerHasBeenBlocked = false;
+  });
 
   // listen for messages from content script
   window.addEventListener(

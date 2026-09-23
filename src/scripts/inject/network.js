@@ -7,6 +7,7 @@
       if (!(resp instanceof Array)) return;
       resp.forEach((o) => {
         if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
+          playerHasBeenBlocked = false;
           ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
         } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
           const postActions = [fixAutoplay];
@@ -21,6 +22,7 @@
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {
+      playerHasBeenBlocked = false;
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
     }
   }
@@ -37,10 +39,12 @@
           const player_resp = getObjectByPath(obj.player, 'args.player_response');
           obj.player.args.raw_player_response = JSON.parse(player_resp);
         } catch (e) {}
+        playerHasBeenBlocked = false;
         ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
       }
 
       if (has.call(obj, 'playerResponse')) {
+        playerHasBeenBlocked = false;
         ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
       }
 
@@ -123,7 +127,7 @@
       'contents.twoColumnWatchNextResults.autoplay.autoplay.sets',
     );
     if (autoPlay === undefined) return undefined;
-    autoPlay = autoPlay[0].autoplayVideo;
+    autoPlay = autoPlay[0]?.autoplayVideo;
     if (autoPlay === undefined) return undefined;
     return autoPlay;
   }

@@ -2,6 +2,7 @@
   // !! Utils
 
   function flattenRuns(arr) {
+    if (arr === null || arr === undefined) return undefined;
     if (arr.simpleText !== undefined) return arr.simpleText;
     if (!Array.isArray(arr.runs)) return arr;
     return arr.runs
