@@ -69,10 +69,13 @@
   }
 
   function blockMixes(data) {
+    if (!Array.isArray(data.filterData.channelName)) data.filterData.channelName = [];
     data.filterData.channelName.push(/^YouTube$/);
   }
 
   function blockTrending(data) {
+    if (!Array.isArray(data.filterData.channelId)) data.filterData.channelId = [];
+
     if (
       document.location.pathname === '/feed/trending' ||
       document.location.pathname === '/feed/explore'
@@ -87,6 +90,8 @@
   }
 
   function blockShorts(data) {
+    if (!Array.isArray(data.filterData.channelId)) data.filterData.channelId = [];
+
     if (document.location.pathname.startsWith('/shorts/')) {
       redirectToIndex();
     }

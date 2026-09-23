@@ -41,18 +41,23 @@ const ports = new Map();
 const blockTimestamps = new Map();
 let enabled = true;
 let compiledStorage;
-let storage = {
-  filterData: {
-    videoId: [],
-    channelId: [],
-    channelName: [],
-    comment: [],
-    title: [],
-    vidLength: [null, null],
-    javascript: '',
-  },
-  options: DEFAULT_OPTIONS,
-};
+// Shared definition of the empty-rule storage shape: module default placeholder,
+// fresh-install boot state and the compile-failure fallback all use it.
+function defaultStorage() {
+  return {
+    filterData: {
+      videoId: [],
+      channelId: [],
+      channelName: [],
+      comment: [],
+      title: [],
+      vidLength: [null, null],
+      javascript: '',
+    },
+    options: DEFAULT_OPTIONS,
+  };
+}
+let storage = defaultStorage();
 
 const utils = {
   // Returns an array of ['pattern', 'flags'] regex pairs built from the user's
@@ -135,6 +140,22 @@ const utils = {
     return current;
   },
 
+  // Compile the current `storage` into the send shape. A corrupt filterData
+  // array (non-string entries) must not kill the compile: that would leave
+  // compiledStorage undefined forever and starve every port of FILTERS (the
+  // guards below early-return) -> pages hang waiting on blockTubeReady. Fall
+  // back to defaults and keep serving. Compile-with-failure is the one place a
+  // throw can escape sanitizeStorage.
+  compileOrDefaults() {
+    try {
+      compiledStorage = utils.compileAll(storage);
+    } catch (e) {
+      console.error('BlockTube: storage compilation failed, falling back to defaults', e);
+      storage = defaultStorage();
+      compiledStorage = utils.compileAll(storage);
+    }
+  },
+
   initFromStorage(data) {
     if (data !== undefined && Object.keys(data).length > 0) {
       const stored = data[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY];
@@ -143,12 +164,16 @@ const utils = {
         console.warn('BlockTube: storage.filterData/options missing or invalid, keeping defaults');
       }
       storage = sanitized;
-      compiledStorage = utils.compileAll(storage);
       utils.checkShape(storage);
     }
     if (data !== undefined && Object.hasOwn(data, BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY)) {
       enabled = data[BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY];
     }
+    // Always compile (defaults when storage is empty/fresh) so no port can ever
+    // observe compiledStorage === undefined after boot: a cold-started SW that
+    // connects a tab before storage.get resolves must not arm it with empty
+    // rules (see sendFilters guard).
+    utils.compileOrDefaults();
     utils.sendFiltersToAll();
   },
 
@@ -180,6 +205,13 @@ const utils = {
   },
 
   sendFilters(port) {
+    // A cold-started service worker may still be waiting on chrome.storage when
+    // a tab connects. Sending a placeholder FILTERS then (compiledStorage
+    // undefined) arms the page with empty rules and storageReceived later skips
+    // startHook — the whole session leaks until a reload. Emit FILTERS only
+    // once storage has been compiled; initFromStorage flushes every connected
+    // port as soon as it has.
+    if (compiledStorage === undefined) return;
     utils.safePost(port, {
       type: BLOCKTUBE_CONSTS.MESSAGES.FILTERS,
       data: { storage, compiledStorage, enabled },
@@ -187,6 +219,7 @@ const utils = {
   },
 
   sendFiltersToAll() {
+    if (compiledStorage === undefined) return;
     ports.forEach((port) => {
       utils.safePost(port, {
         type: BLOCKTUBE_CONSTS.MESSAGES.FILTERS,
@@ -276,7 +309,7 @@ chrome.storage.onChanged.addListener((changes) => {
       changes[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY].newValue,
       storage,
     );
-    compiledStorage = utils.compileAll(storage);
+    utils.compileOrDefaults();
     utils.checkShape(storage);
     utils.sendFiltersToAll();
   }

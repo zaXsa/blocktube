@@ -1387,10 +1387,13 @@
   }
 
   function blockMixes(data) {
+    if (!Array.isArray(data.filterData.channelName)) data.filterData.channelName = [];
     data.filterData.channelName.push(/^YouTube$/);
   }
 
   function blockTrending(data) {
+    if (!Array.isArray(data.filterData.channelId)) data.filterData.channelId = [];
+
     if (
       document.location.pathname === '/feed/trending' ||
       document.location.pathname === '/feed/explore'
@@ -1405,6 +1408,8 @@
   }
 
   function blockShorts(data) {
+    if (!Array.isArray(data.filterData.channelId)) data.filterData.channelId = [];
+
     if (document.location.pathname.startsWith('/shorts/')) {
       redirectToIndex();
     }
@@ -2420,6 +2425,19 @@
   // it to know whether ytInitialData arrived before or after the block and
   // then redirects to the next (not blocked) video once data is available.
   let playerHasBeenBlocked = false;
+  // startHook() is idempotent and only ever runs with a real storage payload in
+  // place (see storageReceived); track that so a placeholder/undefined payload
+  // arriving earlier can't swallow the real boot.
+  let hooksStarted = false;
+  // blockTubeReady must fire exactly once: seed.js defers its boot callbacks on
+  // it while blockTubeDispatched is not yet true, and a re-dispatch would
+  // re-run them (e.g. yt.player.Application.create, loadInitialData).
+  let readyDispatched = false;
+  function fireBlockTubeReady() {
+    if (readyDispatched) return;
+    readyDispatched = true;
+    window.dispatchEvent(new Event('blockTubeReady'));
+  }
   function postMessage(type, data) {
     window.postMessage(
       { from: BLOCKTUBE_CONSTS.MESSAGES.FROM_PAGE, type, data },
@@ -2462,84 +2480,95 @@
     });
   }
   function startHook() {
-    if (window.location.pathname.startsWith('/embed/')) {
-      const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
-      if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
-        try {
-          ytConfigPlayerConfig.raw_player_response = JSON.parse(
-            ytConfigPlayerConfig.embedded_player_response,
-          );
-        } catch (e) {}
-        ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
-      } else {
-        trapObjectPath('yt.config_', undefined, (v) => {
+    // A hostile/odd data shape must never leave the page unarmed: deferred seed
+    // callbacks wait on blockTubeReady, so a mid-way failure fails open (traps
+    // may be partial) and the page still boots; the error is logged. hooksStarted
+    // is latched first so a retry can't double-trap.
+    if (hooksStarted) return;
+    hooksStarted = true;
+
+    try {
+      if (window.location.pathname.startsWith('/embed/')) {
+        const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
+        if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
           try {
-            if (has.call(v, 'PLAYER_VARS')) {
-              v.PLAYER_VARS.raw_player_response = JSON.parse(
-                v.PLAYER_VARS.embedded_player_response,
-              );
-            }
+            ytConfigPlayerConfig.raw_player_response = JSON.parse(
+              ytConfigPlayerConfig.embedded_player_response,
+            );
           } catch (e) {}
           ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
+        } else {
+          trapObjectPath('yt.config_', undefined, (v) => {
+            try {
+              if (has.call(v, 'PLAYER_VARS')) {
+                v.PLAYER_VARS.raw_player_response = JSON.parse(
+                  v.PLAYER_VARS.embedded_player_response,
+                );
+              }
+            } catch (e) {}
+            ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
+          });
+        }
+      }
+
+      const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
+      if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
+        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
+      } else {
+        trapObjectPath('ytplayer.config', undefined, (v) => {
+          const playerResp = getObjectByPath(v, 'args.player_response');
+          if (playerResp) {
+            try {
+              v.args.raw_player_response = JSON.parse(playerResp);
+            } catch (e) {}
+          }
+          ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
         });
       }
-    }
 
-    const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
-    if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
-      ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
-    } else {
-      trapObjectPath('ytplayer.config', undefined, (v) => {
-        const playerResp = getObjectByPath(v, 'args.player_response');
-        if (playerResp) {
-          try {
-            v.args.raw_player_response = JSON.parse(playerResp);
-          } catch (e) {}
-        }
-        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
-      });
-    }
+      if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
+        ObjectFilter(window.ytInitialGuideData, filterRules.guide);
+      } else {
+        trapObjectPath('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
+      }
 
-    if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
-      ObjectFilter(window.ytInitialGuideData, filterRules.guide);
-    } else {
-      trapObjectPath('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
-    }
+      if (
+        typeof window.ytInitialPlayerResponse === 'object' &&
+        window.ytInitialPlayerResponse !== null
+      ) {
+        ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
+      } else {
+        trapObjectPath('ytInitialPlayerResponse', undefined, (v) =>
+          ObjectFilter(v, filterRules.ytPlayer),
+        );
+      }
 
-    if (
-      typeof window.ytInitialPlayerResponse === 'object' &&
-      window.ytInitialPlayerResponse !== null
-    ) {
-      ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
-    } else {
-      trapObjectPath('ytInitialPlayerResponse', undefined, (v) =>
-        ObjectFilter(v, filterRules.ytPlayer),
-      );
-    }
-
-    const postActions = [fixAutoplay];
-    if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
-      ObjectFilter(
-        window.ytInitialData,
-        mergedFilterRules,
-        window.ytInitialData.contents && playerHasBeenBlocked
-          ? postActions.concat(redirectToNext)
-          : postActions,
-        true,
-      );
-    } else {
-      trapObjectPath('ytInitialData', undefined, (v) => {
+      const postActions = [fixAutoplay];
+      if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
         ObjectFilter(
-          v,
+          window.ytInitialData,
           mergedFilterRules,
-          v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
+          window.ytInitialData.contents && playerHasBeenBlocked
+            ? postActions.concat(redirectToNext)
+            : postActions,
           true,
         );
-      });
+      } else {
+        trapObjectPath('ytInitialData', undefined, (v) => {
+          ObjectFilter(
+            v,
+            mergedFilterRules,
+            v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
+            true,
+          );
+        });
+      }
+    } catch (e) {
+      console.error('BlockTube startHook exception (data left in place)', e);
     }
 
     window.blockTubeDispatched = true;
-    window.dispatchEvent(new Event('blockTubeReady'));
+    fireBlockTubeReady();
   }
 
   // Storage payload pushed by the background (via the content_script contract);
@@ -2547,7 +2576,7 @@
   function storageReceived(data) {
     if (data === undefined) {
       window.blockTubeDispatched = true;
-      window.dispatchEvent(new Event('blockTubeReady'));
+      fireBlockTubeReady();
       return;
     }
     // Page-forgeable message (FROM_CONTENT is public): drop anything that
@@ -2581,7 +2610,6 @@
     if (data.options[OPT.MIXES]) blockMixes(data);
     if (data.options[OPT.SHORTS]) blockShorts(data);
 
-    const shouldStartHook = storageData === undefined;
     storageData = data;
 
     // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
@@ -2605,7 +2633,10 @@
 
     noActiveFilters = computeNoActiveFilters();
 
-    if (shouldStartHook && !window.blockTubeDispatched) {
+    // Boot only with the first real payload in place: a placeholder/undefined
+    // storage message (cold-started SW race) must not consume the startHook
+    // slot by setting blockTubeDispatched early.
+    if (!hooksStarted) {
       startHook();
     }
   }

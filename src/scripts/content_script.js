@@ -11,9 +11,15 @@
   let globalStorage;
   let compiledStorage;
   let enabled;
+  // Set only once a real FILTERS payload has arrived; until then the extension
+  // state is uninitialized and sendStorage() must NOT forward placeholders
+  // (that would arm the page with empty rules before the background's storage
+  // is compiled — the cold-start race that leaks the session until a reload).
+  let filtersReady = false;
 
   const utils = {
     sendStorage() {
+      if (!filtersReady) return;
       window.postMessage(
         {
           from: BLOCKTUBE_CONSTS.MESSAGES.FROM_CONTENT,
@@ -97,6 +103,7 @@
       switch (msg.type) {
         case BLOCKTUBE_CONSTS.MESSAGES.FILTERS: {
           if (msg.data) {
+            filtersReady = true;
             globalStorage = msg.data.storage;
             compiledStorage = msg.data.compiledStorage;
             enabled = msg.data.enabled;
