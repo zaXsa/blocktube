@@ -8,6 +8,8 @@
   // background page; globalStorage is the fallback when the extension is
   // disabled mid-session (sendStorage already returns undefined then).
   let port;
+  let portValid = false;
+  let suppressReconnect = false;
   let globalStorage;
   let compiledStorage;
   let enabled;
@@ -32,13 +34,18 @@
     // The port can be mid-reconnect when a forged message lands; don't throw
     // out of the isolated-world message listener, just reconnect.
     safePortPost(msg) {
-      if (!port) {
+      if (suppressReconnect) {
+        suppressReconnect = false;
+        connectToPort();
+      }
+      if (!port || !portValid) {
         connectToPort();
         return;
       }
       try {
         port.postMessage(msg);
       } catch (e) {
+        portValid = false;
         connectToPort();
       }
     },
@@ -92,14 +99,18 @@
   };
 
   function connectToPort() {
+    if (portValid || suppressReconnect) return;
     if (!chrome.runtime || !chrome.runtime.id) return;
+    let local;
     try {
-      port = chrome.runtime.connect();
+      local = chrome.runtime.connect();
     } catch (e) {
       return;
     }
+    port = local;
+    portValid = true;
     // Listen for messages from background page
-    port.onMessage.addListener((msg) => {
+    local.onMessage.addListener((msg) => {
       switch (msg.type) {
         case BLOCKTUBE_CONSTS.MESSAGES.FILTERS: {
           if (msg.data) {
@@ -120,13 +131,41 @@
       }
     });
 
-    port.onDisconnect.addListener(() => {
+    local.onDisconnect.addListener(() => {
+      if (chrome.runtime) {
+        const le = chrome.runtime.lastError;
+        if (le) void le.message;
+      }
+      if (local !== port) return;
+      portValid = false;
+      if (suppressReconnect) return;
       if (!chrome.runtime || !chrome.runtime.id) return;
       connectToPort();
     });
   }
 
   connectToPort();
+
+  window.addEventListener('pageshow', (event) => {
+    if (!event.isTrusted) return;
+    if (event.persisted) {
+      suppressReconnect = false;
+      if (!portValid) connectToPort();
+    }
+  });
+
+  window.addEventListener('pagehide', (event) => {
+    if (!event.isTrusted) return;
+    if (!event.persisted || !port) return;
+    suppressReconnect = true;
+    portValid = false;
+    try {
+      port.disconnect();
+    } catch (e) {
+      void e;
+    }
+    port = null;
+  });
 
   // Listen for messages from injected page script
   window.addEventListener(

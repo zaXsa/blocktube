@@ -243,7 +243,12 @@ chrome.storage.local.get(
 chrome.runtime.onConnect.addListener((port) => {
   const key = port.sender.contextId || port.sender.frameId;
   port.onDisconnect.addListener(() => {
-    ports.delete(key);
+    if (chrome.runtime && chrome.runtime.lastError) {
+      void chrome.runtime.lastError.message;
+    }
+    if (ports.get(key) === port) {
+      ports.delete(key);
+    }
   });
   ports.set(key, port);
   port.onMessage.addListener((msg) => {
