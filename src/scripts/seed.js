@@ -143,28 +143,70 @@
   // I'm forced to hook that one too
   // Bare reference to the original fetch so the wrapper below can delegate.
   const originalFetch = window.fetch;
+
+  // Normalize whatever gets handed to fetch into the request URL string.
+  // YouTube passes a Request in some bundles but a plain URL/string in others;
+  // gating on `instanceof Request` alone silently skipped those SPA fetches and
+  // left every /youtubei/v1 response (browse continuations, get_watch, player)
+  // unfiltered until a full page reload.
+  function getResourceUrl(resource) {
+    if (typeof resource === 'string') return resource;
+    if (resource instanceof Request) return resource.url;
+    if (resource instanceof URL) return resource.href;
+    // Duck-typed lookalikes (shims/polyfills): never throw on exotic objects.
+    if (typeof resource === 'object' && resource !== null) {
+      if (typeof resource.url === 'string' && typeof resource.method === 'string') {
+        return resource.url;
+      }
+      if (typeof resource.href === 'string') return resource.href;
+    }
+    return undefined;
+  }
+
   window.fetch = function (resource, init = undefined) {
-    if (!(resource instanceof Request) || !fetchUris.some((u) => resource.url.includes(u))) {
+    const resourceUrl = getResourceUrl(resource);
+    if (resourceUrl === undefined || !fetchUris.some((u) => resourceUrl.includes(u))) {
+      return originalFetch(resource, init);
+    }
+    // The substring gate only needs a matching path; a crafted URL string that
+    // contains it but fails to parse must not kill the caller's fetch.
+    let url;
+    try {
+      url = new URL(resourceUrl, document.location.origin);
+    } catch (e) {
       return originalFetch(resource, init);
     }
 
     return new Promise((resolve, reject) => {
       originalFetch(resource, init)
         .then(function (resp) {
-          const url = new URL(resource.url);
+          // Non-JSON bodies (error pages, redirects, 204s) carry no video data:
+          // hand the original response through untouched instead of rejecting.
+          if (!resp.ok || !(resp.headers.get('content-type') || '').includes('json')) {
+            resolve(resp);
+            return;
+          }
           resp
             .json()
             .then(function (jsonResp) {
-              if (window.blockTubeDispatched) {
+              const sendFiltered = function () {
                 window.blockTubeExports.fetchFilter(url, jsonResp);
-                resolve(new Response(JSON.stringify(jsonResp)));
-              } else
-                window.addEventListener('blockTubeReady', () => {
-                  window.blockTubeExports.fetchFilter(url, jsonResp);
-                  resolve(new Response(JSON.stringify(jsonResp)));
-                });
+                // Re-serialize with the original status and content-type while
+                // dropping length/encoding headers (the body bytes changed).
+                const headers = new Headers(resp.headers);
+                headers.delete('content-length');
+                headers.delete('content-encoding');
+                resolve(new Response(JSON.stringify(jsonResp), { status: resp.status, headers }));
+              };
+              if (window.blockTubeDispatched) sendFiltered();
+              else window.addEventListener('blockTubeReady', sendFiltered);
             })
-            .catch(reject);
+            // A body that claims JSON but fails to parse shouldn't take down
+            // YouTube's caller either — pass the raw response through.
+            .then(
+              () => {},
+              () => resolve(resp),
+            );
         })
         .catch(reject);
     });
