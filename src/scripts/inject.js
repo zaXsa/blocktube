@@ -880,6 +880,15 @@
         rendererKey === 'gridShelfViewModel')
     )
       return true;
+    // Shorts also ship as a plain lockupViewModel, flagged only by contentType,
+    // so the renderer-key checks above never see them. Exact string, as with
+    // the MIX check: a future variant should fail visibly, not match silently.
+    if (
+      storageData.options[OPT.SHORTS] &&
+      rendererKey === 'lockupViewModel' &&
+      getObjectByPath(filteredObject, 'contentType') === 'LOCKUP_CONTENT_TYPE_SHORT'
+    )
+      return true;
     if (
       storageData.options[OPT.CHIPS_SHELVES] &&
       (rendererKey === 'richShelfRenderer' ||
