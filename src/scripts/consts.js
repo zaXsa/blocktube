@@ -1,7 +1,7 @@
 // BLOCKTUBE_CONSTS — single authored source for the cross-boundary strings
   // (message types, chrome.storage keys, from-markers). Loaded by every realm;
   // build-inject.js also embeds this file (code only, header stripped) into
-  // inject.js. More context: AGENTS.md.
+  // inject.js. Keep the injection-boundary check in sync when adding a key.
   const BLOCKTUBE_CONSTS = Object.freeze({
     MESSAGES: Object.freeze({
       // chrome.storage.local keys
