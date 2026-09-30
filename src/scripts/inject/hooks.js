@@ -133,11 +133,13 @@
   // it while blockTubeDispatched is not yet true, and a re-dispatch would
   // re-run them (e.g. yt.player.Application.create, loadInitialData).
   let readyDispatched = false;
+
   function fireBlockTubeReady() {
     if (readyDispatched) return;
     readyDispatched = true;
     window.dispatchEvent(new Event('blockTubeReady'));
   }
+
   function postMessage(type, data) {
     window.postMessage(
       { from: BLOCKTUBE_CONSTS.MESSAGES.FROM_PAGE, type, data },
@@ -155,6 +157,7 @@
       window.trustedTypes.createPolicy &&
       window.trustedTypes.createPolicy('blocktube', { createScript: (s) => s });
   } catch (e) {}
+
   function blocktubeEval(code) {
     if (ttPolicy) return window.eval(ttPolicy.createScript(code));
     return window.eval(code);
@@ -179,6 +182,7 @@
       }
     });
   }
+
   function startHook() {
     // A hostile/odd data shape must never leave the page unarmed: deferred seed
     // callbacks wait on blockTubeReady, so a mid-way failure fails open (traps

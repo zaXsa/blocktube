@@ -146,6 +146,12 @@
   const lockupMetadataContent =
     'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
 
+  // lockupViewModel tags YouTube-generated collections ('MIX', 'COURSE') with
+  // a badge icon. Only collection lockups nest it, so the path discriminates.
+  const LOCKUP_BADGE_ICON_PATH =
+    'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
+  const LOCKUP_GENERATED_BADGE_ICONS = new Set(['MIX', 'COURSE']);
+
   const filterRules = {
     main: {
       // Feed and watch-page video cards
@@ -764,6 +770,46 @@
     return badges;
   }
 
+  // The blocking rules for one field, in priority order. Returns `match` - the
+  // descriptor for matchedFilterField, or null - plus `value`, the form of the
+  // value the custom JS filter should receive.
+  function matchField(fieldName, value, filterEntries, obj, rendererKey) {
+    if (isPercentWatchedBlocked(fieldName, value, rendererKey)) {
+      return { match: { name: fieldName, value }, value };
+    }
+
+    if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
+      const matchedEntry = filterEntries.find((entry) => entry && entry.test(value));
+      if (matchedEntry) {
+        return {
+          match: { name: fieldName, value: String(matchedEntry).slice(0, 40) },
+          value,
+        };
+      }
+    }
+
+    if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
+      return { match: { name: fieldName, value }, value };
+    }
+
+    if (fieldName === 'vidLength') {
+      const vidLen = parseTime(value);
+      const match = matchesDurationRange(vidLen, filterEntries)
+        ? { name: fieldName, value: vidLen }
+        : null;
+      return { match, value: vidLen };
+    }
+
+    return { match: null, value };
+  }
+
+  // Coerce the two fields whose raw JSON is not what a filter author expects.
+  function normalizeForJsFilter(fieldName, value) {
+    if (fieldName === 'viewCount') return parseViewCount(value);
+    if (fieldName === 'channelBadges' || fieldName === 'badges') return extractBadgeList(value);
+    return value;
+  }
+
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
@@ -786,48 +832,23 @@
       )
         continue;
 
-      let value = getFlattenByPath(obj, filterPath);
+      const value = getFlattenByPath(obj, filterPath);
       if (value === undefined) continue;
 
-      if (isPercentWatchedBlocked(fieldName, value, rendererKey)) {
-        matchedFilterField = { name: fieldName, value };
+      const { match, value: jsValue } = matchField(
+        fieldName,
+        value,
+        filterEntries,
+        obj,
+        rendererKey,
+      );
+      if (match) {
+        matchedFilterField = match;
         doBlock = true;
         break;
       }
 
-      if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
-        const matchedEntry = filterEntries.find((entry) => entry && entry.test(value));
-        if (matchedEntry) {
-          matchedFilterField = { name: fieldName, value: String(matchedEntry).slice(0, 40) };
-          doBlock = true;
-          break;
-        }
-      }
-
-      if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
-        matchedFilterField = { name: fieldName, value };
-        doBlock = true;
-        break;
-      }
-
-      if (fieldName === 'vidLength') {
-        const vidLen = parseTime(value);
-        if (matchesDurationRange(vidLen, filterEntries)) {
-          matchedFilterField = { name: fieldName, value: vidLen };
-          doBlock = true;
-          break;
-        }
-        value = vidLen;
-      }
-
-      if (jsFilterEnabled) {
-        if (fieldName === 'viewCount') {
-          value = parseViewCount(value);
-        } else if (fieldName === 'channelBadges' || fieldName === 'badges') {
-          value = extractBadgeList(value);
-        }
-        friendlyVideoObj[fieldName] = value;
-      }
+      if (jsFilterEnabled) friendlyVideoObj[fieldName] = normalizeForJsFilter(fieldName, jsValue);
     }
 
     if (!doBlock && jsFilterEnabled) {
@@ -854,28 +875,18 @@
     return doBlock;
   };
 
-  // lockupViewModel tags YouTube-generated collections ('MIX', 'COURSE') with
-  // a badge icon. Only collection lockups nest it, so the path discriminates.
-  // Used by both isExtendedMatched and the context-menu extractor.
-  const LOCKUP_BADGE_ICON_PATH =
-    'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
-  const LOCKUP_GENERATED_BADGE_ICONS = new Set(['MIX', 'COURSE']);
-
   // Search results and the home grid deliver Shorts as plain videoRenderers,
   // with a textless time overlay, so the vidLength rule never sees them. Match
   // the overlay style instead. `overlayStyle` is a guess from the DOM
   // attribute; only `style` is confirmed. See the knowledge base.
-  const SHORTS_OVERLAY_STYLE = 'SHORTS';
-  const SHORTS_OVERLAY_STYLE_PATHS = [
-    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
-    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
-  ];
-
   function hasShortsTimeOverlay(obj) {
-    for (let idx = 0; idx < SHORTS_OVERLAY_STYLE_PATHS.length; idx += 1) {
-      if (getObjectByPath(obj, SHORTS_OVERLAY_STYLE_PATHS[idx]) === SHORTS_OVERLAY_STYLE) {
-        return true;
-      }
+    const style = 'SHORTS';
+    const paths = [
+      'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
+      'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
+    ];
+    for (let idx = 0; idx < paths.length; idx += 1) {
+      if (getObjectByPath(obj, paths[idx]) === style) return true;
     }
     return false;
   }
@@ -2078,6 +2089,7 @@
       obj[attr]._btOriginalAttr = attr;
     }
   }
+
   function openToast(msg, duration) {
     const ytdApp = document.getElementsByTagName('ytd-app')[0];
     if (ytdApp === undefined) return;
@@ -2520,11 +2532,13 @@
   // it while blockTubeDispatched is not yet true, and a re-dispatch would
   // re-run them (e.g. yt.player.Application.create, loadInitialData).
   let readyDispatched = false;
+
   function fireBlockTubeReady() {
     if (readyDispatched) return;
     readyDispatched = true;
     window.dispatchEvent(new Event('blockTubeReady'));
   }
+
   function postMessage(type, data) {
     window.postMessage(
       { from: BLOCKTUBE_CONSTS.MESSAGES.FROM_PAGE, type, data },
@@ -2542,6 +2556,7 @@
       window.trustedTypes.createPolicy &&
       window.trustedTypes.createPolicy('blocktube', { createScript: (s) => s });
   } catch (e) {}
+
   function blocktubeEval(code) {
     if (ttPolicy) return window.eval(ttPolicy.createScript(code));
     return window.eval(code);
@@ -2566,6 +2581,7 @@
       }
     });
   }
+
   function startHook() {
     // A hostile/odd data shape must never leave the page unarmed: deferred seed
     // callbacks wait on blockTubeReady, so a mid-way failure fails open (traps

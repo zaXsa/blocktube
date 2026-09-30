@@ -88,6 +88,12 @@
   const lockupMetadataContent =
     'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
 
+  // lockupViewModel tags YouTube-generated collections ('MIX', 'COURSE') with
+  // a badge icon. Only collection lockups nest it, so the path discriminates.
+  const LOCKUP_BADGE_ICON_PATH =
+    'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
+  const LOCKUP_GENERATED_BADGE_ICONS = new Set(['MIX', 'COURSE']);
+
   const filterRules = {
     main: {
       // Feed and watch-page video cards

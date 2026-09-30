@@ -489,6 +489,7 @@
       obj[attr]._btOriginalAttr = attr;
     }
   }
+
   function openToast(msg, duration) {
     const ytdApp = document.getElementsByTagName('ytd-app')[0];
     if (ytdApp === undefined) return;
