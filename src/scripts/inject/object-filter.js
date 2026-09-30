@@ -210,10 +210,17 @@
     return doBlock;
   };
 
-  // lockupViewModel (new grid) marks a Mix with a 'MIX' overlay icon; its path
-  // is deep and used both by isExtendedMatched and the context-menu extractor.
-  const LOCKUP_MIX_ICON_PATH =
+  // lockupViewModel (new grid) tags YouTube-generated collections with an
+  // overlay badge icon: 'MIX' for auto mixes and 'COURSE' for the lesson-based
+  // "designed" playlists (the card that reads "N lessons" / "View full course").
+  // Only collectionThumbnailViewModel lockups (Mixes, Courses) nest the badge
+  // under primaryThumbnail, so this path is itself a collection discriminator.
+  // The path is deep and used both by isExtendedMatched and the context-menu
+  // extractor. Exact strings on purpose: a future YouTube variant should fail
+  // visibly instead of being silently blocked (or silently not blocked).
+  const LOCKUP_BADGE_ICON_PATH =
     'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
+  const LOCKUP_GENERATED_BADGE_ICONS = new Set(['MIX', 'COURSE']);
 
   ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
     if (storageData.options[OPT.MOVIES]) {
@@ -257,8 +264,8 @@
     if (storageData.options[OPT.MIXES] && rendererKey === 'radioRenderer') return true;
     if (storageData.options[OPT.MIXES] && rendererKey === 'compactRadioRenderer') return true;
     if (storageData.options[OPT.MIXES] && rendererKey === 'lockupViewModel') {
-      const imgName = getObjectByPath(filteredObject, LOCKUP_MIX_ICON_PATH);
-      if (imgName === 'MIX') {
+      const imgName = getObjectByPath(filteredObject, LOCKUP_BADGE_ICON_PATH);
+      if (imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName)) {
         return true;
       }
     }

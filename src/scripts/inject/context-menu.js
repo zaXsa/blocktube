@@ -220,8 +220,10 @@
     } else if (attr === 'lockupViewModel') {
       items = extractFromLockupViewModel(obj[attr]);
       if (!items) return null;
-      const imgName = getObjectByPath(obj[attr], LOCKUP_MIX_ICON_PATH);
-      if (imgName !== 'MIX') {
+      const imgName = getObjectByPath(obj[attr], LOCKUP_BADGE_ICON_PATH);
+      // YouTube-generated collections (Mixes, Courses): neither a real video nor
+      // a real channel, so there is nothing meaningful to add to the filters.
+      if (imgName === undefined || !LOCKUP_GENERATED_BADGE_ICONS.has(imgName)) {
         hasChannel = true;
         hasVideo = true;
       }
