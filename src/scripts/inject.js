@@ -854,17 +854,31 @@
     return doBlock;
   };
 
-  // lockupViewModel (new grid) tags YouTube-generated collections with an
-  // overlay badge icon: 'MIX' for auto mixes and 'COURSE' for the lesson-based
-  // "designed" playlists (the card that reads "N lessons" / "View full course").
-  // Only collectionThumbnailViewModel lockups (Mixes, Courses) nest the badge
-  // under primaryThumbnail, so this path is itself a collection discriminator.
-  // The path is deep and used both by isExtendedMatched and the context-menu
-  // extractor. Exact strings on purpose: a future YouTube variant should fail
-  // visibly instead of being silently blocked (or silently not blocked).
+  // lockupViewModel tags YouTube-generated collections ('MIX', 'COURSE') with
+  // a badge icon. Only collection lockups nest it, so the path discriminates.
+  // Used by both isExtendedMatched and the context-menu extractor.
   const LOCKUP_BADGE_ICON_PATH =
     'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
   const LOCKUP_GENERATED_BADGE_ICONS = new Set(['MIX', 'COURSE']);
+
+  // Search results and the home grid deliver Shorts as plain videoRenderers,
+  // with a textless time overlay, so the vidLength rule never sees them. Match
+  // the overlay style instead. `overlayStyle` is a guess from the DOM
+  // attribute; only `style` is confirmed. See the knowledge base.
+  const SHORTS_OVERLAY_STYLE = 'SHORTS';
+  const SHORTS_OVERLAY_STYLE_PATHS = [
+    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
+    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
+  ];
+
+  function hasShortsTimeOverlay(obj) {
+    for (let idx = 0; idx < SHORTS_OVERLAY_STYLE_PATHS.length; idx += 1) {
+      if (getObjectByPath(obj, SHORTS_OVERLAY_STYLE_PATHS[idx]) === SHORTS_OVERLAY_STYLE) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
     if (storageData.options[OPT.MOVIES]) {
@@ -896,6 +910,8 @@
       getObjectByPath(filteredObject, 'contentType') === 'LOCKUP_CONTENT_TYPE_SHORT'
     )
       return true;
+    // Shorts in the video-card shape (search, home, subscriptions).
+    if (storageData.options[OPT.SHORTS] && hasShortsTimeOverlay(filteredObject)) return true;
     if (
       storageData.options[OPT.CHIPS_SHELVES] &&
       (rendererKey === 'richShelfRenderer' ||
