@@ -236,73 +236,87 @@
     return false;
   }
 
-  ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
-    if (storageData.options[OPT.MOVIES]) {
-      if (rendererKey === 'movieRenderer' || rendererKey === 'compactMovieRenderer') return true;
-      if (
-        rendererKey === 'videoRenderer' &&
-        !getObjectByPath(
-          filteredObject,
-          'shortBylineText.runs.navigationEndpoint.browseEndpoint',
-        ) &&
-        filteredObject.longBylineText &&
-        filteredObject.badges
-      )
-        return true;
-    }
+  // A movie: its own renderer, or a video card wearing a movie's byline+badges
+  // (which is how a movie appears inside search/grid results).
+  function matchesMovie(obj, rendererKey) {
+    if (rendererKey === 'movieRenderer' || rendererKey === 'compactMovieRenderer') return true;
+    return (
+      rendererKey === 'videoRenderer' &&
+      !getObjectByPath(obj, 'shortBylineText.runs.navigationEndpoint.browseEndpoint') &&
+      obj.longBylineText &&
+      obj.badges
+    );
+  }
+
+  // A Short ships in four shapes: the three dedicated renderers, a lockup
+  // flagged by contentType, and a plain video card with a SHORTS overlay.
+  function matchesShort(obj, rendererKey) {
     if (
-      storageData.options[OPT.SHORTS] &&
-      (rendererKey === 'shortsLockupViewModel' ||
-        rendererKey === 'reelItemRenderer' ||
-        rendererKey === 'gridShelfViewModel')
+      rendererKey === 'shortsLockupViewModel' ||
+      rendererKey === 'reelItemRenderer' ||
+      rendererKey === 'gridShelfViewModel'
     )
       return true;
-    // Shorts also ship as a plain lockupViewModel, flagged only by contentType,
-    // so the renderer-key checks above never see them. Exact string, as with
-    // the MIX check: a future variant should fail visibly, not match silently.
     if (
-      storageData.options[OPT.SHORTS] &&
       rendererKey === 'lockupViewModel' &&
-      getObjectByPath(filteredObject, 'contentType') === 'LOCKUP_CONTENT_TYPE_SHORT'
+      getObjectByPath(obj, 'contentType') === 'LOCKUP_CONTENT_TYPE_SHORT'
     )
       return true;
-    // Shorts in the video-card shape (search, home, subscriptions).
-    if (storageData.options[OPT.SHORTS] && hasShortsTimeOverlay(filteredObject)) return true;
-    if (
-      storageData.options[OPT.CHIPS_SHELVES] &&
-      (rendererKey === 'richShelfRenderer' ||
-        rendererKey === 'chipsShelfWithVideoShelfRenderer' ||
-        rendererKey === 'brandVideoSingletonRenderer' ||
-        rendererKey === 'brandVideoShelfRenderer' ||
-        rendererKey === 'statementBannerRenderer')
-    )
-      return true;
-    if (storageData.options[OPT.MIXES] && rendererKey === 'radioRenderer') return true;
-    if (storageData.options[OPT.MIXES] && rendererKey === 'compactRadioRenderer') return true;
-    if (storageData.options[OPT.MIXES] && rendererKey === 'lockupViewModel') {
-      const imgName = getObjectByPath(filteredObject, LOCKUP_BADGE_ICON_PATH);
-      if (imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName)) {
-        return true;
-      }
-    }
+    // No rendererKey guard: the overlay marks a Short whatever shape it
+    // arrives as. Only legacy video cards nest thumbnailOverlays.
+    return hasShortsTimeOverlay(obj);
+  }
 
+  const CHIPS_SHELF_RENDERERS = new Set([
+    'richShelfRenderer',
+    'chipsShelfWithVideoShelfRenderer',
+    'brandVideoSingletonRenderer',
+    'brandVideoShelfRenderer',
+    'statementBannerRenderer',
+  ]);
+
+  // A YouTube-generated playlist: the radio renderers, or a collection lockup
+  // badged MIX/COURSE.
+  function matchesGeneratedPlaylist(obj, rendererKey) {
+    if (rendererKey === 'radioRenderer' || rendererKey === 'compactRadioRenderer') return true;
+    if (rendererKey !== 'lockupViewModel') return false;
+    const imgName = getObjectByPath(obj, LOCKUP_BADGE_ICON_PATH);
+    return imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName);
+  }
+
+  // One entry per option, so adding a block type is a line here, not another
+  // branch in the middle of a 70-line function. Order is irrelevant: every
+  // matcher is an independent predicate.
+  const OPTION_MATCHERS = [
+    [OPT.MOVIES, matchesMovie],
+    [OPT.SHORTS, matchesShort],
+    [OPT.CHIPS_SHELVES, (obj, rendererKey) => CHIPS_SHELF_RENDERERS.has(rendererKey)],
+    [OPT.MIXES, matchesGeneratedPlaylist],
+  ];
+
+  ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
+    for (let idx = 0; idx < OPTION_MATCHERS.length; idx += 1) {
+      const [optionKey, matcher] = OPTION_MATCHERS[idx];
+      if (storageData.options[optionKey] && matcher(filteredObject, rendererKey)) return true;
+    }
+    return this.isBlockedComment(filteredObject, rendererKey);
+  };
+
+  // Comments are blocked by id, not by option. The two renderer shapes bury
+  // the id at different depths.
+  ObjectFilter.prototype.isBlockedComment = function (filteredObject, rendererKey) {
+    let commentId;
     if (rendererKey === 'commentThreadRenderer') {
-      if (
-        this.blockedComments.includes(
-          getObjectByPath(filteredObject, 'commentViewModel.commentViewModel.commentId'),
-        )
-      ) {
-        return true;
-      }
+      commentId = getObjectByPath(
+        filteredObject,
+        'commentViewModel.commentViewModel.commentId',
+      );
+    } else if (rendererKey === 'commentViewModel') {
+      commentId = getObjectByPath(filteredObject, 'commentId');
+    } else {
+      return false;
     }
-
-    if (rendererKey === 'commentViewModel') {
-      if (this.blockedComments.includes(getObjectByPath(filteredObject, 'commentId'))) {
-        return true;
-      }
-    }
-
-    return false;
+    return commentId !== undefined && this.blockedComments.includes(commentId);
   };
 
   ObjectFilter.prototype.matchFilterRule = function (obj, objKeys = Object.keys(obj)) {
