@@ -9,7 +9,9 @@
     "lint": "eslint src --ext .js",
     "lint:fix": "eslint src --ext .js --fix",
     "build:inject": "node tools/build-inject.js",
-    "check:inject": "node tools/build-inject.js --check"
+    "check:inject": "node tools/build-inject.js --check",
+    "test": "node test/index.js",
+    "test:mutate": "node test/mutate.js"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
