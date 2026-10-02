@@ -73,6 +73,8 @@
     'playlistVideoRenderer',
     'lockupViewModel',
     'videoCardRenderer',
+    'endScreenVideoRenderer',
+    'endScreenPlaylistRenderer',
     // Mobile
     'reelItemRenderer',
     'slimVideoMetadataSectionRenderer',
@@ -95,6 +97,8 @@
     'commentThreadRenderer',
     'reelShelfRenderer',
     'richSectionRenderer',
+    'watchNextEndScreenRenderer',
+    'endScreen',
   ];
   const collapseableContainersSet = new Set(collapseableContainers);
 
