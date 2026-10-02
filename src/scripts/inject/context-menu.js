@@ -45,32 +45,42 @@
     };
   }
 
-  function addContextMenusMobile(obj, keys) {
-    let attr;
-    if (keys !== undefined) {
-      for (let i = 0; i < keys.length; i += 1) {
-        // same live-ownership guard as findAndExtractMenuItems
-        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) {
-          attr = keys[i];
-          break;
-        }
+  // The first live renderer key that is both a registered context-menu target
+  // and still owned by obj. `keys` is a snapshot taken before rule deletion, so
+  // an entry may have been deleted from obj since it was captured.
+  function resolveContextMenuAttr(obj, keys) {
+    if (keys === undefined) return undefined;
+    for (let i = 0; i < keys.length; i += 1) {
+      if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) {
+        return keys[i];
       }
     }
+    return undefined;
+  }
+
+  // The channel and video a renderer describes, resolved through its filter
+  // rule paths. Both block entries ("Block Channel" / "Block Video") carry
+  // this pair as _btOriginalData for menuOnTap to consume later.
+  function channelAndVideoFrom(parentData, attrKey) {
+    const searchIn = mergedFilterRules[attrKey]?.properties;
+    return {
+      channel: {
+        id: getFlattenByPath(parentData, searchIn?.channelId),
+        text: getFlattenByPath(parentData, searchIn?.channelName),
+      },
+      video: {
+        id: getFlattenByPath(parentData, searchIn?.videoId),
+        text: getFlattenByPath(parentData, searchIn?.title),
+      },
+    };
+  }
+
+  function addContextMenusMobile(obj, keys) {
+    const attr = resolveContextMenuAttr(obj, keys);
     if (attr === undefined) return;
 
     const parentData = obj[attr];
-    const attrKey = attr;
-    const searchIn = mergedFilterRules[attrKey].properties;
-
-    const channelData = {
-      id: getFlattenByPath(parentData, searchIn.channelId),
-      text: getFlattenByPath(parentData, searchIn.channelName),
-    };
-
-    const videoData = {
-      id: getFlattenByPath(parentData, searchIn.videoId),
-      text: getFlattenByPath(parentData, searchIn.title),
-    };
+    const { channel: channelData, video: videoData } = channelAndVideoFrom(parentData, attr);
 
     if (
       [
@@ -310,17 +320,7 @@
   }
 
   function findAndExtractMenuItems(obj, keys) {
-    let attr;
-    if (keys !== undefined) {
-      for (let i = 0; i < keys.length; i += 1) {
-        // has.call(obj, key) is the LIVE check: keys is a snapshot taken before
-        // rule deletion, so a key may have been deleted since it was captured.
-        if (contextMenuObjectsSet.has(keys[i]) && has.call(obj, keys[i])) {
-          attr = keys[i];
-          break;
-        }
-      }
-    }
+    const attr = resolveContextMenuAttr(obj, keys);
     if (!attr) return null;
 
     const result = extractMenuItems(obj, attr);
@@ -637,18 +637,9 @@
       removeParent = false;
       stopPlayer = false;
     } else {
-      const attrKey = parentData._btOriginalAttr;
-      const searchIn = mergedFilterRules[attrKey]?.properties;
-
-      channelData = {
-        id: getFlattenByPath(parentData, searchIn.channelId),
-        text: getFlattenByPath(parentData, searchIn.channelName),
-      };
-
-      videoData = {
-        id: getFlattenByPath(parentData, searchIn.videoId),
-        text: getFlattenByPath(parentData, searchIn.title),
-      };
+      const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
+      channelData = extracted.channel;
+      videoData = extracted.video;
     }
 
     let result;
