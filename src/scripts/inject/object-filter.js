@@ -88,11 +88,12 @@
   // on the range means "block" (default) while the flips of the range mean
   // "block everything outside it" (vidLength_type !== 'block').
   function matchesDurationRange(vidLen, filterEntries) {
-    if (vidLen === SHORTS_TIME && storageData.options[OPT.SHORTS]) {
+    const opts = storageData.options;
+    if (vidLen === SHORTS_TIME && opts[OPT.SHORTS]) {
       return true;
     }
     if (vidLen > 0 && filterEntries.length === 2) {
-      if (storageData.options[OPT.VIDLENGTH_TYPE] === 'block') {
+      if (opts[OPT.VIDLENGTH_TYPE] === 'block') {
         if (
           filterEntries[0] !== null &&
           vidLen >= filterEntries[0] &&

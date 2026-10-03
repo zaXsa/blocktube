@@ -30,6 +30,41 @@
 
   const textAreas = ['title', 'channelName', 'channelId', 'videoId', 'comment'];
 
+  // Declarative binding: element id -> { path: dotted storage path, type: 'checkbox'|'text'|'select'|'number'|'array', default: value }
+  // Types: checkbox stores boolean to .checked; text/select stores string to .value; number parses int for .value; array reads/writes numeric indices
+  /* prettier-ignore-start */
+  const OPTION_BINDINGS = [
+    // checkboxes (options.*)
+    { id: 'disable_trending',      path: `options.${OPT.TRENDING}`,             type: 'checkbox', default: false },
+    { id: 'disable_shorts',        path: `options.${OPT.SHORTS}`,               type: 'checkbox', default: false },
+    { id: 'disable_movies',        path: `options.${OPT.MOVIES}`,               type: 'checkbox', default: false },
+    { id: 'disable_mixes',         path: `options.${OPT.MIXES}`,                type: 'checkbox', default: false },
+    { id: 'disable_chips_shelves', path: `options.${OPT.CHIPS_SHELVES}`,        type: 'checkbox', default: false },
+    { id: 'autoplay',              path: `options.${OPT.AUTOPLAY}`,             type: 'checkbox', default: false },
+    { id: 'disable_db_normalize',  path: `options.${OPT.DISABLE_DB_NORMALIZE}`, type: 'checkbox', default: false },
+    { id: 'disable_on_history',    path: `options.${OPT.DISABLE_ON_HISTORY}`,   type: 'checkbox', default: false },
+    { id: 'disable_you_there',     path: `options.${OPT.DISABLE_YOU_THERE}`,    type: 'checkbox', default: false },
+    { id: 'suggestions_only',      path: `options.${OPT.SUGGESTIONS_ONLY}`,     type: 'checkbox', default: false },
+    { id: 'block_feedback',        path: `options.${OPT.BLOCK_FEEDBACK}`,       type: 'checkbox', default: false },
+    { id: 'enable_javascript',     path: `options.${OPT.ENABLE_JAVASCRIPT}`,    type: 'checkbox', default: false },
+
+    // text/select
+    { id: 'block_message',  path: `options.${OPT.BLOCK_MESSAGE}`,  type: 'text',   default: ''      },
+    { id: 'vidLength_type', path: `options.${OPT.VIDLENGTH_TYPE}`, type: 'select', default: 'allow' },
+    
+    // number
+    { id: 'percent_watched_hide', path: `options.${OPT.PERCENT_WATCHED_HIDE}`, type: 'number', default: NaN },
+
+    // ui
+    { id: 'ui_theme',  path: 'uiTheme', type: 'select', default: 'light' },
+    { id: 'pass_save', path: 'uiPass',  type: 'text',   default: ''      },
+
+    // vidLength array [0,1]
+    { id: 'vidLength_0', path: 'filterData.vidLength', type: 'array', index: 0, default: NaN },
+    { id: 'vidLength_1', path: 'filterData.vidLength', type: 'array', index: 1, default: NaN },
+  ];
+  /* prettier-ignore-end */
+
   function detectColorScheme() {
     let theme = 'light';
 
@@ -73,35 +108,56 @@
     });
   }
 
+  function setByPath(obj, path, value) {
+    const parts = path.split('.');
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      if (!has.call(cur, p) || typeof cur[p] !== 'object' || cur[p] === null) {
+        cur[p] = {};
+      }
+      cur = cur[p];
+    }
+    cur[parts[parts.length - 1]] = value;
+  }
+
+  function getByPath(obj, path, def) {
+    const parts = path.split('.');
+    let cur = obj;
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      if (cur === null || typeof cur !== 'object' || !has.call(cur, p)) return def;
+      cur = cur[p];
+    }
+    return cur;
+  }
+
   function saveForm() {
     textAreas.forEach((v) => {
       storageData.filterData[v] = multilineToArray(jsEditors[v].getValue());
     });
 
-    const vidLenMin = parseInt($('vidLength_0').value, 10);
-    const vidLenMax = parseInt($('vidLength_1').value, 10);
-
-    storageData.filterData.vidLength = [vidLenMin, vidLenMax];
     storageData.filterData.javascript = jsEditors['javascript'].getValue();
 
-    storageData.uiTheme = $('ui_theme').value;
-
-    storageData.uiPass = $('pass_save').value;
-    storageData.options[OPT.TRENDING] = $('disable_trending').checked;
-    storageData.options[OPT.SHORTS] = $('disable_shorts').checked;
-    storageData.options[OPT.MOVIES] = $('disable_movies').checked;
-    storageData.options[OPT.MIXES] = $('disable_mixes').checked;
-    storageData.options[OPT.CHIPS_SHELVES] = $('disable_chips_shelves').checked;
-    storageData.options[OPT.AUTOPLAY] = $('autoplay').checked;
-    storageData.options[OPT.SUGGESTIONS_ONLY] = $('suggestions_only').checked;
-    storageData.options[OPT.DISABLE_DB_NORMALIZE] = $('disable_db_normalize').checked;
-    storageData.options[OPT.DISABLE_ON_HISTORY] = $('disable_on_history').checked;
-    storageData.options[OPT.DISABLE_YOU_THERE] = $('disable_you_there').checked;
-    storageData.options[OPT.BLOCK_FEEDBACK] = $('block_feedback').checked;
-    storageData.options[OPT.ENABLE_JAVASCRIPT] = $('enable_javascript').checked;
-    storageData.options[OPT.BLOCK_MESSAGE] = $('block_message').value;
-    storageData.options[OPT.VIDLENGTH_TYPE] = $('vidLength_type').value;
-    storageData.options[OPT.PERCENT_WATCHED_HIDE] = parseInt($('percent_watched_hide').value, 10);
+    OPTION_BINDINGS.forEach((b) => {
+      const el = $(b.id);
+      if (!el) return;
+      if (b.type === 'checkbox') {
+        setByPath(storageData, b.path, el.checked);
+      } else if (b.type === 'array') {
+        const arr = getByPath(storageData, b.path, []);
+        if (!Array.isArray(arr)) {
+          // ensure array exists
+        }
+        arr[b.index] = parseInt(el.value, 10);
+        setByPath(storageData, b.path, arr);
+      } else if (b.type === 'number') {
+        const val = parseInt(el.value, 10);
+        setByPath(storageData, b.path, val);
+      } else if (b.type === 'text' || b.type === 'select') {
+        setByPath(storageData, b.path, el.value);
+      }
+    });
 
     saveData('status_save');
     detectColorScheme();
@@ -139,30 +195,25 @@
       jsEditors[v].setValue(content.join('\n'));
     });
 
-    const vidLength = get('filterData.vidLength', [NaN, NaN], obj);
-    $('vidLength_0').value = vidLength[0];
-    $('vidLength_1').value = vidLength[1];
-    $('vidLength_type').value = get(`options.${OPT.VIDLENGTH_TYPE}`, 'allow', obj);
-
-    $('ui_theme').value = get('uiTheme', 'light', obj);
-    $('pass_save').value = get('uiPass', '', obj);
-    $('disable_trending').checked = get(`options.${OPT.TRENDING}`, false, obj);
-    $('disable_shorts').checked = get(`options.${OPT.SHORTS}`, false, obj);
-    $('disable_movies').checked = get(`options.${OPT.MOVIES}`, false, obj);
-    $('disable_mixes').checked = get(`options.${OPT.MIXES}`, false, obj);
-    $('disable_chips_shelves').checked = get(`options.${OPT.CHIPS_SHELVES}`, false, obj);
-    $('autoplay').checked = get(`options.${OPT.AUTOPLAY}`, false, obj);
-    $('disable_db_normalize').checked = get(`options.${OPT.DISABLE_DB_NORMALIZE}`, false, obj);
-    $('disable_on_history').checked = get(`options.${OPT.DISABLE_ON_HISTORY}`, false, obj);
-    $('disable_you_there').checked = get(`options.${OPT.DISABLE_YOU_THERE}`, false, obj);
-    $('suggestions_only').checked = get(`options.${OPT.SUGGESTIONS_ONLY}`, false, obj);
-    $('block_feedback').checked = get(`options.${OPT.BLOCK_FEEDBACK}`, false, obj);
-    $('enable_javascript').checked = get(`options.${OPT.ENABLE_JAVASCRIPT}`, false, obj);
-    $('block_message').value = get(`options.${OPT.BLOCK_MESSAGE}`, '', obj);
-    $('percent_watched_hide').value = get(`options.${OPT.PERCENT_WATCHED_HIDE}`, NaN, obj);
-
     const jsContent = get('filterData.javascript', defaultJSFunction, obj);
     jsEditors['javascript'].setValue(jsContent);
+
+    OPTION_BINDINGS.forEach((b) => {
+      const el = $(b.id);
+      if (!el) return;
+      const val = get(b.path, b.default, obj);
+      if (b.type === 'checkbox') {
+        el.checked = !!val;
+      } else if (b.type === 'array') {
+        const arr = Array.isArray(val) ? val : [b.default, b.default];
+        el.value = arr[b.index];
+      } else if (b.type === 'number') {
+        // keep NaN as-is for empty number fields
+        el.value = isNaN(val) ? '' : val;
+      } else if (b.type === 'text' || b.type === 'select') {
+        el.value = val;
+      }
+    });
 
     if ($('enable_javascript').checked) {
       $('advanced_tab').style.removeProperty('display');
