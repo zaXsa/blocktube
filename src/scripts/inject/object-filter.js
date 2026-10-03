@@ -65,12 +65,14 @@
   // Hide videos we already watched past the threshold (percent_watched_hide).
   // playlist rows and history/library/playlist pages are exempt.
   function isPercentWatchedBlocked(fieldName, value, rendererKey) {
+    const opts = storageData.options;
+    const threshold = opts[OPT.PERCENT_WATCHED_HIDE];
     return (
       fieldName === 'percentWatched' &&
-      storageData.options[OPT.PERCENT_WATCHED_HIDE] &&
+      threshold &&
       rendererKey !== 'playlistPanelVideoRenderer' &&
       !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
-      parseInt(value) >= storageData.options[OPT.PERCENT_WATCHED_HIDE]
+      parseInt(value) >= threshold
     );
   }
 
@@ -167,8 +169,10 @@
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
+    const opts = storageData.options;
+    const fd = storageData.filterData;
 
-    if (document.location.pathname === '/feed/history' && storageData.options[OPT.DISABLE_ON_HISTORY])
+    if (document.location.pathname === '/feed/history' && opts[OPT.DISABLE_ON_HISTORY])
       return false;
 
     let doBlock = false;
@@ -176,7 +180,7 @@
       const filterPath = filterPaths[fieldName];
       if (filterPath === undefined) continue;
 
-      const filterEntries = storageData.filterData[fieldName];
+      const filterEntries = fd[fieldName];
       if (
         regexPropsSet.has(fieldName) &&
         (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
