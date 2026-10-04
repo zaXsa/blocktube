@@ -32,7 +32,8 @@
 
   // Declarative binding: element id -> { path: dotted storage path, type: 'checkbox'|'text'|'select'|'number'|'array', default: value }
   // Types: checkbox stores boolean to .checked; text/select stores string to .value; number parses int for .value; array reads/writes numeric indices
-  /* prettier-ignore-start */
+  // Keep the column alignment below: range start/end ignore comments are not honored in JS.
+  // prettier-ignore
   const OPTION_BINDINGS = [
     // checkboxes (options.*)
     { id: 'disable_trending',      path: `options.${OPT.TRENDING}`,             type: 'checkbox', default: false },
@@ -51,7 +52,7 @@
     // text/select
     { id: 'block_message',  path: `options.${OPT.BLOCK_MESSAGE}`,  type: 'text',   default: ''      },
     { id: 'vidLength_type', path: `options.${OPT.VIDLENGTH_TYPE}`, type: 'select', default: 'allow' },
-    
+
     // number
     { id: 'percent_watched_hide', path: `options.${OPT.PERCENT_WATCHED_HIDE}`, type: 'number', default: NaN },
 
@@ -63,7 +64,6 @@
     { id: 'vidLength_0', path: 'filterData.vidLength', type: 'array', index: 0, default: NaN },
     { id: 'vidLength_1', path: 'filterData.vidLength', type: 'array', index: 1, default: NaN },
   ];
-  /* prettier-ignore-end */
 
   function detectColorScheme() {
     let theme = 'light';

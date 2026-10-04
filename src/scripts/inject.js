@@ -622,30 +622,54 @@
     }
   }
 
-  function parseViewCount(viewCount) {
-    const parts = viewCount.split(' ');
-    if (parts[1] !== 'views' && parts[1] !== 'view') return undefined; // Fail if not english formatting
-    const views = parts[0];
+  /**
+   * Parses a view count string (e.g., "1.5M views", "No views", "100K", "2 million views") into an integer.
+   * @param {string} s - The input string to parse.
+   * @returns {number|undefined} The exact view count as a number, or undefined if invalid.
+   */
+  function parseViewCount(s) {
+    if (typeof s !== 'string') return undefined;
 
-    // Handle abbreviated formats (K, M, B)
-    const multipliers = {
-      K: 1000,
-      M: 1000000,
-      B: 1000000000,
-    };
+    // Normalize spaces (including &nbsp;) and convert to lowercase
+    const clean = s
+      .replace(/\u00a0/g, ' ')
+      .trim()
+      .toLowerCase();
+    if (clean === '') return undefined;
 
-    // Check if it ends with a multiplier
-    const lastChar = views.slice(-1).toUpperCase();
-    let multiplier = 1;
-    let numericPart = views.replace(',', '');
-
-    if (multipliers[lastChar]) {
-      multiplier = multipliers[lastChar];
-      numericPart = views.slice(0, -1); // Remove the letter
+    // 1. Handle zero views case ("No views", "No view", any spacing/casing)
+    if (/^no\s+views?$/.test(clean)) {
+      return 0;
     }
 
-    // Return the final count
-    return numericPart * multiplier;
+    // 2. Match patterns like "1.5 million views", "100K views", or just "100K"
+    // Group 1: The numeric part (digits, dots, commas)
+    // Group 2: The multiplier suffix (thousand/million/billion or k/m/b)
+    const match = clean.match(/^([\d,.]+)\s*(thousand|million|billion|[kmb])?(?:\s+views?)?$/);
+    if (!match) return undefined;
+
+    const numStr = match[1];
+    const multiplierStr = match[2];
+
+    // Reject malformed numbers ("1.2.3") that parseFloat would silently truncate
+    if ((numStr.match(/\./g) || []).length > 1) return undefined;
+
+    // Convert string to float (remove thousands-separator commas)
+    const num = parseFloat(numStr.replace(/,/g, ''));
+    if (Number.isNaN(num)) return undefined;
+
+    // Map suffixes to their corresponding numeric multipliers (kept column-aligned below).
+    // prettier-ignore
+    const multipliers = {
+    k: 1e3, thousand: 1e3,
+    m: 1e6, million:  1e6,
+    b: 1e9, billion:  1e9,
+  };
+
+    const factor = multiplierStr ? multipliers[multiplierStr] : 1;
+    if (factor === undefined) return undefined;
+
+    return Math.round(num * factor);
   }
 
   // ================== src/scripts/inject/object-filter.js ==================
