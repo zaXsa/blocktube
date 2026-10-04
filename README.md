@@ -23,6 +23,13 @@ Filter and block unwanted content from YouTube™.
 * [**Chrome Webstore**](https://chrome.google.com/webstore/detail/blocktube/bbeaicapbccfllodepmimpkgecanonai?hl=en-US)
 * [**Firefox AMO**](https://addons.mozilla.org/en-US/firefox/addon/blocktube/)
 
+## Guides
+
+* [Filter syntax](docs/filters.md) — keywords, regex, comments, editor
+  shortcuts, and what each filter list matches
+* [Advanced blocking](docs/advanced-blocking.md) — custom JavaScript filter
+  reference (`video` fields, `objectType` renderers, examples)
+
 ## FAQ
   
 * What is the difference between "Channel ID" and "Channel Name"  
@@ -51,84 +58,21 @@ Filter and block unwanted content from YouTube™.
 ## Advanced blocking (custom JavaScript filter)
 
 Options page > `Advanced Blocking` tab. Check `Enable advanced blocking`,
-edit the function, then `Save`. It only runs while that checkbox is checked.
-
-Signature (must evaluate to a function):
+edit the function, then `Save`. It runs **after** the built-in
+title/channel/regex/duration options and only while the checkbox is checked —
+return truthy to block, falsy to allow:
 
 ```js
 (video, objectType) => {
-  // Add custom conditions below
   if (video.hasOwnProperty("badges") && video.badges.includes("members")) {
     return true;
   }
-
-  // Custom conditions did not match, do not block
   return false;
 }
 ```
 
-* Return `true` (or any truthy value) to block, `false`/falsy to allow.
-* It runs **after** the built-in title/channel/regex/duration options. If those
-  already matched, your function is not consulted for that item.
-* An exception inside your function is caught and logged — the item is left
-  in place (fails open), never fails closed.
-
-### `video` object
-
-`video` is a normalized "friendly" object built from the YouTube renderer
-currently being checked — **not** the raw YouTube JSON. Only keys the current
-renderer provides are present, so always guard access (e.g.
-`video.hasOwnProperty("badges")` or `video.badges !== undefined`). Missing keys
-mean "not applicable here", not "empty".
-
-| Key | Type | Notes |
-| --- | ---- | ----- |
-| `videoId` | `string` | e.g. `"dQw4w9WgXcQ"` |
-| `channelId` | `string` | e.g. `"UC..."`. For `lockupViewModel` collab videos only the first creator is in `channelId`; other collaborators are still blocked via the Channel ID filter. |
-| `channelName` | `string` | Flattened display text. |
-| `title` | `string` | Flattened display text. |
-| `vidLength` | `number` | Duration in seconds, parsed from YouTube's `"12:34"` text. |
-| `viewCount` | `number` | Parsed from text like `"1.5M views"` / `"No views"`. `undefined` when unparsable. |
-| `badges` | `string[]` | Normalized to `"verified"`, `"artist"`, `"live"`, `"members"`. Example: a members-only video exposes `["members"]`. Raw `metadataBadgeRenderer` / `badgeViewModel` styles are mapped for you. |
-| `channelBadges` | `string[]` | Same normalization as `badges`, but for the channel owner. |
-| `publishTimeText` | `string` | e.g. `"3 days ago"`. |
-| `percentWatched` | `number` | Resume-playback percent, when YouTube provides it. |
-| `comment` | `string` | Only present on comment renderers (`commentRenderer`, `commentEntityPayload`, `liveChatTextMessageRenderer`). |
-
-### `objectType` (renderer key)
-
-Second argument is the YouTube renderer name being filtered, e.g.
-`videoRenderer`, `gridVideoRenderer`, `compactVideoRenderer`,
-`lockupViewModel` (new grid), `videoCardRenderer`, `shortsLockupViewModel`,
-`reelItemRenderer`, `movieRenderer` / `compactMovieRenderer`,
-`playlistPanelVideoRenderer`, `commentRenderer`, `commentEntityPayload`,
-`liveChatTextMessageRenderer`, and others. The same video appears under
-different renderers on different surfaces (home, search, watch-page rail,
-player), so avoid filtering on `objectType` unless you need to — and when you
-do, accept all relevant variants.
-
-More examples:
-
-```js
-// Block live streams
-if (video.hasOwnProperty("badges") && video.badges.includes("live")) {
-  return true;
-}
-
-// Block videos with more than 1M views
-if (video.hasOwnProperty("viewCount") && video.viewCount > 1000000) {
-  return true;
-}
-
-// objectType is available when you need renderer-specific logic
-// (video, objectType) => objectType === "shortsLockupViewModel"
-```
-
-Full background and further examples:
-[Advanced-Blocking wiki](https://github.com/amitbl/blocktube/wiki/Advanced-Blocking).
-Your function is `eval`'d in the page realm (YouTube's Trusted Types policy
-requires this), so treat it like code: never paste in a function you do not
-understand.
+Full reference (`video` object fields, `objectType` renderer names, more
+examples): [docs/advanced-blocking.md](docs/advanced-blocking.md).
 
 ## Import / Export
 
@@ -183,9 +127,7 @@ Chrome: https://developer.chrome.com/docs/extensions/mv3/getstarted/development-
 ## Future work
 
 * User-friendly options UI
-* Sync options to cloud provider / enterprise policies
 * Whitelist mode
-* Dynamic rules (match multiple rules to block a video)
 
 ## License
 
