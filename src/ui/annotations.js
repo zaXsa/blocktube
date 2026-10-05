@@ -10,8 +10,9 @@
   // src/scripts/content_script.js. Classification mirrors compileRegex
   // (src/scripts/background.js): trimmed-empty or starts with `//`.
   // Annotations are metadata, never rules: the UI must display and preserve
-  // them byte-identical across save round-trips, never let the user edit
-  // them, and never silently drop them.
+  // them byte-identical across save round-trips and never silently drop
+  // them. Table views keep them out of the editing path (edits go through
+  // the preserving row helpers); raw text editing is explicit and free.
   function isAnnotationLine(line) {
     if (typeof line !== 'string') return false;
     const trimmed = line.trim();
@@ -38,6 +39,9 @@
   }
 
   // Rebuild a stored array: annotations back at their original indices,
+  // (Test-only for now: the UI preserves annotations through the untouched
+  // save path instead, so nothing calls this yet. Kept — with coverage —
+  // as the specified save-time fallback.)
   // rules (possibly edited — added, removed, reordered) filling the other
   // slots in order, surplus rules appended at the end. With unedited rules
   // the result is byte-identical to the split input, including interleaved
@@ -223,7 +227,9 @@
   }
 
   // Set (or clear, with empty text) the `// Label:` line of a rule.
-  // Sanitized like background annotations: no newlines, capped at 200 chars.
+  // Sanitized like background annotations — single line, capped at 200 —
+  // plus invisible bidi/control characters stripped so a label cannot
+  // visually reorder or conceal its row.
   function setRuleLabel(lines, ruleIndex, text) {
     if (!(lines instanceof Array)) {
       throw new TypeError('setRuleLabel expects an array of lines');
@@ -232,7 +238,11 @@
     if (typeof target !== 'string' || isAnnotationLine(target)) {
       throw new Error('setRuleLabel expects the index of a rule line');
     }
-    const clean = String(text).replace(/\s+/g, ' ').trim().slice(0, 200);
+    const clean = String(text)
+      .replace(/\s+/g, ' ')
+      .replace(/[\u0000-\u001F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+      .trim()
+      .slice(0, 200);
     const out = lines.slice();
     const attached = readLabel(out[ruleIndex - 1]) !== null;
     if (attached) {

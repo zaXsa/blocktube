@@ -155,10 +155,8 @@
       if (b.type === 'checkbox') {
         setByPath(storageData, b.path, el.checked);
       } else if (b.type === 'array') {
-        const arr = getByPath(storageData, b.path, []);
-        if (!Array.isArray(arr)) {
-          // ensure array exists
-        }
+        let arr = getByPath(storageData, b.path, []);
+        if (!Array.isArray(arr)) arr = [];
         arr[b.index] = parseInt(el.value, 10);
         setByPath(storageData, b.path, arr);
       } else if (b.type === 'number') {
@@ -230,7 +228,7 @@
       $('advanced_tab').style.removeProperty('display');
     }
 
-    // refresh CodeMirror editors after the tab becomes visible (a/19970695)
+    // refresh CodeMirror editors after the panel becomes visible (a/19970695)
     setTimeout(() => Object.values(jsEditors).forEach((v) => v.refresh()), 1);
     $('save_btn').classList.add('disabled-btn');
     $('dirty_flag').hidden = true;
@@ -313,29 +311,56 @@
 
   // Invalid-regex warnings under the regex-evaluated editors: lines that
   // would fail RegExp construction downstream (and so never match).
-  // Informational only — saving is never blocked.
+  // Invalid-ID warnings under the ID editors: ID lines are wrapped raw
+  // (`^id$`), so a line outside the ID charset either never matches or —
+  // like `.*` — matches far more than intended. Informational only in both
+  // cases — saving is never blocked.
   const WARNING_EDITORS = {
     title: 'warning-title',
     channelName: 'warning-channelName',
     comment: 'warning-comment',
   };
+  const WARNING_IDS = {
+    channelId: 'warning-channelId',
+    videoId: 'warning-videoId',
+  };
+
+  function renderWarning(warnId, lineNumbers, message) {
+    const warn = $(warnId);
+    if (lineNumbers.length === 0) {
+      warn.classList.add('is-hidden');
+      warn.textContent = '';
+      return;
+    }
+    warn.classList.remove('is-hidden');
+    warn.textContent =
+      `⚠ ${message} on line${lineNumbers.length > 1 ? 's' : ''} ${lineNumbers.join(', ')} — ` +
+      'saving is still allowed.';
+  }
 
   function updateWarnings() {
     Object.entries(WARNING_EDITORS).forEach(([key, warnId]) => {
       const bad = BLOCKTUBE_ANNOTATIONS.findInvalidRegexLines(
         jsEditors[key].getValue().split('\n'),
       );
-      const warn = $(warnId);
-      if (bad.length === 0) {
-        warn.classList.add('is-hidden');
-        warn.textContent = '';
-        return;
-      }
-      warn.classList.remove('is-hidden');
-      const lines = bad.map((entry) => entry.index + 1).join(', ');
-      warn.textContent =
-        `⚠ Invalid regex on line${bad.length > 1 ? 's' : ''} ${lines} — ` +
-        'these lines never match, but saving is still allowed.';
+      renderWarning(
+        warnId,
+        bad.map((entry) => entry.index + 1),
+        'Invalid regex — these lines never match',
+      );
+    });
+    Object.entries(WARNING_IDS).forEach(([key, warnId]) => {
+      const bad = [];
+      jsEditors[key]
+        .getValue()
+        .split('\n')
+        .forEach((line, index) => {
+          const trimmed = line.trim();
+          if (trimmed !== '' && !trimmed.startsWith('//')) {
+            if (!BLOCKTUBE_ANNOTATIONS.isValidFilterId(trimmed)) bad.push(index + 1);
+          }
+        });
+      renderWarning(warnId, bad, 'Invalid ID — may match far more than intended');
     });
   }
 
@@ -1090,42 +1115,63 @@
       a.download = fileName;
       const event = new MouseEvent('click');
       a.dispatchEvent(event);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }, 0);
+  }
+
+  // Backup shape gate: truthiness alone would let a malformed file through
+  // and persist defaults over the user's real lists. Missing lists fall back
+  // to defaults in populateForms; present ones must actually be arrays.
+  const BACKUP_LISTS = ['videoId', 'channelId', 'channelName', 'comment', 'title'];
+
+  function isValidBackup(json) {
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+    const { filterData, options } = json;
+    if (!filterData || typeof filterData !== 'object' || Array.isArray(filterData)) return false;
+    if (!options || typeof options !== 'object' || Array.isArray(options)) return false;
+    return BACKUP_LISTS.every(
+      (key) => filterData[key] === undefined || Array.isArray(filterData[key]),
+    );
   }
 
   function importOptions(evt) {
     const files = evt.target.files;
-    const f = files[0];
+    const f = files && files[0];
+    if (!(f instanceof File)) return;
+    if (f.size > 5 * 1024 * 1024) {
+      alert('This backup file is too large');
+      return;
+    }
     const reader = new FileReader();
+    reader.onerror = () => alert('Could not read the backup file');
 
     reader.onload = function (e) {
       let json;
       try {
         json = JSON.parse(e.target.result);
-        if (json.filterData && json.options) {
-          populateForms(json);
-          // Importing a backup must not silently enable code execution.
-          $('enable_javascript').checked = false;
-          // Remind only when there is actually a custom filter to miss:
-          // non-blank imported JavaScript that now sits inert until
-          // re-enabled. Hidden again once the user re-enables it.
-          const importedJs =
-            json.filterData && typeof json.filterData.javascript === 'string'
-              ? json.filterData.javascript
-              : '';
-          const warn = $('import_js_warning');
-          if (importedJs.trim() !== '') {
-            warn.textContent =
-              'This backup contained a custom JavaScript filter. Advanced blocking was left ' +
-              'disabled for safety — review it under Advanced, then re-check Enable advanced ' +
-              'blocking if you trust it.';
-            warn.classList.remove('is-hidden');
-          } else {
-            warn.classList.add('is-hidden');
-            warn.textContent = '';
-          }
-          saveForm();
+        if (!isValidBackup(json)) throw new Error('bad shape');
+        populateForms(json);
+        // Importing a backup must not silently enable code execution.
+        $('enable_javascript').checked = false;
+        // Remind only when there is actually a custom filter to miss:
+        // non-blank imported JavaScript that now sits inert until
+        // re-enabled. Hidden again once the user re-enables it.
+        const importedJs =
+          json.filterData && typeof json.filterData.javascript === 'string'
+            ? json.filterData.javascript
+            : '';
+        const warn = $('import_js_warning');
+        if (importedJs.trim() !== '') {
+          warn.textContent =
+            'This backup contained a custom JavaScript filter. Advanced blocking was left ' +
+            'disabled for safety — review it under Advanced, then re-check Enable advanced ' +
+            'blocking if you trust it.';
+          warn.classList.remove('is-hidden');
+        } else {
+          warn.classList.add('is-hidden');
+          warn.textContent = '';
         }
+        saveForm();
       } catch (ex) {
         alert('This is not a valid BlockTube backup');
       }
