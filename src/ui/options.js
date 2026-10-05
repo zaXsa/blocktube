@@ -340,6 +340,13 @@
       styleActiveLine: true,
       lineWrapping: true,
       extraKeys: {
+        // Persistent search: dialog stays open, Enter/Shift+Enter = next/prev,
+        // all matches highlighted via the search overlay. Replaces the
+        // one-shot default (Ctrl-F -> find) without touching cm/ vendor files.
+        'Ctrl-F': 'findPersistent',
+        'Cmd-F': 'findPersistent',
+        'Ctrl-G': 'findPersistentNext',
+        'Shift-Ctrl-G': 'findPersistentPrev',
         F11(cm) {
           if (cm.getOption('fullScreen')) {
             cm.display.scroller.style.maxHeight = cm.start_h || '200px';
