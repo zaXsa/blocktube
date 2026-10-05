@@ -57,7 +57,7 @@ Filter and block unwanted content from YouTube™.
 
 ## Advanced blocking (custom JavaScript filter)
 
-Options page > `Advanced Blocking` tab. Check `Enable advanced blocking`,
+Options page > `Advanced` panel. Check `Enable advanced blocking`,
 edit the function, then `Save`. It runs **after** the built-in
 title/channel/regex/duration options and only while the checkbox is checked —
 return truthy to block, falsy to allow:
@@ -82,7 +82,7 @@ examples): [docs/advanced-blocking.md](docs/advanced-blocking.md).
   **always disables advanced blocking** (`Enable advanced blocking` is
   unchecked), even if the backup had it enabled. Imported JavaScript is
   arbitrary executable code, so it must never silently start running.
-* After an import: open the `Advanced Blocking` tab, review the imported code,
+* After an import: open the `Advanced` panel, review the imported code,
   re-check `Enable advanced blocking` only if you trust it, then `Save`.
   Until you do, the imported function is stored but inert.
 

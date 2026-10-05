@@ -55,6 +55,7 @@
   "globals": {
     "CodeMirror": "readonly",
     "BLOCKTUBE_CONSTS": "readonly",
+    "BLOCKTUBE_ANNOTATIONS": "readonly",
     "CONTEXT_BLOCK_TYPES": "readonly",
     "globalThis": "readonly",
     "importScripts": "readonly"

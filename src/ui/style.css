@@ -157,19 +157,6 @@ body {
 
 /* SECTION */
 
-/* Headers */
-form legend {
-  font-size: medium;
-  background: var(--light);
-  margin-top: 1.5em;
-  padding-block: .6em;
-  padding-inline: .8em;
-  border-radius: 8px 8px 0px 0px;
-  border: 1px solid var(--borders);
-  /*  Fix default CSS spacing  */
-  margin-bottom: -1px;
-}
-
 /* Fieldsets */
 fieldset {
   margin: 0;
@@ -243,8 +230,10 @@ fieldset:last-of-type div {
   height: auto;
 }
 .CodeMirror .CodeMirror-scroll {
-  min-height: 220px;
-  max-height: 220px;
+  /* Viewport-relative so the list shows as many entries as the window
+     allows: grows with content from 40vh up to 70vh, then scrolls. */
+  min-height: 40vh;
+  max-height: 70vh;
 }
 
 .CodeMirror-fullscreen {
@@ -268,15 +257,15 @@ fieldset:last-of-type div {
   transition: 200ms all;
 }
 
-/* FINAL BUTTONS */
-div.buttons {
+/* DATA PANEL BUTTONS */
+.data-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: .4em;
   margin-top: 10px;
 }
 
-div.buttons input {
+.data-buttons input {
   flex: 1 1 30%;
   color: var(--white-force);
   text-transform: uppercase;
@@ -284,19 +273,9 @@ div.buttons input {
   font-weight: 600;
   font-size: medium;
   border: none;
-  
   padding-inline: 1em;
   padding-block: .5em;
   border-radius: .3em;
-}
-
-div.buttons span {
-  font-size: medium;
-  width: 100% !important;
-  order: 1;
-  background: var(--light) !important;
-  border-radius: 8px;
-  padding: 1em;
 }
 
 /* Save - Export - Import */
@@ -367,70 +346,191 @@ input#import {
 .cm-darktheme .CodeMirror-activeline-background { background: #191e2a; }
 .cm-darktheme .CodeMirror-matchingbracket { text-decoration: underline; color: white !important; }
 
-/* TABS */
+/* OPTIONS LAYOUT — sticky panel header + left sidebar nav, one panel visible */
 
-.tabset {
+.opt-head {
+  display: flex;
+  align-items: center;
+  gap: .6em;
+  margin-top: 1.5em;
+  padding: .6em .8em;
+  background: var(--light);
+  border: 1px solid var(--borders);
+  border-radius: 8px;
+}
+
+.sticky-top {
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 99999999;
+}
+
+#opt_title {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: small;
+}
+
+.dirty-flag {
+  font-size: small;
+  font-style: italic;
+}
+
+.opt-counts {
+  font-size: small;
+  opacity: .8;
+  white-space: nowrap;
+}
+
+.opt-head-spacer {
+  flex: 1 1 auto;
+}
+
+.opt-head input[type="button"] {
+  color: var(--white-force);
+  text-transform: uppercase;
+  background-color: var(--btn-bg);
+  font-weight: 600;
+  font-size: small;
+  border: 1.5px solid transparent;
+  padding-inline: 1em;
+  padding-block: .5em;
+  border-radius: .3em;
+  cursor: pointer;
+}
+
+.opt-shell {
+  display: flex;
+  flex-direction: row;
+  gap: 1em;
   margin-top: 1%;
 }
 
-.tabset > .tab-menu > input[type="radio"] {
-  position: absolute;
-  left: -200vw;
+.opt-nav {
+  display: flex;
+  flex-direction: column;
+  min-width: 12em;
+  background-color: var(--btn-bg);
+  border: 1px solid var(--borders);
+  border-radius: 8px;
+  padding: .4em;
+  align-self: flex-start;
 }
 
-.tabset .tab-panel {
-  display: none;
-}
-
-.tabset > .tab-menu > label {
-  position: relative;
-  display: block;
-  
-
+.opt-nav-btn {
+  text-align: left;
   text-decoration: none;
   color: var(--white);
-  background-color: var(--btn-bg);
+  background-color: transparent;
   font-weight: 600;
   font-size: smaller;
-  
-  padding-inline: .3em;
-  padding-block: .3em;
-  margin-left: 0em;
+  padding-inline: .6em;
+  padding-block: .5em;
+  border: 1.5px solid transparent;
+  border-radius: .3em;
+  cursor: pointer;
+}
 
-  transition: 150ms all;
+.opt-nav-btn:hover {
+  color: #06c;
+}
+
+.opt-nav-btn.is-active {
+  color: #06c;
+  background-color: var(--cm-bg);
+  border-color: var(--borders);
+}
+
+.opt-panels {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.opt-panel h2 {
+  font-size: medium;
+  background: var(--light);
+  margin-top: 0;
+  margin-bottom: -1px;
+  padding-block: .6em;
+  padding-inline: .8em;
+  border-radius: 8px 8px 0px 0px;
+  border: 1px solid var(--borders);
+}
+
+.opt-panel > div {
+  margin-block: 1.5em;
+}
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: .6em;
+  background: var(--light);
+  border: 1px solid var(--borders);
+  border-radius: 8px;
+  padding: .6em .8em;
+  font-weight: 600;
+}
+
+/* One-line Add box above the ID editors */
+.add-row {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+}
+
+.add-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--btn-bg);
+  border: 2px solid transparent;
+  border-radius: 3px;
+  color: var(--white);
+  padding-inline: .5em;
+  padding-block: .35em;
+}
+
+.add-input:focus {
+  background-color: var(--btn-bg-focus);
+  border-bottom: 2px solid var(--white);
+}
+
+.add-row input[type="button"] {
+  color: var(--white-force);
+  text-transform: uppercase;
+  background-color: var(--btn-bg);
+  font-weight: 600;
+  font-size: small;
+  border: 1.5px solid transparent;
+  padding-inline: 1em;
+  padding-block: .5em;
+  border-radius: .3em;
+  cursor: pointer;
+}
+
+.add-notice {
+  /* Own reserved line under the row: showing text never moves the button. */
+  min-height: 1.5em;
+  font-size: small;
+  color: #f28779;
+  white-space: nowrap;
+}
+
+.add-notice.is-hidden {
+  visibility: hidden;
+}
+
+/* Locked annotation lines inside the filter editors */
+.cm-annotation-locked {
+  background: rgba(128, 128, 128, .18);
+  font-style: italic;
+}
+
+input#discard_btn {
+  background: #234444;
   border: 1.5px solid transparent;
   cursor: pointer;
-  border-bottom: 1px solid var(--borders);
-}
-
-.tabset > .tab-menu > label:hover,
-.tabset > .tab-menu > input:focus + label {
-  color: #06c;
-}
-
-.tabset > .tab-menu > label:hover::after,
-.tabset > .tab-menu > input:focus + label::after,
-.tabset > .tab-menu > input:checked + label::after {
-  background: #06c;
-}
-
-.tabset > .tab-menu > input:checked + label {
-  color: #06c;
-  border-right: 1px solid var(--borders);
-  border-left: 1px solid var(--borders);
-}
-
-#tabbed-filters-parent {
-  display: flex;
-  flex-direction: row;
-}
-
-#tabbed-filters-menu {
-  background-color: var(--btn-bg);
-}
-
-#tabbed-filters-content {
-  width:100%
 }
 
 /* Mobile */
@@ -445,8 +545,14 @@ input#import {
     height: 24px;
     width: 24px;
   }
-  #tabbed-filters-parent {
+  .opt-shell {
     flex-direction: column;
+  }
+  .opt-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+    align-self: stretch;
   }
   fieldset > div {
     padding-inline: 0;
@@ -460,13 +566,6 @@ input#import {
     padding-bottom: 5px;
   }
 
-}
-
-.sticky {
-  position: -webkit-sticky;
-  position: sticky;
-  bottom: 0;
-  z-index: 99999999;
 }
 
 .flex-break {

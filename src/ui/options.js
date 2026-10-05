@@ -30,6 +30,16 @@
 
   const textAreas = ['title', 'channelName', 'channelId', 'videoId', 'comment'];
 
+  // Panel -> filter editors it hosts, for the header counts.
+  const PANEL_EDITORS = {
+    'panel-channel-id': ['channelId'],
+    'panel-channel-name': ['channelName'],
+    'panel-video-id': ['videoId'],
+    'panel-video-title': ['title'],
+    'panel-comments': ['comment'],
+  };
+  let activePanel = 'panel-general';
+
   // Declarative binding: element id -> { path: dotted storage path, type: 'checkbox'|'text'|'select'|'number'|'array', default: value }
   // Types: checkbox stores boolean to .checked; text/select stores string to .value; number parses int for .value; array reads/writes numeric indices
   // Keep the column alignment below: range start/end ignore comments are not honored in JS.
@@ -162,6 +172,7 @@
     saveData('status_save');
     detectColorScheme();
     $('save_btn').classList.add('disabled-btn');
+    $('dirty_flag').hidden = true;
   }
 
   function loginForm() {
@@ -222,6 +233,9 @@
     // refresh CodeMirror editors after the tab becomes visible (a/19970695)
     setTimeout(() => Object.values(jsEditors).forEach((v) => v.refresh()), 1);
     $('save_btn').classList.add('disabled-btn');
+    $('dirty_flag').hidden = true;
+    applyReadOnlyMarks();
+    updateCounts();
   }
 
   // !! Helpers
@@ -269,6 +283,116 @@
       status.textContent = '';
       status.classList.remove('alert-animate');
     }, 1000);
+  }
+
+  // Header counts: active (non-empty, non-`//`) entries per visible panel
+  // plus the total across all filter editors.
+  function updateCounts() {
+    let total = 0;
+    const perEditor = {};
+    Object.values(PANEL_EDITORS).forEach((keys) => {
+      keys.forEach((key) => {
+        const n = BLOCKTUBE_ANNOTATIONS.countActiveEntries(jsEditors[key].getValue().split('\n'));
+        perEditor[key] = n;
+        total += n;
+      });
+    });
+    const keys = PANEL_EDITORS[activePanel] || [];
+    const panelTotal = keys.reduce((sum, key) => sum + (perEditor[key] || 0), 0);
+    $('opt_counts').textContent =
+      keys.length > 0 ? `${panelTotal} in this panel · ${total} total` : `${total} total`;
+  }
+
+  function showAddNotice(noticeId, text) {
+    const notice = $(noticeId);
+    notice.textContent = text;
+    notice.classList.remove('is-hidden');
+    clearTimeout(notice.hideTimer);
+    notice.hideTimer = setTimeout(() => {
+      notice.classList.add('is-hidden');
+    }, 3000);
+  }
+
+  // One-line Add box for an ID editor: raw IDs only (trimmed, validated,
+  // deduped against existing non-annotation lines). Appends the ID and marks
+  // dirty via the editor change event. No URL parsing, no handle resolution.
+  function setupAddBox(editorKey, inputId, buttonId, noticeId) {
+    const add = () => {
+      const input = $(inputId);
+      const id = input.value.trim();
+      if (id === '') {
+        showAddNotice(noticeId, 'Paste an ID first.');
+        return;
+      }
+      if (!BLOCKTUBE_ANNOTATIONS.isValidFilterId(id)) {
+        showAddNotice(noticeId, 'Invalid ID — letters, digits, _ and - only, up to 64 chars.');
+        return;
+      }
+      const existing = BLOCKTUBE_ANNOTATIONS.splitAnnotations(
+        jsEditors[editorKey].getValue().split('\n'),
+      ).rules.map((line) => line.trim());
+      if (existing.includes(id)) {
+        showAddNotice(noticeId, 'Already in the list.');
+        return;
+      }
+      const cm = jsEditors[editorKey];
+      const current = cm.getValue();
+      // Provenance comment mirroring the context-menu format
+      // (`// Blocked by context menu (<text>) (<date>)`). No handle is known
+      // here, so that slot stays blank instead of repeating the ID, and the
+      // locale date matches content_script.js. Groups are separated by a
+      // blank line, like the context-menu groups.
+      const now = new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+      }).format(new Date());
+      const annotation = `// Blocked by direct add () (${now})`;
+      const prefix = current.trim() === '' ? '' : `${current.replace(/\n+$/, '')}\n\n`;
+      cm.setValue(`${prefix}${annotation}\n${id}\n`);
+      applyReadOnlyMarks(editorKey);
+      input.value = '';
+      input.focus();
+    };
+    $(buttonId).addEventListener('click', add);
+    $(inputId).addEventListener('keydown', (evt) => {
+      if (evt.key === 'Enter') {
+        evt.preventDefault();
+        add();
+      }
+    });
+  }
+
+  // Lock `//` annotation lines (including context-menu date lines) inside
+  // the editors via read-only marks: displayed, preserved by the untouched
+  // save path, never user-editable. Blank separators stay editable.
+  // Marks die on setValue, so re-apply after every populate/import/Add.
+  const readOnlyMarks = {};
+
+  function applyReadOnlyMarks(editorKey) {
+    const keys = editorKey === undefined ? textAreas : [editorKey];
+    keys.forEach((key) => {
+      const cm = jsEditors[key];
+      if (!cm) return;
+      (readOnlyMarks[key] || []).forEach((mark) => mark.clear());
+      const marks = [];
+      const lines = cm.getValue().split('\n');
+      BLOCKTUBE_ANNOTATIONS.splitAnnotations(lines).annotations.forEach((entry) => {
+        if (entry.line.trim() === '' || entry.index >= cm.lineCount()) return;
+        const text = cm.getLine(entry.index) || '';
+        marks.push(
+          cm.markText(
+            { line: entry.index, ch: 0 },
+            { line: entry.index, ch: text.length },
+            { readOnly: true, className: 'cm-annotation-locked' },
+          ),
+        );
+      });
+      readOnlyMarks[key] = marks;
+    });
   }
 
   function saveFile(data, fileName) {
@@ -381,6 +505,11 @@
     saveForm();
   });
 
+  $('discard_btn').addEventListener('click', () => {
+    if ($('save_btn').classList.contains('disabled-btn')) return;
+    populateForms();
+  });
+
   $('login').addEventListener('submit', (evt) => {
     evt.preventDefault();
     loginForm();
@@ -410,24 +539,31 @@
     }
   });
 
-  $('options').addEventListener('change', (evt) => {
-    if (evt.target.tagName === 'INPUT' && evt.target.getAttribute('type') === 'radio') return;
+  $('options').addEventListener('change', () => {
     $('save_btn').classList.remove('disabled-btn');
+    $('dirty_flag').hidden = false;
+    updateCounts();
   });
 
   function initTabs(name) {
     const element = document.getElementById(name);
-    element.querySelectorAll("input[type='radio']").forEach((box) => {
-      box.addEventListener('click', (e) => {
-        element.querySelectorAll('section').forEach((tab) => {
-          tab.style.display = 'none';
+    element.querySelectorAll('.opt-nav-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        element.querySelectorAll('.opt-panel').forEach((panel) => {
+          panel.style.display = 'none';
         });
+        element.querySelectorAll('.opt-nav-btn').forEach((other) => {
+          other.classList.remove('is-active');
+        });
+        btn.classList.add('is-active');
 
-        const tabName = e.target.getAttribute('aria-controls');
-        const tab = document.getElementById(tabName);
-        tab.style.display = 'block';
+        const panel = document.getElementById(btn.getAttribute('aria-controls'));
+        panel.style.display = 'block';
+        activePanel = btn.getAttribute('aria-controls');
+        $('opt_title').textContent = btn.textContent;
+        updateCounts();
 
-        tab.querySelectorAll('textarea').forEach((txtarea) => {
+        panel.querySelectorAll('textarea').forEach((txtarea) => {
           const areaName = txtarea.getAttribute('id');
           if (has.call(jsEditors, areaName)) {
             jsEditors[areaName].refresh();
@@ -435,11 +571,15 @@
         });
       });
 
-      if (box.checked) {
-        box.click();
+      if (btn.classList.contains('is-active')) {
+        btn.click();
       }
     });
   }
 
-  initTabs('tabbed-filters-parent');
+  initTabs('opt-shell');
+
+  setupAddBox('channelId', 'channelId_add', 'channelId_add_btn', 'channelId_add_notice');
+  setupAddBox('videoId', 'videoId_add', 'videoId_add_btn', 'videoId_add_notice');
+  updateCounts();
 })();

@@ -33,82 +33,29 @@
         </fieldset>
       </form>
       <form id="options" style="display:none">
-        <legend>Filter options</legend>
-        <fieldset>
-          <div class="tabset" id="tabbed-filters-parent">
-            <div class="tab-menu" id="tabbed-filters-menu">
-              <input type="radio" name="filter-tab" id="tab-title" aria-controls="title-tab-content" checked>
-              <label style="border-top: 1px solid var(--borders)" for="tab-title">Video title</label>
-
-              <input type="radio" name="filter-tab" id="tab-channel-name" aria-controls="channel-name-tab-content">
-              <label for="tab-channel-name">Channel name</label>
-
-              <input type="radio" name="filter-tab" id="tab-video-id" aria-controls="videoid-tab-content">
-              <label for="tab-video-id">Video ID</label>
-
-              <input type="radio" name="filter-tab" id="tab-channel-id" aria-controls="channelid-tab-content">
-              <label for="tab-channel-id">Channel ID</label>
-
-              <input type="radio" name="filter-tab" id="tab-comment" aria-controls="comment-tab-content">
-              <label for="tab-comment">Comment content</label>
-
-              <input type="radio" name="filter-tab" id="tab-advanced" aria-controls="advanced-tab-content">
-              <label for="tab-advanced">
-                Advanced Blocking
-              </label>
-
-            </div>
-            <div class="tab-panels" id="tabbed-filters-content">
-              <section id="title-tab-content" class="tab-panel">
-                <div>
-                  <textarea id="title"></textarea>
-                  <div id="title_resizer" class="cm-resizer"></div>
-                </div>
-              </section>
-
-              <section id="channel-name-tab-content" class="tab-panel">
-                <div>
-                  <textarea id="channelName"></textarea>
-                  <div id="channelName_resizer" class="cm-resizer"></div>
-                </div>
-              </section>
-
-              <section id="videoid-tab-content" class="tab-panel">
-                <div>
-                  <textarea id="videoId"></textarea>
-                  <div id="videoId_resizer" class="cm-resizer"></div>
-                </div>
-              </section>
-
-              <section id="channelid-tab-content" class="tab-panel">
-                <div>
-                  <textarea id="channelId"></textarea>
-                  <div id="channelId_resizer" class="cm-resizer"></div>
-                </div>
-              </section>
-
-              <section id="comment-tab-content" class="tab-panel">
-                <div>
-                  <textarea id="comment"></textarea>
-                  <div id="comment_resizer" class="cm-resizer"></div>
-                </div>
-              </section>
-
-              <section id="advanced-tab-content" class="tab-panel">
-                <div id="advanced_tab" style="display: none" class="advanced">
-                        <textarea id="javascript"></textarea>
-                        <div id="javascript_resizer" class="cm-resizer"></div>
-                </div>
-                <div>
-                  <input id="enable_javascript" type="checkbox" />
-                  <label style="margin-top:5px" for="enable_javascript">Enable advanced blocking <a style="cursor: pointer" target="_blank" href="https://github.com/amitbl/blocktube/wiki/Advanced-Blocking" class="tooltip-link" title="Don't enable this unless you know some Javascript and have read the documentation">?</a></label>
-                </div>
-              </section>
-
-            </div>
-        </fieldset>
-        <legend>Other options</legend>
-        <fieldset>
+        <div class="opt-head sticky-top">
+          <span id="opt_title">General</span>
+          <span id="opt_counts" class="opt-counts"></span>
+          <span id="dirty_flag" class="dirty-flag" hidden>Unsaved changes</span>
+          <span class="opt-head-spacer"></span>
+          <input type="button" id="discard_btn" value="✕ Discard" />
+          <input type="button" class="disabled-btn" id="save_btn" value="✔ Save" />
+        </div>
+        <div class="opt-shell" id="opt-shell">
+          <nav class="opt-nav" id="opt-nav" aria-label="Option sections">
+            <button type="button" class="opt-nav-btn is-active" data-panel="panel-general" aria-controls="panel-general">General</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-channel-id" aria-controls="panel-channel-id">Channel ID</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-channel-name" aria-controls="panel-channel-name">Channel Name</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-video-id" aria-controls="panel-video-id">Video ID</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-video-title" aria-controls="panel-video-title">Video Title</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-comments" aria-controls="panel-comments">Comments</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-advanced" aria-controls="panel-advanced">Advanced</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-data" aria-controls="panel-data">Import/Export</button>
+          </nav>
+          <div class="opt-panels" id="opt-panels">
+            <section class="opt-panel" id="panel-general" aria-label="General">
+              <h2>General</h2>
+              <fieldset>
           <div>
             <label class="block-label" for="ui_theme">UI Theme</label>
             <select id="ui_theme" class="select">
@@ -186,14 +133,82 @@
             <label for="disable_on_history">Disable blocking on watch history page</label>
           </div>
           </div>
-        </fieldset>
-        <div class="buttons sticky">
-          <input type="button" class="disabled-btn" id="save_btn" value="✔ Save" />
-          <input type="button" id="export" value="🡅 Export" />
-          <input type="button" id="import" value="🡇 Import" />
-          <input type="file" id="myfile" accept="application/json" style="display:none" />
-          <div class="flex-break"></div>
-          <div id="status_save" class="alert"></div>
+              </fieldset>
+            </section>
+
+            <section class="opt-panel" id="panel-channel-id" aria-label="Channel ID" style="display:none">
+              <h2>Channel ID</h2>
+              <div class="add-row">
+                <input type="text" id="channelId_add" class="add-input" placeholder="Paste a channel ID, then Add" autocomplete="off" spellcheck="false" />
+                <input type="button" id="channelId_add_btn" value="+ Add" />
+              </div>
+              <div id="channelId_add_notice" class="add-notice is-hidden"></div>
+              <div>
+                <textarea id="channelId"></textarea>
+                <div id="channelId_resizer" class="cm-resizer"></div>
+              </div>
+            </section>
+
+            <section class="opt-panel" id="panel-channel-name" aria-label="Channel Name" style="display:none">
+              <h2>Channel Name</h2>
+              <div>
+                <textarea id="channelName"></textarea>
+                <div id="channelName_resizer" class="cm-resizer"></div>
+              </div>
+            </section>
+
+            <section class="opt-panel" id="panel-video-id" aria-label="Video ID" style="display:none">
+              <h2>Video ID</h2>
+              <div class="add-row">
+                <input type="text" id="videoId_add" class="add-input" placeholder="Paste a video ID, then Add" autocomplete="off" spellcheck="false" />
+                <input type="button" id="videoId_add_btn" value="+ Add" />
+              </div>
+              <div id="videoId_add_notice" class="add-notice is-hidden"></div>
+              <div>
+                <textarea id="videoId"></textarea>
+                <div id="videoId_resizer" class="cm-resizer"></div>
+              </div>
+            </section>
+
+            <section class="opt-panel" id="panel-video-title" aria-label="Video Title" style="display:none">
+              <h2>Video Title</h2>
+              <div>
+                <textarea id="title"></textarea>
+                <div id="title_resizer" class="cm-resizer"></div>
+              </div>
+            </section>
+
+            <section class="opt-panel" id="panel-comments" aria-label="Comments" style="display:none">
+              <h2>Comments</h2>
+              <div>
+                <textarea id="comment"></textarea>
+                <div id="comment_resizer" class="cm-resizer"></div>
+              </div>
+            </section>
+
+            <section class="opt-panel" id="panel-advanced" aria-label="Advanced" style="display:none">
+              <h2>Advanced</h2>
+              <div class="advanced-toggle">
+                <input id="enable_javascript" type="checkbox" />
+                <label for="enable_javascript">Enable advanced blocking <a style="cursor: pointer" target="_blank" href="https://github.com/amitbl/blocktube/wiki/Advanced-Blocking" class="tooltip-link" title="Don't enable this unless you know some Javascript and have read the documentation">?</a></label>
+              </div>
+              <div id="advanced_tab" style="display: none" class="advanced">
+                <textarea id="javascript"></textarea>
+                <div id="javascript_resizer" class="cm-resizer"></div>
+              </div>
+            </section>
+
+            <section class="opt-panel" id="panel-data" aria-label="Import/Export" style="display:none">
+              <h2>Import/Export</h2>
+              <div class="data-buttons">
+                <input type="button" id="export" value="🡅 Export" />
+                <input type="button" id="import" value="🡇 Import" />
+                <input type="file" id="myfile" accept="application/json" style="display:none" />
+                <div class="flex-break"></div>
+                <div id="status_save" class="alert"></div>
+              </div>
+            </section>
+          </div>
         </div>
       </form>
     </div>
@@ -211,6 +226,7 @@
     <script type="text/javascript" src="cm/simple.js"></script>
     <script type="text/javascript" src="cm-syntax.js"></script>
     <script type="text/javascript" src="../scripts/consts.js"></script>
+    <script type="text/javascript" src="annotations.js"></script>
     <script type="text/javascript" src="options.js"></script>
   </body>
 </html>

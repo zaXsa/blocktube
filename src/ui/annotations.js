@@ -75,5 +75,28 @@
     return out;
   }
 
-  root.BLOCKTUBE_ANNOTATIONS = { isAnnotationLine, splitAnnotations, mergeAnnotations };
+  // Raw-ID validity for the Add boxes: the same rule the background enforces
+  // on context-menu entries (src/scripts/background.js) — YouTube IDs use
+  // this charset, capped at 64 chars. No URL parsing, no handle resolution,
+  // no network: anything else is rejected with a notice.
+  function isValidFilterId(id) {
+    return typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id);
+  }
+
+  // Active entries for the header counts: editable rule lines only
+  // (non-empty, non-`//`). Annotations are metadata, not rules.
+  function countActiveEntries(lines) {
+    if (!(lines instanceof Array)) {
+      throw new TypeError('countActiveEntries expects an array of lines');
+    }
+    return splitAnnotations(lines).rules.length;
+  }
+
+  root.BLOCKTUBE_ANNOTATIONS = {
+    isAnnotationLine,
+    splitAnnotations,
+    mergeAnnotations,
+    isValidFilterId,
+    countActiveEntries,
+  };
 })(globalThis);

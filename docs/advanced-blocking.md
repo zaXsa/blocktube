@@ -7,7 +7,7 @@ here.)
 
 ## Enabling
 
-Options page > `Advanced Blocking` tab. Check `Enable advanced blocking`, edit
+Options page > `Advanced` panel. Check `Enable advanced blocking`, edit
 the function, then `Save`. It runs **after** the built-in title/channel/regex/
 duration options and only while the checkbox is checked: if those already
 matched, your function is not consulted for that item.
