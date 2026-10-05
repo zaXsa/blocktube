@@ -408,16 +408,18 @@
       if (TABLE_EDITORS[editorKey] && !$(TABLE_EDITORS[editorKey].editorWrap).hidden) {
         clearReadOnlyMarks(editorKey);
       }
-      // A lingering search filter would hide the new row: clear it. The
-      // table itself stays exactly where it is (refreshTable preserves the
-      // view); when adding from raw mode, the return toggle jumps to it.
+      // A lingering search filter would hide the new row: clear it. Reveal
+      // it now in table mode, or on return when adding from raw mode.
       if (TABLE_EDITORS[editorKey]) {
         const t = TABLE_EDITORS[editorKey];
         $(t.search).value = '';
         tableState[editorKey].query = '';
-        tableState[editorKey].pendingAddedId = $(t.tableWrap).hidden ? id : null;
+        tableState[editorKey].pendingAddedId = id;
       }
       refreshTable(editorKey, true);
+      if (TABLE_EDITORS[editorKey] && !$(TABLE_EDITORS[editorKey].tableWrap).hidden) {
+        jumpToAddedRow(editorKey);
+      }
       updateRawSearch(editorKey);
       input.value = '';
       input.focus();
@@ -444,12 +446,16 @@
       search: 'channelId_search',
       shown: 'channelId_shown',
       toggle: 'channelId_raw_toggle',
+      jumpTop: 'channelId_jump_top',
+      jumpEnd: 'channelId_jump_end',
       tableWrap: 'channelId_table_wrap',
       editorWrap: 'channelId_editor_wrap',
       range: 'channelId_range',
       page: 'channelId_page',
       pages: 'channelId_pages',
       pageGo: 'channelId_page_go',
+      prev: 'channelId_prev',
+      next: 'channelId_next',
       top: 'channelId_top',
       end: 'channelId_end',
     },
@@ -459,12 +465,16 @@
       search: 'videoId_search',
       shown: 'videoId_shown',
       toggle: 'videoId_raw_toggle',
+      jumpTop: 'videoId_jump_top',
+      jumpEnd: 'videoId_jump_end',
       tableWrap: 'videoId_table_wrap',
       editorWrap: 'videoId_editor_wrap',
       range: 'videoId_range',
       page: 'videoId_page',
       pages: 'videoId_pages',
       pageGo: 'videoId_page_go',
+      prev: 'videoId_prev',
+      next: 'videoId_next',
       top: 'videoId_top',
       end: 'videoId_end',
     },
@@ -474,12 +484,16 @@
       search: 'channelName_search',
       shown: 'channelName_shown',
       toggle: 'channelName_raw_toggle',
+      jumpTop: 'channelName_jump_top',
+      jumpEnd: 'channelName_jump_end',
       tableWrap: 'channelName_table_wrap',
       editorWrap: 'channelName_editor_wrap',
       range: 'channelName_range',
       page: 'channelName_page',
       pages: 'channelName_pages',
       pageGo: 'channelName_page_go',
+      prev: 'channelName_prev',
+      next: 'channelName_next',
       top: 'channelName_top',
       end: 'channelName_end',
     },
@@ -489,12 +503,16 @@
       search: 'title_search',
       shown: 'title_shown',
       toggle: 'title_raw_toggle',
+      jumpTop: 'title_jump_top',
+      jumpEnd: 'title_jump_end',
       tableWrap: 'title_table_wrap',
       editorWrap: 'title_editor_wrap',
       range: 'title_range',
       page: 'title_page',
       pages: 'title_pages',
       pageGo: 'title_page_go',
+      prev: 'title_prev',
+      next: 'title_next',
       top: 'title_top',
       end: 'title_end',
     },
@@ -504,12 +522,16 @@
       search: 'comment_search',
       shown: 'comment_shown',
       toggle: 'comment_raw_toggle',
+      jumpTop: 'comment_jump_top',
+      jumpEnd: 'comment_jump_end',
       tableWrap: 'comment_table_wrap',
       editorWrap: 'comment_editor_wrap',
       range: 'comment_range',
       page: 'comment_page',
       pages: 'comment_pages',
       pageGo: 'comment_page_go',
+      prev: 'comment_prev',
+      next: 'comment_next',
       top: 'comment_top',
       end: 'comment_end',
     },
@@ -547,41 +569,29 @@
     if (keepPosition === true && state.filtered.length > 0) {
       let pos = state.filtered.findIndex((row) => String(row.id) === anchorId);
       if (pos < 0) pos = Math.min(anchorPos, state.filtered.length - 1);
-      if (pos > 0) {
-        const scroller = $(TABLE_EDITORS[key].scroll);
-        const savedTop = scroller.scrollTop;
-        goToTablePage(key, Math.floor(pos / TABLE_CHUNK) + 1);
-        scroller.scrollTop = Math.min(savedTop, scroller.scrollHeight);
-      }
+      if (pos > 0) goToTablePage(key, Math.floor(pos / TABLE_CHUNK) + 1);
     }
   }
 
   function applyTableQuery(key) {
-    const t = TABLE_EDITORS[key];
     const state = tableState[key];
     const query = state.query.trim().toLowerCase();
     state.filtered =
       query === '' ? state.rows : state.rows.filter((row) => tableRowText(row).includes(query));
-    state.shown = 0;
-    state.renderStart = 0;
-    state.firstVisible = 0;
-    $(t.rows).textContent = '';
-    $(t.page).value = '1';
-    renderMoreRows(key);
+    goToTablePage(key, 1);
   }
 
-  function renderMoreRows(key) {
+  // True paging: exactly one page lives in the DOM. Nothing mutates while
+  // scrolling, so the view cannot jitter, drift, or cascade.
+  function renderTablePage(key) {
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
-    if (state.shown >= state.filtered.length) {
-      updateTableShown(key);
-      return;
-    }
     const fragment = document.createDocumentFragment();
-    const end = Math.min(state.shown + TABLE_CHUNK, state.filtered.length);
-    for (let i = state.shown; i < end; i++) {
+    const end = Math.min(state.renderStart + TABLE_CHUNK, state.filtered.length);
+    for (let i = state.renderStart; i < end; i++) {
       fragment.appendChild(buildTableRow(key, state.filtered[i], i + 1));
     }
+    $(t.rows).textContent = '';
     $(t.rows).appendChild(fragment);
     state.shown = end;
     updateTableShown(key);
@@ -600,31 +610,38 @@
     $(t.rows).textContent = '';
     $(t.page).value = String(safe);
     $(t.scroll).scrollTop = 0;
-    renderMoreRows(key);
+    renderTablePage(key);
   }
 
-  // Keep the page number (and footer range) in sync with the scroll
-  // position: the page reflects the first visible row. Never fights the
-  // user while the page input itself is focused.
+  // Keep the page number in sync with the scroll position, derived from the
+  // first visible row (exact: matches the # column). Binary search keeps it
+  // cheap on large windows. Never fights the user while the page input
+  // itself is focused.
   function syncTablePage(key) {
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
     const scroller = $(t.scroll);
     const rows = $(t.rows).children;
-    if (rows.length === 0) return;
-    const thead = scroller.querySelector('thead');
-    const top = scroller.getBoundingClientRect().top + (thead ? thead.offsetHeight : 0);
-    let first = state.renderStart;
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].getBoundingClientRect().bottom > top) {
-        first = state.renderStart + i;
-        break;
+    if (rows.length > 0) {
+      const thead = scroller.querySelector('thead');
+      const top = scroller.getBoundingClientRect().top + (thead ? thead.offsetHeight : 0);
+      let lo = 0;
+      let hi = rows.length - 1;
+      let first = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (rows[mid].getBoundingClientRect().bottom > top) {
+          first = mid;
+          hi = mid - 1;
+        } else {
+          lo = mid + 1;
+        }
       }
+      state.firstVisible = state.renderStart + first;
     }
-    state.firstVisible = first;
     const pageInput = $(t.page);
     if (document.activeElement !== pageInput) {
-      pageInput.value = String(Math.floor(first / TABLE_CHUNK) + 1);
+      pageInput.value = String(Math.floor((state.firstVisible || 0) / TABLE_CHUNK) + 1);
     }
     updateTableShown(key);
   }
@@ -649,6 +666,7 @@
       state.query.trim() === ''
         ? `${state.shown} of ${state.rows.length}`
         : `${state.shown} of ${state.filtered.length} (from ${state.rows.length})`;
+    // Footer range shows the visible window (exact, like the # column).
     const from = state.filtered.length === 0 ? 0 : (state.firstVisible || 0) + 1;
     $(t.range).textContent = `Rows ${from}–${state.shown} of ${state.filtered.length}`;
     $(t.pages).textContent = `of ${Math.max(1, Math.ceil(state.filtered.length / TABLE_CHUNK))}`;
@@ -719,9 +737,11 @@
     updateTableShown(key);
   }
 
-  // Reveal a just-added row: jump to its page (a lingering search would
-  // otherwise hide it). Consumes the pending marker.
+  // Reveal a just-added row: jump to its page, then bring the row itself
+  // into view (rather than snapping the page to the top). Consumes the
+  // pending marker.
   function jumpToAddedRow(key) {
+    const t = TABLE_EDITORS[key];
     const state = tableState[key];
     const id = state.pendingAddedId;
     if (!id) return;
@@ -729,6 +749,9 @@
     const pos = state.filtered.findIndex((row) => String(row.id) === id);
     if (pos < 0) return;
     goToTablePage(key, Math.floor(pos / TABLE_CHUNK) + 1);
+    const row = state.filtered[pos];
+    const tr = $(t.rows).querySelector(`tr[data-rule-index="${row.ruleIndex}"]`);
+    if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   function buildTableRow(key, row, displayIndex) {
@@ -745,6 +768,7 @@
     // Exact IDs are short and stay on one line; patterns (names, titles,
     // comments) may be long, so they wrap instead of widening the table.
     idCell.className = key === 'channelId' || key === 'videoId' ? 'cell-id' : 'cell-pattern';
+    idCell.title = String(row.id);
     idCell.textContent = String(row.id);
     tr.appendChild(idCell);
 
@@ -884,20 +908,18 @@
         stepRawSearch(key, evt.shiftKey ? -1 : 1);
       }
     });
-    $(t.scroll).addEventListener('scroll', (evt) => {
-      const el = evt.target;
-      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) renderMoreRows(key);
-      // Page number tracks the scroll position (rAF-throttled for long lists).
+    // One page lives in the DOM, so scrolling never mutates anything: the
+    // handler only syncs the page number (rAF-throttled).
+    $(t.scroll).addEventListener('scroll', () => {
       const st = tableState[key];
-      if (!st.scrollTick) {
-        st.scrollTick = true;
-        const sync = () => {
-          st.scrollTick = false;
-          syncTablePage(key);
-        };
-        if (window.requestAnimationFrame) window.requestAnimationFrame(sync);
-        else sync();
-      }
+      if (st.scrollTick) return;
+      st.scrollTick = true;
+      const sync = () => {
+        st.scrollTick = false;
+        syncTablePage(key);
+      };
+      if (window.requestAnimationFrame) window.requestAnimationFrame(sync);
+      else sync();
     });
     $(t.rows).addEventListener('click', (evt) => {
       const btn = evt.target.closest('button[data-action]');
@@ -946,6 +968,12 @@
     });
     const goToPageInput = () => goToTablePage(key, parseInt($(t.page).value, 10));
     $(t.pageGo).addEventListener('click', goToPageInput);
+    const stepPage = (direction) => {
+      // goToTablePage clamps into range.
+      goToTablePage(key, parseInt($(t.page).value, 10) + direction);
+    };
+    $(t.prev).addEventListener('click', () => stepPage(-1));
+    $(t.next).addEventListener('click', () => stepPage(1));
     $(t.page).addEventListener('keydown', (evt) => {
       if (evt.key === 'Enter') goToPageInput();
     });
@@ -953,6 +981,28 @@
     $(t.end).addEventListener('click', () => {
       goToTablePage(key, Math.ceil(tableState[key].filtered.length / TABLE_CHUNK));
       $(t.scroll).scrollTop = $(t.scroll).scrollHeight;
+    });
+    // Toolbar jumps work in both views: table pages vs raw first/last line.
+    $(t.jumpTop).addEventListener('click', () => {
+      if ($(t.editorWrap).hidden) {
+        goToTablePage(key, 1);
+        return;
+      }
+      const cm = jsEditors[key];
+      cm.setCursor({ line: 0, ch: 0 });
+      cm.scrollIntoView({ line: 0, ch: 0 }, 20);
+    });
+    $(t.jumpEnd).addEventListener('click', () => {
+      if ($(t.editorWrap).hidden) {
+        goToTablePage(key, Math.ceil(tableState[key].filtered.length / TABLE_CHUNK));
+        $(t.scroll).scrollTop = $(t.scroll).scrollHeight;
+        return;
+      }
+      const cm = jsEditors[key];
+      const last = cm.lastLine();
+      const endCh = (cm.getLine(last) || '').length;
+      cm.setCursor({ line: last, ch: endCh });
+      cm.scrollIntoView({ line: last, ch: endCh }, 20);
     });
     refreshTable(key);
   }

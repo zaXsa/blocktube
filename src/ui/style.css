@@ -262,7 +262,7 @@ fieldset:last-of-type div {
 .data-buttons {
   display: flex;
   flex-wrap: wrap;
-  gap: .4em;
+  gap: .8em;
   margin-top: 10px;
 }
 
@@ -275,8 +275,12 @@ fieldset:last-of-type div {
   font-size: medium;
   border: none;
   padding-inline: 1em;
-  padding-block: .5em;
+  padding-block: .7em;
   border-radius: .3em;
+}
+
+.data-buttons .alert {
+  flex-basis: 100%;
 }
 
 /* Save - Export - Import */
@@ -611,6 +615,10 @@ input#import {
   width: 3.5em;
 }
 
+.col-id {
+  width: 15em;
+}
+
 .cell-index {
   text-align: right;
 }
@@ -662,6 +670,7 @@ input#import {
 .entity-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: small;
 }
 
@@ -689,6 +698,12 @@ input#import {
 .cell-id {
   font-family: monospace;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-label {
+  overflow-wrap: anywhere;
 }
 
 .cell-pattern {
@@ -847,7 +862,6 @@ input#discard_btn {
   background-color: #085820fc;
   text-align:center;
   color: var(--white-force);
-  position: absolute;
 }
 
 .alert-animate {

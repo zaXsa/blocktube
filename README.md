@@ -45,7 +45,7 @@ Discard, and an `Unsaved changes` flag):
   dated provenance comment.
 * **Advanced** — the custom JavaScript filter behind `Enable advanced
   blocking`.
-* **Import/Export** — backup and restore (`blocktube_backup.json`).
+* **Export / Import** — backup and restore (`blocktube_backup.json`).
 
 ## FAQ
   
