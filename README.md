@@ -101,7 +101,9 @@ examples): [docs/advanced-blocking.md](docs/advanced-blocking.md).
   arbitrary executable code, so it must never silently start running.
 * After an import: open the `Advanced` panel, review the imported code,
   re-check `Enable advanced blocking` only if you trust it, then `Save`.
-  Until you do, the imported function is stored but inert.
+  Until you do, the imported function is stored but inert. If the backup
+  contained a custom filter, the `Export / Import` panel keeps a reminder
+  up until you re-enable it.
 
 ## Development & Build
 

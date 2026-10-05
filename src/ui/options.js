@@ -339,6 +339,23 @@
     });
   }
 
+  // Counts/warnings re-scan every editor (tens of ms on huge lists), so
+  // the keystroke-heavy change path debounces while discrete actions
+  // (navigation, populate, table edits) update immediately.
+  let countsTimer = 0;
+
+  function scheduleCounts() {
+    clearTimeout(countsTimer);
+    countsTimer = setTimeout(() => {
+      updateCounts();
+      updateWarnings();
+      // Keep raw match positions accurate while typing with an active query.
+      Object.keys(TABLE_EDITORS).forEach((key) => {
+        if (!$(TABLE_EDITORS[key].editorWrap).hidden) updateRawSearch(key);
+      });
+    }, 150);
+  }
+
   function showAddNotice(noticeId, text) {
     const notice = $(noticeId);
     notice.textContent = text;
@@ -433,10 +450,10 @@
     });
   }
 
-  // Entity tables for the ID lists: one row per blocked ID over the
+  // Entity tables for the filter lists: one row per entry over the
   // unchanged array storage. Table mutations splice the editor's lines and
   // setValue, so dirty/counts/marks/warnings/save paths are reused untouched.
-  // Rows are cheap objects; the DOM is chunked with infinite scroll. All row
+  // Rows are cheap objects; true paging keeps one page in the DOM. All row
   // content is set via textContent (raw mode allows arbitrary text).
   const TABLE_CHUNK = 150;
   const TABLE_EDITORS = {
@@ -558,13 +575,13 @@
     if (!state) return;
     // Anchor on the first visible row so edits keep the exact view instead
     // of throwing the user back to the top: re-locate it by ID after the
-    // rebuild (indices shift), then restore the scroll offset.
+    // rebuild (indices shift).
     let anchorId = null;
     const anchorPos = state.firstVisible || state.renderStart || 0;
     if (keepPosition === true && state.filtered.length > 0 && anchorPos < state.filtered.length) {
       anchorId = String(state.filtered[anchorPos].id);
     }
-    state.rows = BLOCKTUBE_ANNOTATIONS.parseRuleRows(tableLines(key));
+    // applyTableQuery re-parses rows fresh from the editor.
     applyTableQuery(key);
     if (keepPosition === true && state.filtered.length > 0) {
       let pos = state.filtered.findIndex((row) => String(row.id) === anchorId);
@@ -575,6 +592,8 @@
 
   function applyTableQuery(key) {
     const state = tableState[key];
+    // Always re-parse: raw typing changes lines without touching table state.
+    state.rows = BLOCKTUBE_ANNOTATIONS.parseRuleRows(tableLines(key));
     const query = state.query.trim().toLowerCase();
     state.filtered =
       query === '' ? state.rows : state.rows.filter((row) => tableRowText(row).includes(query));
@@ -695,6 +714,8 @@
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
     clearRawSearch(key);
+    // Fresh rows: raw typing changes lines without touching table state.
+    state.rows = BLOCKTUBE_ANNOTATIONS.parseRuleRows(tableLines(key));
     if ($(t.editorWrap).hidden) {
       updateTableShown(key);
       return;
@@ -842,6 +863,7 @@
     jsEditors[key].setValue(lines.join('\n'));
     applyReadOnlyMarks(key);
     refreshTable(key, true);
+    updateCounts();
   }
 
   // Re-parse before acting: the stored lines may have changed since the row
@@ -1007,11 +1029,11 @@
     refreshTable(key);
   }
 
-  // Lock `//` annotation lines (including context-menu date lines) inside
-  // the editors via read-only marks: displayed, preserved by the untouched
-  // save path, never user-editable. Blank separators stay editable.
-  // Marks die on setValue, so re-apply after every populate/import/Add.
-  // Raw-list mode clears them for free editing (re-applied on return).
+  // Lock `//` annotation lines inside the editors via read-only marks.
+  // Only table-less editors (Comments) take locks: table-backed editors are
+  // hidden in table mode (marks invisible and irrelevant) and free editing
+  // in raw mode — this also avoids re-marking tens of thousands of lines.
+  // Marks die on setValue; the save path preserves text regardless.
   const readOnlyMarks = {};
 
   function clearReadOnlyMarks(editorKey) {
@@ -1084,6 +1106,24 @@
           populateForms(json);
           // Importing a backup must not silently enable code execution.
           $('enable_javascript').checked = false;
+          // Remind only when there is actually a custom filter to miss:
+          // non-blank imported JavaScript that now sits inert until
+          // re-enabled. Hidden again once the user re-enables it.
+          const importedJs =
+            json.filterData && typeof json.filterData.javascript === 'string'
+              ? json.filterData.javascript
+              : '';
+          const warn = $('import_js_warning');
+          if (importedJs.trim() !== '') {
+            warn.textContent =
+              'This backup contained a custom JavaScript filter. Advanced blocking was left ' +
+              'disabled for safety — review it under Advanced, then re-check Enable advanced ' +
+              'blocking if you trust it.';
+            warn.classList.remove('is-hidden');
+          } else {
+            warn.classList.add('is-hidden');
+            warn.textContent = '';
+          }
           saveForm();
         }
       } catch (ex) {
@@ -1198,6 +1238,7 @@
     if (v.target.checked) {
       $('advanced_tab').style.removeProperty('display');
       setTimeout(() => jsEditors['javascript'].refresh(), 1);
+      $('import_js_warning').classList.add('is-hidden');
     } else {
       $('advanced_tab').style.display = 'none';
     }
@@ -1209,8 +1250,7 @@
     if (evt.target.closest('.table-toolbar, .table-footer, .add-row, .table-wrap')) return;
     $('save_btn').classList.remove('disabled-btn');
     $('dirty_flag').hidden = false;
-    updateCounts();
-    updateWarnings();
+    scheduleCounts();
   });
 
   function initTabs(name) {
