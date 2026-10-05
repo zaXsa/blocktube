@@ -30,6 +30,23 @@ Filter and block unwanted content from YouTube™.
 * [Advanced blocking](docs/advanced-blocking.md) — custom JavaScript filter
   reference (`video` fields, `objectType` renderers, examples)
 
+## Options page
+
+Sidebar sections, one panel at a time (header shows entry counts, Save /
+Discard, and an `Unsaved changes` flag):
+
+* **General** — every other option (theme, password, runtime, checkboxes).
+* **Channel ID / Video ID / Channel Name / Video Title / Comments** — each
+  list as a searchable table (one row per entry with its date, source, and
+  an editable label; single-click remove; paging for large lists) plus a
+  `Raw list` toggle for direct text editing. ID panels take raw IDs only;
+  name/title/comment panels take keywords or `/regex/flags` (invalid regex
+  is flagged without blocking save). An `Add` box appends entries with a
+  dated provenance comment.
+* **Advanced** — the custom JavaScript filter behind `Enable advanced
+  blocking`.
+* **Import/Export** — backup and restore (`blocktube_backup.json`).
+
 ## FAQ
   
 * What is the difference between "Channel ID" and "Channel Name"  
@@ -126,7 +143,6 @@ Chrome: https://developer.chrome.com/docs/extensions/mv3/getstarted/development-
 
 ## Future work
 
-* User-friendly options UI
 * Whitelist mode
 
 ## License

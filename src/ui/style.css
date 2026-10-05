@@ -231,9 +231,10 @@ fieldset:last-of-type div {
 }
 .CodeMirror .CodeMirror-scroll {
   /* Viewport-relative so the list shows as many entries as the window
-     allows: grows with content from 40vh up to 70vh, then scrolls. */
-  min-height: 40vh;
-  max-height: 70vh;
+     allows, but the surrounding chrome (header, toolbar, footer) always
+     stays on screen: the min() caps win on short windows. */
+  min-height: min(40vh, calc(100vh - 420px));
+  max-height: min(65vh, calc(100vh - 330px));
 }
 
 .CodeMirror-fullscreen {
@@ -475,14 +476,16 @@ input#import {
 
 /* One-line Add box above the ID editors */
 .add-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: .4em;
+  flex-wrap: wrap;
 }
 
 .add-input {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: none;
+  width: min(28em, 100%);
   background: var(--btn-bg);
   border: 2px solid transparent;
   border-radius: 3px;
@@ -497,6 +500,7 @@ input#import {
 }
 
 .add-row input[type="button"] {
+  margin-left: auto;
   color: var(--white-force);
   text-transform: uppercase;
   background-color: var(--btn-bg);
@@ -510,21 +514,280 @@ input#import {
 }
 
 .add-notice {
-  /* Own reserved line under the row: showing text never moves the button. */
-  min-height: 1.5em;
+  /* Floating bubble under the row: overlays instead of taking layout space,
+     so it can never wrap the button or shift anything. */
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  max-width: 100%;
+  z-index: 50;
+  pointer-events: none;
+  background: var(--light);
+  border: 1px solid #f28779;
+  border-radius: .3em;
+  padding: .3em .6em;
   font-size: small;
   color: #f28779;
-  white-space: nowrap;
 }
 
 .add-notice.is-hidden {
-  visibility: hidden;
+  display: none;
+}
+
+/* Entity tables on the ID panels */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+}
+
+.table-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--btn-bg);
+  border: 2px solid transparent;
+  border-radius: 3px;
+  color: var(--white);
+  padding-inline: .5em;
+  padding-block: .35em;
+}
+
+.table-search:focus {
+  background-color: var(--btn-bg-focus);
+  border-bottom: 2px solid var(--white);
+}
+
+.table-toolbar input[type="button"] {
+  min-width: 6em;
+  color: var(--white-force);
+  text-transform: uppercase;
+  background-color: var(--btn-bg);
+  font-weight: 600;
+  font-size: small;
+  border: 1.5px solid transparent;
+  padding-inline: 1em;
+  padding-block: .5em;
+  border-radius: .3em;
+  cursor: pointer;
+}
+
+.table-shown {
+  font-size: small;
+  opacity: .8;
+  white-space: nowrap;
+}
+
+.table-footer {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+  margin-top: .4em;
+}
+
+.table-footer input[type="button"] {
+  color: var(--white-force);
+  text-transform: uppercase;
+  background-color: var(--btn-bg);
+  font-weight: 600;
+  font-size: small;
+  border: 1.5px solid transparent;
+  padding-inline: .8em;
+  padding-block: .4em;
+  border-radius: .3em;
+  cursor: pointer;
+}
+
+.page-input {
+  width: 4.5em;
+  background: var(--btn-bg);
+  border: 2px solid transparent;
+  border-radius: 3px;
+  color: var(--white);
+  padding-inline: .4em;
+  padding-block: .25em;
+}
+
+.col-index {
+  width: 3.5em;
+}
+
+.cell-index {
+  text-align: right;
+}
+
+.table-scroll {
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid var(--borders);
+  border-radius: 8px;
+}
+
+/* Fixed equal heights for the table/raw views so toggling never jumps.
+   Both views fill the same viewport-relative box; inner areas scroll.
+   (Class selectors, so the `hidden` attribute keeps working.) */
+.fixed-view {
+  height: min(54vh, calc(100vh - 340px));
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fixed-view[hidden] {
+  display: none;
+}
+
+.fixed-view .table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.fixed-view .CodeMirror {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+.fixed-view .CodeMirror-scroll {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+}
+
+.fixed-view .cm-resizer,
+.fixed-view .table-footer {
+  flex: none;
+}
+
+.entity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: small;
+}
+
+.entity-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  text-transform: uppercase;
+  background: var(--light);
+  padding: .5em .6em;
+  border-bottom: 1px solid var(--borders);
+}
+
+.entity-table td {
+  padding: .35em .6em;
+  border-bottom: 1px solid var(--borders);
+  vertical-align: middle;
+}
+
+.entity-table tr:last-child td {
+  border-bottom: none;
+}
+
+.cell-id {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.cell-pattern {
+  font-family: monospace;
+  overflow-wrap: anywhere;
+}
+
+.cell-date {
+  white-space: nowrap;
+  opacity: .8;
+}
+
+.cell-label .muted,
+.muted {
+  opacity: .5;
+}
+
+.small {
+  font-size: smaller;
+}
+
+.col-action {
+  width: 3em;
+  text-align: right;
+}
+
+.row-remove,
+.row-edit {
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: .3em;
+  color: var(--white);
+  cursor: pointer;
+  font-size: medium;
+  line-height: 1;
+  padding: .1em .35em;
+}
+
+.row-remove:hover {
+  color: #ef4f43;
+  border-color: var(--borders);
+}
+
+.row-edit {
+  font-size: small;
+  opacity: .6;
+  margin-left: .4em;
+}
+
+.row-edit:hover {
+  opacity: 1;
+  border-color: var(--borders);
+}
+
+.label-input {
+  width: 100%;
+  background: var(--btn-bg-focus);
+  border: 2px solid #06c;
+  border-radius: 3px;
+  color: var(--white);
+  padding-inline: .5em;
+  padding-block: .25em;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* Search-match highlighting: stronger than the pale vendor default so
+   matches read clearly on both themes (applies to Ctrl-F overlay and the
+   raw-list search alike). */
+.CodeMirror .cm-searching {
+  background-color: #ffd400;
+  color: #000;
 }
 
 /* Locked annotation lines inside the filter editors */
 .cm-annotation-locked {
   background: rgba(128, 128, 128, .18);
   font-style: italic;
+}
+
+/* Invalid-regex warnings under the regex-evaluated editors */
+.regex-warning {
+  margin-top: .4em;
+  padding: .4em .6em;
+  font-size: small;
+  color: #e8a33d;
+  background: rgba(232, 163, 61, .12);
+  border: 1px solid rgba(232, 163, 61, .5);
+  border-radius: .3em;
+}
+
+.regex-warning.is-hidden {
+  display: none;
 }
 
 input#discard_btn {

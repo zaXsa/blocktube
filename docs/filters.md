@@ -21,8 +21,16 @@ Work while focused in one of the filter textareas:
   automatically — it is harmless but has no effect, so omit it.
 * **Lines starting with `//` are comments and are ignored** by the filter
   engine. BlockTube itself writes these when you block via the context menu
-  (`// Blocked by context menu (…) (…)` with the date) — they are annotations,
-  not rules, and the options page locks them against editing.
+  (`// Blocked by context menu (…) (…)` with the date) or the Add box
+  (`// Blocked by direct add () (…)`). They are annotations, not rules: the
+  options page shows them locked in the table view (freely editable in raw
+  mode) and preserves them across saves.
+* **`// Label: …` attaches a personal label** to the entry below it, shown
+  in the table and editable there with the ✎ button. Like all `//` lines it
+  never affects filtering, import, or export.
+* **Invalid regex is flagged, not fatal.** A `/pattern/flags` line that fails
+  `RegExp` construction shows a warning under the editor naming the line
+  numbers — it simply never matches. Saving is never blocked.
 
 ## Keyword boundaries
 

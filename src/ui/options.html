@@ -140,10 +140,42 @@
               <h2>Channel ID</h2>
               <div class="add-row">
                 <input type="text" id="channelId_add" class="add-input" placeholder="Paste a channel ID, then Add" autocomplete="off" spellcheck="false" />
+                <span id="channelId_add_notice" class="add-notice is-hidden"></span>
                 <input type="button" id="channelId_add_btn" value="+ Add" />
               </div>
-              <div id="channelId_add_notice" class="add-notice is-hidden"></div>
-              <div>
+              <div class="table-toolbar">
+                <input type="search" id="channelId_search" class="table-search" placeholder="Search this list…" autocomplete="off" />
+                <span id="channelId_shown" class="table-shown"></span>
+                <span class="opt-head-spacer"></span>
+                <input type="button" id="channelId_raw_toggle" value="Raw list" />
+              </div>
+              <div id="channelId_table_wrap" class="table-wrap fixed-view">
+                <div id="channelId_table_scroll" class="table-scroll">
+                  <table class="entity-table">
+                    <thead>
+                      <tr>
+                        <th class="col-index">#</th>
+                        <th>ID</th>
+                        <th>Label</th>
+                        <th>Date</th>
+                        <th class="col-action"><span class="visually-hidden">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="channelId_rows"></tbody>
+                  </table>
+                </div>
+                <div class="table-footer">
+                  <span id="channelId_range" class="table-shown"></span>
+                  <span class="opt-head-spacer"></span>
+                  <label class="table-shown" for="channelId_page">Page</label>
+                  <input type="number" id="channelId_page" class="page-input" min="1" value="1" />
+                  <span id="channelId_pages" class="table-shown"></span>
+                  <input type="button" id="channelId_page_go" value="Go" />
+                  <input type="button" id="channelId_top" value="⤒ Top" />
+                  <input type="button" id="channelId_end" value="⤓ End" />
+                </div>
+              </div>
+              <div id="channelId_editor_wrap" class="fixed-view" hidden>
                 <textarea id="channelId"></textarea>
                 <div id="channelId_resizer" class="cm-resizer"></div>
               </div>
@@ -151,7 +183,45 @@
 
             <section class="opt-panel" id="panel-channel-name" aria-label="Channel Name" style="display:none">
               <h2>Channel Name</h2>
-              <div>
+              <div class="add-row">
+                <input type="text" id="channelName_add" class="add-input" placeholder="Add keyword or /regex/…" autocomplete="off" spellcheck="false" />
+                <span id="channelName_add_notice" class="add-notice is-hidden"></span>
+                <input type="button" id="channelName_add_btn" value="+ Add" />
+              </div>
+              <div class="table-toolbar">
+                <input type="search" id="channelName_search" class="table-search" placeholder="Search this list…" autocomplete="off" />
+                <span id="channelName_shown" class="table-shown"></span>
+                <span class="opt-head-spacer"></span>
+                <input type="button" id="channelName_raw_toggle" value="Raw list" />
+              </div>
+              <div id="warning-channelName" class="regex-warning is-hidden"></div>
+              <div id="channelName_table_wrap" class="table-wrap fixed-view">
+                <div id="channelName_table_scroll" class="table-scroll">
+                  <table class="entity-table">
+                    <thead>
+                      <tr>
+                        <th class="col-index">#</th>
+                        <th>Pattern</th>
+                        <th>Label</th>
+                        <th>Date</th>
+                        <th class="col-action"><span class="visually-hidden">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="channelName_rows"></tbody>
+                  </table>
+                </div>
+                <div class="table-footer">
+                  <span id="channelName_range" class="table-shown"></span>
+                  <span class="opt-head-spacer"></span>
+                  <label class="table-shown" for="channelName_page">Page</label>
+                  <input type="number" id="channelName_page" class="page-input" min="1" value="1" />
+                  <span id="channelName_pages" class="table-shown"></span>
+                  <input type="button" id="channelName_page_go" value="Go" />
+                  <input type="button" id="channelName_top" value="⤒ Top" />
+                  <input type="button" id="channelName_end" value="⤓ End" />
+                </div>
+              </div>
+              <div id="channelName_editor_wrap" class="fixed-view" hidden>
                 <textarea id="channelName"></textarea>
                 <div id="channelName_resizer" class="cm-resizer"></div>
               </div>
@@ -161,10 +231,42 @@
               <h2>Video ID</h2>
               <div class="add-row">
                 <input type="text" id="videoId_add" class="add-input" placeholder="Paste a video ID, then Add" autocomplete="off" spellcheck="false" />
+                <span id="videoId_add_notice" class="add-notice is-hidden"></span>
                 <input type="button" id="videoId_add_btn" value="+ Add" />
               </div>
-              <div id="videoId_add_notice" class="add-notice is-hidden"></div>
-              <div>
+              <div class="table-toolbar">
+                <input type="search" id="videoId_search" class="table-search" placeholder="Search this list…" autocomplete="off" />
+                <span id="videoId_shown" class="table-shown"></span>
+                <span class="opt-head-spacer"></span>
+                <input type="button" id="videoId_raw_toggle" value="Raw list" />
+              </div>
+              <div id="videoId_table_wrap" class="table-wrap fixed-view">
+                <div id="videoId_table_scroll" class="table-scroll">
+                  <table class="entity-table">
+                    <thead>
+                      <tr>
+                        <th class="col-index">#</th>
+                        <th>ID</th>
+                        <th>Label</th>
+                        <th>Date</th>
+                        <th class="col-action"><span class="visually-hidden">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="videoId_rows"></tbody>
+                  </table>
+                </div>
+                <div class="table-footer">
+                  <span id="videoId_range" class="table-shown"></span>
+                  <span class="opt-head-spacer"></span>
+                  <label class="table-shown" for="videoId_page">Page</label>
+                  <input type="number" id="videoId_page" class="page-input" min="1" value="1" />
+                  <span id="videoId_pages" class="table-shown"></span>
+                  <input type="button" id="videoId_page_go" value="Go" />
+                  <input type="button" id="videoId_top" value="⤒ Top" />
+                  <input type="button" id="videoId_end" value="⤓ End" />
+                </div>
+              </div>
+              <div id="videoId_editor_wrap" class="fixed-view" hidden>
                 <textarea id="videoId"></textarea>
                 <div id="videoId_resizer" class="cm-resizer"></div>
               </div>
@@ -172,7 +274,45 @@
 
             <section class="opt-panel" id="panel-video-title" aria-label="Video Title" style="display:none">
               <h2>Video Title</h2>
-              <div>
+              <div class="add-row">
+                <input type="text" id="title_add" class="add-input" placeholder="Add keyword or /regex/…" autocomplete="off" spellcheck="false" />
+                <span id="title_add_notice" class="add-notice is-hidden"></span>
+                <input type="button" id="title_add_btn" value="+ Add" />
+              </div>
+              <div class="table-toolbar">
+                <input type="search" id="title_search" class="table-search" placeholder="Search this list…" autocomplete="off" />
+                <span id="title_shown" class="table-shown"></span>
+                <span class="opt-head-spacer"></span>
+                <input type="button" id="title_raw_toggle" value="Raw list" />
+              </div>
+              <div id="warning-title" class="regex-warning is-hidden"></div>
+              <div id="title_table_wrap" class="table-wrap fixed-view">
+                <div id="title_table_scroll" class="table-scroll">
+                  <table class="entity-table">
+                    <thead>
+                      <tr>
+                        <th class="col-index">#</th>
+                        <th>Pattern</th>
+                        <th>Label</th>
+                        <th>Date</th>
+                        <th class="col-action"><span class="visually-hidden">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="title_rows"></tbody>
+                  </table>
+                </div>
+                <div class="table-footer">
+                  <span id="title_range" class="table-shown"></span>
+                  <span class="opt-head-spacer"></span>
+                  <label class="table-shown" for="title_page">Page</label>
+                  <input type="number" id="title_page" class="page-input" min="1" value="1" />
+                  <span id="title_pages" class="table-shown"></span>
+                  <input type="button" id="title_page_go" value="Go" />
+                  <input type="button" id="title_top" value="⤒ Top" />
+                  <input type="button" id="title_end" value="⤓ End" />
+                </div>
+              </div>
+              <div id="title_editor_wrap" class="fixed-view" hidden>
                 <textarea id="title"></textarea>
                 <div id="title_resizer" class="cm-resizer"></div>
               </div>
@@ -180,7 +320,45 @@
 
             <section class="opt-panel" id="panel-comments" aria-label="Comments" style="display:none">
               <h2>Comments</h2>
-              <div>
+              <div class="add-row">
+                <input type="text" id="comment_add" class="add-input" placeholder="Add keyword or /regex/…" autocomplete="off" spellcheck="false" />
+                <span id="comment_add_notice" class="add-notice is-hidden"></span>
+                <input type="button" id="comment_add_btn" value="+ Add" />
+              </div>
+              <div class="table-toolbar">
+                <input type="search" id="comment_search" class="table-search" placeholder="Search this list…" autocomplete="off" />
+                <span id="comment_shown" class="table-shown"></span>
+                <span class="opt-head-spacer"></span>
+                <input type="button" id="comment_raw_toggle" value="Raw list" />
+              </div>
+              <div id="warning-comment" class="regex-warning is-hidden"></div>
+              <div id="comment_table_wrap" class="table-wrap fixed-view">
+                <div id="comment_table_scroll" class="table-scroll">
+                  <table class="entity-table">
+                    <thead>
+                      <tr>
+                        <th class="col-index">#</th>
+                        <th>Pattern</th>
+                        <th>Label</th>
+                        <th>Date</th>
+                        <th class="col-action"><span class="visually-hidden">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="comment_rows"></tbody>
+                  </table>
+                </div>
+                <div class="table-footer">
+                  <span id="comment_range" class="table-shown"></span>
+                  <span class="opt-head-spacer"></span>
+                  <label class="table-shown" for="comment_page">Page</label>
+                  <input type="number" id="comment_page" class="page-input" min="1" value="1" />
+                  <span id="comment_pages" class="table-shown"></span>
+                  <input type="button" id="comment_page_go" value="Go" />
+                  <input type="button" id="comment_top" value="⤒ Top" />
+                  <input type="button" id="comment_end" value="⤓ End" />
+                </div>
+              </div>
+              <div id="comment_editor_wrap" class="fixed-view" hidden>
                 <textarea id="comment"></textarea>
                 <div id="comment_resizer" class="cm-resizer"></div>
               </div>
