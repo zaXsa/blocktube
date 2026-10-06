@@ -17,6 +17,13 @@
 
   function getFlattenByPath(obj, filterPath) {
     if (filterPath === undefined) return;
+    // Function-valued rule paths (e.g. lockupViewModel.channelName): called
+    // with the renderer, flattened the same way so runs-shaped text still
+    // joins. Lets a rule express "the part that looks like X" where no static
+    // dotted path can (see lockupChannelName).
+    if (typeof filterPath === 'function') {
+      return flattenRuns(filterPath(obj));
+    }
     const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
     let value;
     for (let idx = 0; idx < filterPathArr.length; idx += 1) {
@@ -118,6 +125,60 @@
     }
 
     return nextObj;
+  }
+
+  // The channel a lockupViewModel card attributes itself to, or undefined.
+  // A static dotted path cannot express this: channel cards carry the channel
+  // in metadataRows[0], but channel-less cards (a channel's own /videos tab,
+  // "From <channel>" shelves) drop that row, so
+  // `metadataRows.metadataParts.text.content` silently resolves to the VIEW
+  // COUNT ("3.4M") instead — the wrong annotation on allowlist/block entries
+  // and false channelName-filter hits on view counts. The channel part is the
+  // one whose text is a bare label: view/time parts always carry a part-level
+  // accessibilityLabel (views additionally a leadingIcon), the channel part
+  // never does. Single-row cards have no channel row at all.
+  function lockupChannelName(renderer) {
+    const rows = getObjectByPath(
+      renderer,
+      'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows',
+    );
+    if (!Array.isArray(rows) || rows.length < 2) return undefined;
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      for (let j = 0; j < parts.length; j += 1) {
+        const part = parts[j];
+        if (!part || typeof part !== 'object') continue;
+        if (part.accessibilityLabel !== undefined || part.leadingIcon !== undefined) continue;
+        const text = part.text;
+        if (!text || typeof text !== 'object') continue;
+        if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+        const runs = flattenRuns(text);
+        if (typeof runs === 'string' && runs.length > 0) return runs;
+      }
+    }
+    return undefined;
+  }
+
+  // The channel that owns the current page (channel pages only), remembered
+  // from the last payload that carried page metadata. Video cards on a
+  // channel's own tabs omit per-card attribution (no avatar, no channel row),
+  // so without this neither filtering nor the context menu can tell they
+  // belong to the page's channel. Continuation payloads carry no metadata
+  // themselves, hence the cache; it is cleared on navigation (see hooks.js
+  // yt-navigate-start) and only ever set from a real channelMetadataRenderer.
+  let pageChannel = null;
+
+  function rememberPageChannel(root) {
+    if (!root || typeof root !== 'object') return;
+    const md = getObjectByPath(root, 'metadata.channelMetadataRenderer');
+    if (!md || typeof md !== 'object') return;
+    if (typeof md.externalId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(md.externalId)) return;
+    const title = typeof md.title === 'string' ? md.title : flattenRuns(md.title);
+    pageChannel = {
+      id: md.externalId,
+      name: typeof title === 'string' && title.length > 0 ? title : undefined,
+    };
   }
 
   // parseTime() sentinel values:

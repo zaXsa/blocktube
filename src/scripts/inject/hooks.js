@@ -373,6 +373,10 @@
 
   window.addEventListener('yt-navigate-start', () => {
     playerHasBeenBlocked = false;
+    // The page-channel cache (paths.js) is per page: continuations of the new
+    // page repopulate it from fresh metadata, but until then a stale channel
+    // must not attribute the new page's cards.
+    pageChannel = null;
   });
 
   // listen for messages from content script

@@ -240,6 +240,9 @@
     }
     const clean = String(text)
       .replace(/\s+/g, ' ')
+      // Intentional control/bidi strip (see comment above): the range IS the
+      // sanitizer, so the no-control-regex rule is disabled for this line.
+      // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '')
       .trim()
       .slice(0, 200);

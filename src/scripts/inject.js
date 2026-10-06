@@ -50,7 +50,8 @@
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
   // content script and the background (page scripts can forge the type field).
-  const CONTEXT_BLOCK_TYPES = Object.freeze(['channelId', 'videoId', 'whitelist']);
+  // `unwhitelist` removes ids from the allowlist instead of adding them.
+  const CONTEXT_BLOCK_TYPES = Object.freeze(['channelId', 'videoId', 'whitelist', 'unwhitelist']);
 
   globalThis.BLOCKTUBE_CONSTS = BLOCKTUBE_CONSTS;
   globalThis.CONTEXT_BLOCK_TYPES = CONTEXT_BLOCK_TYPES;
@@ -336,7 +337,11 @@
       lockupViewModel: paths({
         videoId: 'contentId',
         title: 'metadata.lockupMetadataViewModel.title.content',
-        channelName: `${lockupMetadataContent}.metadataParts.text.content`,
+        // Function path: a static dotted path misreads the view count as the
+        // channel on channel-less cards (channel tabs, channel shelves) — see
+        // lockupChannelName in paths.js. Evaluated lazily, so the later
+        // fragment is always loaded by call time.
+        channelName: (renderer) => lockupChannelName(renderer),
         badges: `${lockupMetadataContent}[1].badges`,
         vidLength:
           'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
@@ -489,6 +494,13 @@
 
   function getFlattenByPath(obj, filterPath) {
     if (filterPath === undefined) return;
+    // Function-valued rule paths (e.g. lockupViewModel.channelName): called
+    // with the renderer, flattened the same way so runs-shaped text still
+    // joins. Lets a rule express "the part that looks like X" where no static
+    // dotted path can (see lockupChannelName).
+    if (typeof filterPath === 'function') {
+      return flattenRuns(filterPath(obj));
+    }
     const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
     let value;
     for (let idx = 0; idx < filterPathArr.length; idx += 1) {
@@ -592,6 +604,60 @@
     return nextObj;
   }
 
+  // The channel a lockupViewModel card attributes itself to, or undefined.
+  // A static dotted path cannot express this: channel cards carry the channel
+  // in metadataRows[0], but channel-less cards (a channel's own /videos tab,
+  // "From <channel>" shelves) drop that row, so
+  // `metadataRows.metadataParts.text.content` silently resolves to the VIEW
+  // COUNT ("3.4M") instead — the wrong annotation on allowlist/block entries
+  // and false channelName-filter hits on view counts. The channel part is the
+  // one whose text is a bare label: view/time parts always carry a part-level
+  // accessibilityLabel (views additionally a leadingIcon), the channel part
+  // never does. Single-row cards have no channel row at all.
+  function lockupChannelName(renderer) {
+    const rows = getObjectByPath(
+      renderer,
+      'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows',
+    );
+    if (!Array.isArray(rows) || rows.length < 2) return undefined;
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      for (let j = 0; j < parts.length; j += 1) {
+        const part = parts[j];
+        if (!part || typeof part !== 'object') continue;
+        if (part.accessibilityLabel !== undefined || part.leadingIcon !== undefined) continue;
+        const text = part.text;
+        if (!text || typeof text !== 'object') continue;
+        if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+        const runs = flattenRuns(text);
+        if (typeof runs === 'string' && runs.length > 0) return runs;
+      }
+    }
+    return undefined;
+  }
+
+  // The channel that owns the current page (channel pages only), remembered
+  // from the last payload that carried page metadata. Video cards on a
+  // channel's own tabs omit per-card attribution (no avatar, no channel row),
+  // so without this neither filtering nor the context menu can tell they
+  // belong to the page's channel. Continuation payloads carry no metadata
+  // themselves, hence the cache; it is cleared on navigation (see hooks.js
+  // yt-navigate-start) and only ever set from a real channelMetadataRenderer.
+  let pageChannel = null;
+
+  function rememberPageChannel(root) {
+    if (!root || typeof root !== 'object') return;
+    const md = getObjectByPath(root, 'metadata.channelMetadataRenderer');
+    if (!md || typeof md !== 'object') return;
+    if (typeof md.externalId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(md.externalId)) return;
+    const title = typeof md.title === 'string' ? md.title : flattenRuns(md.title);
+    pageChannel = {
+      id: md.externalId,
+      name: typeof title === 'string' && title.length > 0 ? title : undefined,
+    };
+  }
+
   // parseTime() sentinel values:
   //   -1 = time string could not be parsed (matchFilterProperties treats any
   //        vidLen <= 0 as "no duration constraint", so -1 just never matches)
@@ -681,6 +747,9 @@
       return new ObjectFilter(object, ruleConfig, postActions, contextMenus);
 
     this.object = object;
+    // Channel pages stamp their id on the payload root (see rememberPageChannel
+    // in paths.js); continuation payloads do not, they ride the cache.
+    rememberPageChannel(object);
     this.filterRules = ruleConfig;
     // Precomputed rule-name table so matchFilterRule can scan the object's
     // own (few) keys instead of iterating every rule key per visited node.
@@ -830,6 +899,16 @@
       if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
         return { match: null, value };
       }
+      // Fail-open on non-attribution values: structural renderers carry URLs
+      // (tabRenderer), icon types (chips) or other non-IDs in the channelId
+      // slot. Those can never match an exact-ID allowlist entry, so blocking
+      // them deletes page chrome instead of content — channel tabs vanish and
+      // the channel page looks like it never loads. Real channel ids and the
+      // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
+      // the check below via the shared ID charset.
+      if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
+        return { match: null, value };
+      }
       return { match: { name: fieldName, value }, value };
     }
 
@@ -869,6 +948,17 @@
     return value;
   }
 
+  // Per-video cards that may omit their channel on a channel's own page (no
+  // avatar, no channel row — see lockupChannelName). Everywhere else the
+  // fail-open rule stands: unattributed structural renderers (tabs, chips,
+  // shelves) must survive, so the page-channel fallback never applies to them.
+  const pageChannelFallbackRenderers = new Set([
+    'lockupViewModel',
+    'gridVideoRenderer',
+    'videoRenderer',
+    'compactVideoRenderer',
+  ]);
+
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
@@ -896,8 +986,23 @@
       )
         continue;
 
-      const value = getFlattenByPath(obj, filterPath);
-      if (value === undefined) continue;
+      let value = getFlattenByPath(obj, filterPath);
+      if (value === undefined) {
+        // On a channel's own page its video cards carry no channel id; without
+        // the page fallback they can neither be blacklisted nor (in whitelist
+        // mode) hidden for being non-allowlisted — the page looks unblockable.
+        // Structural renderers keep the fail-open rule (see
+        // pageChannelFallbackRenderers): only per-video cards inherit the page.
+        if (
+          fieldName === 'channelId' &&
+          pageChannel !== null &&
+          pageChannelFallbackRenderers.has(rendererKey)
+        ) {
+          value = pageChannel.id;
+        } else {
+          continue;
+        }
+      }
 
       const { match, value: jsValue } = matchField(
         fieldName,
@@ -1673,7 +1778,16 @@
   // Mobile "up next" cards carry no block actions, so we inject full
   // menuServiceItemRenderer entries ourselves; YT renders the toast text
   // ("Channel blocked") in place after the tap.
-  function buildBlockActionMenuItem(attr, menuAction, originalData, label, toastText) {
+  // Allow entries must NOT hide the card (the item stays visible, only the
+  // toast confirms), so they pass hideContainer=false; removals keep it true.
+  function buildBlockActionMenuItem(
+    attr,
+    menuAction,
+    originalData,
+    label,
+    toastText,
+    hideContainer = true,
+  ) {
     return {
       menuServiceItemRenderer: {
         _btOriginalAttr: attr,
@@ -1691,7 +1805,7 @@
           },
           feedbackEndpoint: {
             uiActions: {
-              hideEnclosingContainer: true,
+              hideEnclosingContainer: hideContainer,
             },
             actions: [
               {
@@ -1734,6 +1848,9 @@
   // rule paths. Both block entries ("Block Channel" / "Block Video") carry
   // this pair as _btOriginalData for menuOnTap to consume later.
   function channelAndVideoFrom(parentData, attrKey) {
+    if (attrKey === 'lockupViewModel') {
+      return { channel: lockupChannelFrom(parentData), video: lockupVideoFrom(parentData) };
+    }
     const searchIn = mergedFilterRules[attrKey]?.properties;
     return {
       channel: {
@@ -1744,6 +1861,29 @@
         id: getFlattenByPath(parentData, searchIn?.videoId),
         text: getFlattenByPath(parentData, searchIn?.title),
       },
+    };
+  }
+
+  // Lockup cards resolve through the same rule paths, plus the channel-page
+  // fallback: cards on a channel's own tabs carry no attribution (no avatar,
+  // no channel row), so without the page channel the menu tap posts an
+  // undefined id that the content script drops — the tap silently does
+  // nothing — and the annotation falls back to the view count. lockupChannelName
+  // (a function rule path) already refuses the view count; the page channel
+  // fills the rest.
+  function lockupChannelFrom(renderer) {
+    const searchIn = mergedFilterRules.lockupViewModel?.properties;
+    return {
+      id: getFlattenByPath(renderer, searchIn?.channelId) || pageChannel?.id,
+      text: getFlattenByPath(renderer, searchIn?.channelName) || pageChannel?.name,
+    };
+  }
+
+  function lockupVideoFrom(renderer) {
+    const searchIn = mergedFilterRules.lockupViewModel?.properties;
+    return {
+      id: getFlattenByPath(renderer, searchIn?.videoId),
+      text: getFlattenByPath(renderer, searchIn?.title),
     };
   }
 
@@ -1782,15 +1922,16 @@
       if (!items) return;
       const allowMode = isWhitelistMenuMode();
       if (allowMode) {
-        // Whitelist mode: allowlisting only (videos can't be allowlisted).
+        // Whitelist mode: the visible cards are already allowlisted, so an
+        // "Allow Channel" entry would be pointless — offer removal instead.
         if (channelData.id)
           items.push(
             buildBlockActionMenuItem(
               attr,
-              'allow_channel',
+              'unallow_channel',
               channelData,
-              'Allow Channel',
-              'Channel allowed',
+              'Remove from Whitelist',
+              'Removed from whitelist',
             ),
           );
         return;
@@ -1819,6 +1960,7 @@
             channelData,
             'Allow Channel',
             'Channel allowed',
+            false,
           ),
         );
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
@@ -1830,8 +1972,8 @@
       const channelButtons = allowMode
         ? [
             {
-              action: 'allow_channel',
-              label: 'Allow Channel',
+              action: 'unallow_channel',
+              label: 'Remove from Whitelist',
             },
           ]
         : [
@@ -1996,11 +2138,12 @@
     const items = sheetmodel.content?.listViewModel?.listItems;
     if (!items) return null;
 
-    const searchIn = mergedFilterRules['lockupViewModel'].properties;
-    const channelId = getFlattenByPath(renderer, searchIn.channelId);
-    const channelName = getFlattenByPath(renderer, searchIn.channelName);
-    const videoId = getFlattenByPath(renderer, searchIn.videoId);
-    const videoName = getFlattenByPath(renderer, searchIn.title);
+    const channel = lockupChannelFrom(renderer);
+    const video = lockupVideoFrom(renderer);
+    const channelId = channel.id;
+    const channelName = channel.text;
+    const videoId = video.id;
+    const videoName = video.text;
 
     const metadataBlock = {
       metadata: {
@@ -2066,12 +2209,13 @@
     const blockVideoItem = createLockupButtonItem('Block Video', cleanVideoContext);
 
     if (isWhitelistMenuMode(store)) {
-      // Whitelist mode: allowlisting only (videos can't be allowlisted).
-      const allowChannelItem = createLockupButtonItem(
-        'Allow Channel',
-        createCleanContext(items, store, true, currentObj, true),
+      // Whitelist mode: the visible cards are already allowlisted, so offer
+      // removal instead of a pointless re-allow.
+      const removeChannelItem = createLockupButtonItem(
+        'Remove from Whitelist',
+        createCleanContext(items, store, true, currentObj, true, true),
       );
-      if (hasChannel) items.push(allowChannelItem);
+      if (hasChannel) items.push(removeChannelItem);
       return true;
     }
 
@@ -2089,8 +2233,20 @@
     return true;
   }
 
-  function createCleanContext(items, store, isChannel, currentObj, forAllow = false) {
-    if (store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
+  function createCleanContext(
+    items,
+    store,
+    isChannel,
+    currentObj,
+    forAllow = false,
+    forRemove = false,
+  ) {
+    // Allow/remove entries must never reuse YouTube's native command: it
+    // hides the card (the home-grid removal reported for Allow taps). They
+    // always get a clone with the matching toast and hide flag, regardless
+    // of the block_feedback option. Real block entries keep the identity
+    // fast-path so YouTube's own feedback flow keeps working.
+    if (!forAllow && !forRemove && store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
       const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
       let item;
       for (const icon of targetIcons) {
@@ -2113,9 +2269,11 @@
 
     const msg = !isChannel
       ? 'Video Blocked'
-      : forAllow || isWhitelistMenuMode(store)
-        ? 'Channel Allowed'
-        : 'Channel Blocked';
+      : forRemove
+        ? 'Removed from whitelist'
+        : forAllow || isWhitelistMenuMode(store)
+          ? 'Channel Allowed'
+          : 'Channel Blocked';
     const cleanContext = deepClone(baseContext);
 
     if (cleanContext.commandContext?.onTap) {
@@ -2131,30 +2289,38 @@
         feedbackEndpoint: {
           feedbackToken: '',
           uiActions: {
-            hideEnclosingContainer: true,
+            // Allow entries keep the card in place; removals and blocks
+            // hide it.
+            hideEnclosingContainer: !forAllow || forRemove,
           },
-          actions: [
-            {
-              clickTrackingParams: '',
-              replaceEnclosingAction: {
-                item: {
-                  notificationMultiActionRenderer: {
-                    responseText: {
-                      accessibility: {
-                        accessibilityData: {
-                          label: msg,
+          // No confirmation popups: allow/remove entries execute silently
+          // (their hide flag above is the only native effect). Real block
+          // entries keep the toast.
+          actions:
+            forAllow || forRemove
+              ? []
+              : [
+                  {
+                    clickTrackingParams: '',
+                    replaceEnclosingAction: {
+                      item: {
+                        notificationMultiActionRenderer: {
+                          responseText: {
+                            accessibility: {
+                              accessibilityData: {
+                                label: msg,
+                              },
+                            },
+                            simpleText: msg,
+                          },
+                          buttons: [],
+                          trackingParams: '',
+                          dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
                         },
                       },
-                      simpleText: msg,
                     },
-                    buttons: [],
-                    trackingParams: '',
-                    dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
                   },
-                },
-              },
-            },
-          ],
+                ],
           contentId: currentObj.contentId,
         },
       };
@@ -2182,6 +2348,7 @@
     const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
     const allowChannelItem = createStandardBlockItem('Allow Channel');
+    const removeChannelItem = createStandardBlockItem('Remove from Whitelist');
 
     if (store.options[OPT.BLOCK_FEEDBACK]) {
       for (const item of items) {
@@ -2198,8 +2365,9 @@
     }
 
     if (allowMode) {
-      // Whitelist mode: allowlisting only (videos can't be allowlisted).
-      if (hasChannel) items.push(allowChannelItem);
+      // Whitelist mode: the visible cards are already allowlisted, so offer
+      // removal instead of a pointless re-allow (videos can't be allowlisted).
+      if (hasChannel) items.push(removeChannelItem);
       return false;
     }
 
@@ -2244,7 +2412,64 @@
     }
   }
 
+  // Our own toast layer. The legacy yt-action dispatch below no longer
+  // surfaces a visible toast on current YouTube, so taps that relied on it
+  // confirmed with no feedback at all (the "Channel Allowed" seen on some
+  // surfaces comes from the executed menu command itself — a different
+  // system). This fixed-position div is styled property-by-property through
+  // CSSOM only (no <style>, no innerHTML), so page CSP and Trusted Types
+  // stay out of the way; pointer-events:none so it can never swallow clicks.
+  let toastTimer = 0;
+
+  function showDomToast(msg, duration) {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+    let el = null;
+    if (typeof document.getElementById === 'function') {
+      el = document.getElementById('blocktube-toast');
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'blocktube-toast';
+      el.setAttribute('role', 'status');
+      const style = el.style;
+      style.position = 'fixed';
+      style.left = '50%';
+      style.bottom = '48px';
+      style.transform = 'translateX(-50%)';
+      style.zIndex = '2147483647';
+      style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+      style.color = '#fff';
+      style.fontSize = '14px';
+      style.fontFamily = 'Roboto, Arial, sans-serif';
+      style.padding = '10px 16px';
+      style.borderRadius = '8px';
+      style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.4)';
+      style.pointerEvents = 'none';
+      style.display = 'none';
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.display = 'block';
+    if (typeof clearTimeout === 'function') clearTimeout(toastTimer);
+    if (typeof setTimeout === 'function') {
+      toastTimer = setTimeout(() => {
+        el.style.display = 'none';
+      }, duration);
+    }
+  }
+
   function openToast(msg, duration) {
+    // Guaranteed feedback first; the legacy dispatch below is a harmless
+    // no-op wherever YouTube no longer listens for it.
+    try {
+      showDomToast(msg, duration);
+    } catch (e) {}
+    try {
+      legacyToast(msg, duration);
+    } catch (e) {}
+  }
+
+  function legacyToast(msg, duration) {
     const ytdApp = document.getElementsByTagName('ytd-app')[0];
     if (ytdApp === undefined) return;
     const ytEvent = new CustomEvent('yt-action', {
@@ -2308,6 +2533,10 @@
         type = 'whitelist';
         break;
       }
+      case 'unallow_channel': {
+        type = 'unwhitelist';
+        break;
+      }
       case 'block_video': {
         type = 'videoId';
         break;
@@ -2318,11 +2547,16 @@
 
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
     if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
-      document.getElementById('movie_player').stopVideo();
+      // Allowlists keep playback going; blocks and removals stop it.
+      if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
       const noun = type === 'videoId' ? 'Video' : 'Channel';
-      alert(`${noun} ${type === 'whitelist' ? 'Allowed' : 'Blocked'}`);
+      const verb =
+        type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
+      alert(`${noun} ${verb}`);
     }
-    if (data._btOriginalAttr === 'commentRenderer') {
+    // Runtime comment filtering mirrors the blacklist path only: allowlist
+    // taps must never push the commenter into the channelId blacklist.
+    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
       const comments = document.querySelector('ytm-section-list-renderer');
       storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
       noActiveFilters = computeNoActiveFilters();
@@ -2409,6 +2643,9 @@
       case 'Allow Channel':
         result = { type: 'whitelist', data: channelData };
         break;
+      case 'Remove from Whitelist':
+        result = { type: 'unwhitelist', data: channelData };
+        break;
       case 'Block Video':
         result = { type: 'videoId', data: videoData };
         break;
@@ -2480,7 +2717,10 @@
     return { parentDom, parentData };
   }
 
-  function removeParentHelper(isDataFromRightHandSide, parentDom) {
+  // `message` is the inline placeholder left where the card was: "Blocked"
+  // for blocks, "Removed from whitelist" for removals. Allow entries never
+  // reach this helper — the card stays in place and only a toast confirms.
+  function removeParentHelper(isDataFromRightHandSide, parentDom, message = 'Blocked') {
     if (['YTD-BACKSTAGE-POST-RENDERER', 'YTD-POST-RENDERER'].includes(parentDom.tagName)) {
       parentDom.parentNode.remove();
     } else if (
@@ -2496,7 +2736,7 @@
     } else {
       parentDom.dismissedRenderer = {
         notificationMultiActionRenderer: {
-          responseText: { simpleText: 'Blocked' },
+          responseText: { simpleText: message },
         },
       };
       parentDom.setAttribute('is-dismissed', '');
@@ -2508,7 +2748,11 @@
 
     const { isDataFromRightHandSide, menuAction } = getActionMenuData(this);
 
-    if (!['Block Channel', 'Block Video', 'Allow Channel'].includes(menuAction)) {
+    if (
+      !['Block Channel', 'Block Video', 'Allow Channel', 'Remove from Whitelist'].includes(
+        menuAction,
+      )
+    ) {
       event.preventDefault();
       return;
     }
@@ -2535,11 +2779,23 @@
     // Notify system what data should be added to the block list
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
 
-    if (removeParent) {
-      // Remove correct component based on parentDom
-      removeParentHelper(isDataFromRightHandSide, parentDom);
-    } else if (stopPlayer) {
-      document.getElementById('movie_player').stopVideo();
+    // No confirmation popups by design: allow taps keep the card in place so
+    // it can be watched right away, and removals already replace the card
+    // itself — the storage write above is the whole visible effect.
+    if (type === 'unwhitelist') {
+      if (removeParent) {
+        // Remove correct component based on parentDom
+        removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
+      } else if (stopPlayer) {
+        document.getElementById('movie_player').stopVideo();
+      }
+    } else if (type !== 'whitelist') {
+      if (removeParent) {
+        // Remove correct component based on parentDom
+        removeParentHelper(isDataFromRightHandSide, parentDom);
+      } else if (stopPlayer) {
+        document.getElementById('movie_player').stopVideo();
+      }
     }
 
     if (this.data.serviceEndpoint) {
@@ -2925,6 +3181,10 @@
 
   window.addEventListener('yt-navigate-start', () => {
     playerHasBeenBlocked = false;
+    // The page-channel cache (paths.js) is per page: continuations of the new
+    // page repopulate it from fresh metadata, but until then a stale channel
+    // must not attribute the new page's cards.
+    pageChannel = null;
   });
 
   // listen for messages from content script

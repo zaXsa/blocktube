@@ -4,6 +4,9 @@
       return new ObjectFilter(object, ruleConfig, postActions, contextMenus);
 
     this.object = object;
+    // Channel pages stamp their id on the payload root (see rememberPageChannel
+    // in paths.js); continuation payloads do not, they ride the cache.
+    rememberPageChannel(object);
     this.filterRules = ruleConfig;
     // Precomputed rule-name table so matchFilterRule can scan the object's
     // own (few) keys instead of iterating every rule key per visited node.
@@ -154,6 +157,16 @@
       if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
         return { match: null, value };
       }
+      // Fail-open on non-attribution values: structural renderers carry URLs
+      // (tabRenderer), icon types (chips) or other non-IDs in the channelId
+      // slot. Those can never match an exact-ID allowlist entry, so blocking
+      // them deletes page chrome instead of content — channel tabs vanish and
+      // the channel page looks like it never loads. Real channel ids and the
+      // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
+      // the check below via the shared ID charset.
+      if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
+        return { match: null, value };
+      }
       return { match: { name: fieldName, value }, value };
     }
 
@@ -193,6 +206,17 @@
     return value;
   }
 
+  // Per-video cards that may omit their channel on a channel's own page (no
+  // avatar, no channel row — see lockupChannelName). Everywhere else the
+  // fail-open rule stands: unattributed structural renderers (tabs, chips,
+  // shelves) must survive, so the page-channel fallback never applies to them.
+  const pageChannelFallbackRenderers = new Set([
+    'lockupViewModel',
+    'gridVideoRenderer',
+    'videoRenderer',
+    'compactVideoRenderer',
+  ]);
+
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
@@ -220,8 +244,23 @@
       )
         continue;
 
-      const value = getFlattenByPath(obj, filterPath);
-      if (value === undefined) continue;
+      let value = getFlattenByPath(obj, filterPath);
+      if (value === undefined) {
+        // On a channel's own page its video cards carry no channel id; without
+        // the page fallback they can neither be blacklisted nor (in whitelist
+        // mode) hidden for being non-allowlisted — the page looks unblockable.
+        // Structural renderers keep the fail-open rule (see
+        // pageChannelFallbackRenderers): only per-video cards inherit the page.
+        if (
+          fieldName === 'channelId' &&
+          pageChannel !== null &&
+          pageChannelFallbackRenderers.has(rendererKey)
+        ) {
+          value = pageChannel.id;
+        } else {
+          continue;
+        }
+      }
 
       const { match, value: jsValue } = matchField(
         fieldName,

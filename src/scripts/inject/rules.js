@@ -277,7 +277,11 @@
       lockupViewModel: paths({
         videoId: 'contentId',
         title: 'metadata.lockupMetadataViewModel.title.content',
-        channelName: `${lockupMetadataContent}.metadataParts.text.content`,
+        // Function path: a static dotted path misreads the view count as the
+        // channel on channel-less cards (channel tabs, channel shelves) — see
+        // lockupChannelName in paths.js. Evaluated lazily, so the later
+        // fragment is always loaded by call time.
+        channelName: (renderer) => lockupChannelName(renderer),
         badges: `${lockupMetadataContent}[1].badges`,
         vidLength:
           'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
