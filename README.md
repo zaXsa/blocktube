@@ -11,6 +11,7 @@ Filter and block unwanted content from YouTube™.
 * Blocked videos do not appear anywhere on the site
 * Support for `m.youtube.com` on Firefox for Android and Kiwi Browser
 * Block complete channels
+* Whitelist mode: show only allowlisted channels, hide everything else
 * Supports both keywords and raw Regex
 * Does not break or limit any features of YouTube like playlist or autoplay
 * Hide and block the Trending section
@@ -45,6 +46,11 @@ Discard, and an `Unsaved changes` flag):
   dated provenance comment.
 * **Advanced** — the custom JavaScript filter behind `Enable advanced
   blocking`.
+* **Whitelist** — visible only while whitelist mode is on (the switch lives
+  in `General` and in the popup). One channel ID per line, plus an `Add`
+  box; an empty allowlist hides everything with a channel. While the mode
+  is on, all other panels hide and their filters are bypassed, not deleted
+  — the banner says so, and everything returns when you switch back.
 * **Export / Import** — backup and restore (`blocktube_backup.json`).
 
 ## FAQ
@@ -71,6 +77,18 @@ Discard, and an `Unsaved changes` flag):
   You can choose between two options:
   - Block the entire page and leave a custom message
   - Auto redirect user to the next video
+
+* What happens to my other filters in whitelist mode?  
+  They are bypassed, not deleted. While whitelist mode is on, only
+  allowlisted channels show; title/name/ID/comment filters, duration and
+  watch-progress rules, and the custom JavaScript filter do nothing, but
+  everything is preserved and applies again when you switch the mode off.
+
+* Where is my allowlist?  
+  In the dedicated `Whitelist` panel on the options page (visible only while
+  the mode is on) — one channel ID per line. The fastest way to fill it is
+  the context menu: `Allow Channel` on any video in block mode, or, with
+  the mode on, removing entries again via `Remove from Whitelist`.
 
 ## Advanced blocking (custom JavaScript filter)
 
@@ -142,10 +160,6 @@ npm run fmt:check
 Firefox: https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/
 Chrome: https://developer.chrome.com/docs/extensions/mv3/getstarted/development-basics/#load-unpacked
 ```
-
-## Future work
-
-* Whitelist mode
 
 ## License
 
