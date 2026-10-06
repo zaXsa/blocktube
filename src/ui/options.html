@@ -44,6 +44,7 @@
         <div class="opt-shell" id="opt-shell">
           <nav class="opt-nav" id="opt-nav" aria-label="Option sections">
             <button type="button" class="opt-nav-btn is-active" data-panel="panel-general" aria-controls="panel-general">General</button>
+            <button type="button" class="opt-nav-btn" data-panel="panel-whitelist" aria-controls="panel-whitelist" style="display:none">Whitelist</button>
             <button type="button" class="opt-nav-btn" data-panel="panel-channel-id" aria-controls="panel-channel-id">Channel ID</button>
             <button type="button" class="opt-nav-btn" data-panel="panel-channel-name" aria-controls="panel-channel-name">Channel Name</button>
             <button type="button" class="opt-nav-btn" data-panel="panel-video-id" aria-controls="panel-video-id">Video ID</button>
@@ -89,6 +90,10 @@
           </div>
           <div class="multi-column-content">
           <div style="margin-top: 0">
+            <input id="whitelist_mode" type="checkbox" />
+            <label for="whitelist_mode">Whitelist <span class="tooltip" title="When on, only allowlisted channels show; other filters are bypassed, not deleted. Manage the allowlist in the Whitelist panel.">?</span></label>
+          </div>
+          <div>
             <input id="disable_mixes" type="checkbox" />
             <label for="disable_mixes">Block YouTube's auto-generated playlists and courses</label>
           </div>
@@ -134,6 +139,22 @@
           </div>
           </div>
               </fieldset>
+            </section>
+
+            <section class="opt-panel" id="panel-whitelist" aria-label="Whitelist" style="display:none">
+              <h2>Whitelist</h2>
+              <div id="whitelist_banner" class="whitelist-banner is-hidden">Whitelist active — only allowlisted channels show; other filters are bypassed, not deleted.</div>
+              <div id="whitelist_empty_hint" class="whitelist-hint is-hidden">Allowlist is empty — nothing with a channel will show until you add a channel ID.</div>
+              <div class="add-row">
+                <input type="text" id="whitelist_add" class="add-input" placeholder="Paste a channel ID, then Add" autocomplete="off" spellcheck="false" />
+                <span id="whitelist_add_notice" class="add-notice is-hidden"></span>
+                <input type="button" id="whitelist_add_btn" value="+ Add" />
+              </div>
+              <div id="warning-whitelist" class="regex-warning is-hidden"></div>
+              <div>
+                <textarea id="whitelist"></textarea>
+                <div id="whitelist_resizer" class="cm-resizer"></div>
+              </div>
             </section>
 
             <section class="opt-panel" id="panel-channel-id" aria-label="Channel ID" style="display:none">

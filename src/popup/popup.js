@@ -1,10 +1,15 @@
 document.addEventListener('DOMContentLoaded', () => {
   const checkbox = document.getElementById('toggle-extension');
   const statusText = document.getElementById('status-text');
+  const whitelistCheckbox = document.getElementById('toggle-whitelist');
 
   function renderToggle(state) {
     checkbox.checked = state;
     statusText.textContent = state ? 'On' : 'Off';
+  }
+
+  function renderWhitelist(state) {
+    whitelistCheckbox.checked = state;
   }
 
   function detectColorScheme() {
@@ -30,9 +35,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (Object.hasOwn(changes, BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY)) {
       renderToggle(!!changes.enabled.newValue);
     }
+    // Whitelist flag lives inside storageData.options (same flag the options
+    // page binds via OPTION_BINDINGS); converge so both surfaces stay in sync.
+    if (Object.hasOwn(changes, BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY)) {
+      const next = changes[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY].newValue;
+      if (next && next.options) {
+        renderWhitelist(!!next.options[BLOCKTUBE_CONSTS.OPTIONS.WHITELIST_MODE]);
+      }
+    }
   });
 
-  // Restore the switch state from storage
+  // Restore the switch states from storage
   chrome.storage.local.get(
     [BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY, BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY],
     (result) => {
@@ -48,6 +61,12 @@ document.addEventListener('DOMContentLoaded', () => {
           ? true
           : !!result[BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY],
       );
+      // Missing flag (pre-whitelist installs) reads as falsy -> blacklist.
+      renderWhitelist(
+        !!result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]?.options?.[
+          BLOCKTUBE_CONSTS.OPTIONS.WHITELIST_MODE
+        ],
+      );
     },
   );
 
@@ -55,6 +74,22 @@ document.addEventListener('DOMContentLoaded', () => {
   checkbox.addEventListener('change', (event) => {
     if (event.target instanceof HTMLInputElement) {
       chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY]: event.target.checked });
+      chrome.tabs.reload(); // Reload page to apply the new state
+    }
+  });
+
+  // Whitelist mode switch: read-modify-write the shared storageData blob
+  // (same pre-existing pattern as theme/password writes), then reload so the
+  // new mode applies immediately.
+  whitelistCheckbox.addEventListener('change', (event) => {
+    if (event.target instanceof HTMLInputElement) {
+      const on = event.target.checked;
+      chrome.storage.local.get(BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY, (result) => {
+        const data = result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY] || {};
+        if (!data.options || typeof data.options !== 'object') data.options = {};
+        data.options[BLOCKTUBE_CONSTS.OPTIONS.WHITELIST_MODE] = on;
+        chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: data });
+      });
       chrome.tabs.reload(); // Reload page to apply the new state
     }
   });

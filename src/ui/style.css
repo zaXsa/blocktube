@@ -790,10 +790,13 @@ input#import {
   font-style: italic;
 }
 
-/* Invalid-regex warnings under the regex-evaluated editors */
+/* Invalid-regex warnings under the regex-evaluated editors.
+   The box keeps a single reserved line (visibility, not display) so
+   show/hide while typing never reflows the editor below it. */
 .regex-warning {
   margin-top: .4em;
   padding: .4em .6em;
+  min-height: 2.3em; /* one text line + vertical padding */
   font-size: small;
   color: #e8a33d;
   background: rgba(232, 163, 61, .12);
@@ -802,7 +805,35 @@ input#import {
 }
 
 .regex-warning.is-hidden {
-  display: none;
+  visibility: hidden;
+}
+
+/* Whitelist mode: panel banner/hint.
+   Like .regex-warning above, the boxes keep a single reserved line
+   (visibility, not display) so show/hide never reflows the editor below. */
+.whitelist-banner {
+  padding: .4em .6em;
+  min-height: 2.3em; /* one text line + vertical padding */
+  font-size: small;
+  color: #4aa3ff;
+  background: rgba(0, 102, 204, .12);
+  border: 1px solid rgba(0, 102, 204, .5);
+  border-radius: .3em;
+}
+
+.whitelist-hint {
+  padding: .4em .6em;
+  min-height: 2.3em; /* one text line + vertical padding */
+  font-size: small;
+  color: #e8a33d;
+  background: rgba(232, 163, 61, .12);
+  border: 1px solid rgba(232, 163, 61, .5);
+  border-radius: .3em;
+}
+
+.whitelist-banner.is-hidden,
+.whitelist-hint.is-hidden {
+  visibility: hidden;
 }
 
 input#discard_btn {

@@ -33,6 +33,7 @@ const DEFAULT_OPTIONS = {
   [OPTS.DISABLE_ON_HISTORY]: false,
   [OPTS.VIDLENGTH_TYPE]: 'allow',
   [OPTS.PERCENT_WATCHED_HIDE]: NaN,
+  [OPTS.WHITELIST_MODE]: false,
 };
 
 // keyed by (contextId || frameId) of the sender -> still-open content-script port
@@ -51,6 +52,7 @@ function defaultStorage() {
       channelName: [],
       comment: [],
       title: [],
+      whitelist: [],
       vidLength: [null, null],
       javascript: '',
     },

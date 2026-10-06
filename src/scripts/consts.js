@@ -35,6 +35,7 @@
       DISABLE_ON_HISTORY: 'disable_on_history',
       VIDLENGTH_TYPE: 'vidLength_type',
       PERCENT_WATCHED_HIDE: 'percent_watched_hide',
+      WHITELIST_MODE: 'whitelist_mode',
     }),
   });
 

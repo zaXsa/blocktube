@@ -34,12 +34,14 @@ body {
 .toggle-row {
   display: flex;
   align-items: center;
+  align-self: stretch;
   margin-bottom: 15px;
 }
 
 .status-text {
   margin-left: 10px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 /* Toggle Switch Styling */

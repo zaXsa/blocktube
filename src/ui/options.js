@@ -23,12 +23,13 @@
       channelName: ['// Add your channel name filters below', ''],
       comment: ['// Add your comment filters below', ''],
       title: ['// Add your video title filters below', ''],
+      whitelist: ['// Add your allowlisted channel IDs below', ''],
     },
     options: {},
     uiPass: '',
   };
 
-  const textAreas = ['title', 'channelName', 'channelId', 'videoId', 'comment'];
+  const textAreas = ['title', 'channelName', 'channelId', 'videoId', 'comment', 'whitelist'];
 
   // Panel -> filter editors it hosts, for the header counts.
   const PANEL_EDITORS = {
@@ -37,6 +38,7 @@
     'panel-video-id': ['videoId'],
     'panel-video-title': ['title'],
     'panel-comments': ['comment'],
+    'panel-whitelist': ['whitelist'],
   };
   let activePanel = 'panel-general';
 
@@ -58,6 +60,7 @@
     { id: 'suggestions_only',      path: `options.${OPT.SUGGESTIONS_ONLY}`,     type: 'checkbox', default: false },
     { id: 'block_feedback',        path: `options.${OPT.BLOCK_FEEDBACK}`,       type: 'checkbox', default: false },
     { id: 'enable_javascript',     path: `options.${OPT.ENABLE_JAVASCRIPT}`,    type: 'checkbox', default: false },
+    { id: 'whitelist_mode',        path: `options.${OPT.WHITELIST_MODE}`,       type: 'checkbox', default: false },
 
     // text/select
     { id: 'block_message',  path: `options.${OPT.BLOCK_MESSAGE}`,  type: 'text',   default: ''      },
@@ -199,6 +202,12 @@
   }
 
   function populateForms(obj = undefined) {
+    // Pre-whitelist stored blobs and backups lack the allowlist: default to
+    // an empty list so the editor, export, and counts see [] (Phase 1: the
+    // inject realm still ignores both the flag and the list).
+    if (storageData.filterData && !Array.isArray(storageData.filterData.whitelist)) {
+      storageData.filterData.whitelist = [];
+    }
     textAreas.forEach((v) => {
       const content = get(`filterData.${v}`, [], obj);
       jsEditors[v].setValue(content.join('\n'));
@@ -242,6 +251,7 @@
       // re-locks: raw stays free-editing.
       if (!$(TABLE_EDITORS[key].editorWrap).hidden) clearReadOnlyMarks(key);
     });
+    updateWhitelistUI();
   }
 
   // !! Helpers
@@ -307,6 +317,7 @@
     const panelTotal = keys.reduce((sum, key) => sum + (perEditor[key] || 0), 0);
     $('opt_counts').textContent =
       keys.length > 0 ? `${panelTotal} in this panel · ${total} total` : `${total} total`;
+    updateWhitelistHint();
   }
 
   // Invalid-regex warnings under the regex-evaluated editors: lines that
@@ -323,6 +334,7 @@
   const WARNING_IDS = {
     channelId: 'warning-channelId',
     videoId: 'warning-videoId',
+    whitelist: 'warning-whitelist',
   };
 
   function renderWarning(warnId, lineNumbers, message) {
@@ -362,6 +374,61 @@
         });
       renderWarning(warnId, bad, 'Invalid ID — may match far more than intended');
     });
+  }
+
+  // Whitelist mode (WHITELIST_PLAN.md Phase 1): one flag, two surfaces. Mode
+  // on -> the Whitelist panel and General stay usable (UI theme/password must
+  // never be locked out, and stored General values like block_message stay
+  // honored); every other panel hides. Mode off -> the Whitelist panel hides
+  // and the normal UI returns. The inject realm ignores both the flag and the
+  // list in this phase.
+  const WHITELIST_VISIBLE = ['panel-whitelist', 'panel-general'];
+
+  function isWhitelistModeOn() {
+    const el = $('whitelist_mode');
+    if (el) return el.checked === true;
+    return !!get('options.whitelist_mode', false);
+  }
+
+  // Empty-allowlist hint: shown when no active (non-empty, non-`//`) entries.
+  function updateWhitelistHint() {
+    const hint = $('whitelist_empty_hint');
+    if (!hint || !jsEditors.whitelist) return;
+    const n = BLOCKTUBE_ANNOTATIONS.countActiveEntries(jsEditors.whitelist.getValue().split('\n'));
+    hint.classList.toggle('is-hidden', n !== 0);
+  }
+
+  function updateWhitelistUI() {
+    const on = isWhitelistModeOn();
+    const visible = (panel) =>
+      on ? WHITELIST_VISIBLE.includes(panel) : panel !== 'panel-whitelist';
+    document.querySelectorAll('.opt-nav-btn').forEach((btn) => {
+      btn.style.display = visible(btn.getAttribute('aria-controls')) ? '' : 'none';
+    });
+    if (on && !WHITELIST_VISIBLE.includes(activePanel)) {
+      const wlBtn = document.querySelector('.opt-nav-btn[data-panel="panel-whitelist"]');
+      if (wlBtn) wlBtn.click();
+    } else if (!on && activePanel === 'panel-whitelist') {
+      const genBtn = document.querySelector('.opt-nav-btn[data-panel="panel-general"]');
+      if (genBtn) genBtn.click();
+    }
+    // The nav click above already hides the other panels; enforce again so a
+    // direct call (e.g. populate before any click) still converges.
+    document.querySelectorAll('.opt-panel').forEach((panel) => {
+      if (!visible(panel.id)) {
+        panel.style.display = 'none';
+      } else {
+        panel.style.display = panel.id === activePanel ? 'block' : 'none';
+      }
+    });
+    const banner = $('whitelist_banner');
+    if (banner) banner.classList.toggle('is-hidden', !on);
+    updateWhitelistHint();
+    // The newly shown panel's editor measured while hidden: refresh after
+    // layout settles so the first render is never blank.
+    if (jsEditors.whitelist) {
+      setTimeout(() => jsEditors.whitelist.refresh(), 1);
+    }
   }
 
   // Counts/warnings re-scan every editor (tens of ms on huge lists), so
@@ -736,6 +803,9 @@
   }
 
   function updateRawSearch(key) {
+    // Table-less editors (e.g. the Phase 1 Whitelist textarea) have an Add
+    // box but no table: nothing to highlight in place.
+    if (!TABLE_EDITORS[key] || !tableState[key]) return;
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
     clearRawSearch(key);
@@ -1122,7 +1192,7 @@
   // Backup shape gate: truthiness alone would let a malformed file through
   // and persist defaults over the user's real lists. Missing lists fall back
   // to defaults in populateForms; present ones must actually be arrays.
-  const BACKUP_LISTS = ['videoId', 'channelId', 'channelName', 'comment', 'title'];
+  const BACKUP_LISTS = ['videoId', 'channelId', 'channelName', 'comment', 'title', 'whitelist'];
 
   function isValidBackup(json) {
     if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
@@ -1290,6 +1360,30 @@
     }
   });
 
+  // Whitelist mode preview: panel visibility flips with the checkbox before
+  // Save (dirty tracking still goes through the form-level change listener).
+  $('whitelist_mode').addEventListener('change', () => {
+    updateWhitelistUI();
+  });
+
+  // Cross-surface sync (WHITELIST_PLAN.md constraint 1): the popup toggles
+  // the same flag via a STORAGE_KEY read-modify-write. Converge the checkbox
+  // and panel visibility without touching unsaved editor content.
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes) => {
+      const key = BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY;
+      if (!has.call(changes, key)) return;
+      const next = changes[key] && changes[key].newValue;
+      if (!next || !next.options) return;
+      const el = $('whitelist_mode');
+      const mode = !!next.options[OPT.WHITELIST_MODE];
+      if (el && el.checked !== mode) {
+        el.checked = mode;
+        updateWhitelistUI();
+      }
+    });
+  }
+
   $('options').addEventListener('change', (evt) => {
     // Table search/Add/label inputs commit `change` events too, but they are
     // not saved state — only real option and filter edits mark dirty.
@@ -1350,6 +1444,13 @@
   );
   setupAddBox('title', 'title_add', 'title_add_btn', 'title_add_notice', validatePattern);
   setupAddBox('comment', 'comment_add', 'comment_add_btn', 'comment_add_notice', validatePattern);
+  setupAddBox(
+    'whitelist',
+    'whitelist_add',
+    'whitelist_add_btn',
+    'whitelist_add_notice',
+    validateFilterId,
+  );
   setupTable('channelId');
   setupTable('videoId');
   setupTable('channelName');
