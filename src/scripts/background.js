@@ -117,6 +117,14 @@ const utils = {
       }
     });
 
+    // The allowlist compiles with the exact-ID rule but stays out of the
+    // blacklist loop above; inject hydrates it separately. Absent (pre-
+    // whitelist blobs) the key is omitted and inject reads it as [].
+    const whitelistArr = utils.compileRegex(filterData.whitelist, 'channelId');
+    if (whitelistArr) {
+      sendData.filterData.whitelist = whitelistArr;
+    }
+
     sendData.filterData.vidLength = Array.isArray(filterData.vidLength)
       ? filterData.vidLength
       : [null, null];

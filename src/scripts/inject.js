@@ -716,6 +716,10 @@
   // range and no regex entries or custom function. Each check below maps to one
   // of those user option groups.
   function computeNoActiveFilters() {
+    // Whitelist mode always filters — even an empty allowlist blocks
+    // everything carrying a channel id — so never take the early-out that
+    // would silently disable the mode.
+    if (storageData.options[OPT.WHITELIST_MODE]) return false;
     if (
       storageData.options[OPT.SHORTS] ||
       storageData.options[OPT.MOVIES] ||
@@ -762,6 +766,16 @@
     return collabIds.some((id) => filterEntries.some((entry) => entry && entry.test(id)));
   }
 
+  // Whitelist mode (generous, fail-open): a card is allowed when ANY
+  // collaborator id in the avatar stack matches the allowlist, even if the
+  // primary channel id does not.
+  function isCollabChannelAllowlisted(obj) {
+    const allowlist = storageData.filterData.whitelist || [];
+    if (allowlist.length === 0) return false;
+    const collabIds = getCollaboratorChannelIds(obj);
+    return collabIds.some((id) => allowlist.some((entry) => entry && entry.test(id)));
+  }
+
   // vidLength is a mandatory [min, max] duration range in seconds; a duration
   // on the range means "block" (default) while the flips of the range mean
   // "block everything outside it" (vidLength_type !== 'block').
@@ -806,6 +820,19 @@
   // descriptor for matchedFilterField, or null - plus `value`, the form of the
   // value the custom JS filter should receive.
   function matchField(fieldName, value, filterEntries, obj, rendererKey) {
+    // Whitelist mode inverts channelId: block iff NO allowlist entry tests
+    // positive. Every other field is bypassed here (the caller additionally
+    // skips their value extraction, so only channelId costs a read).
+    if (storageData.options[OPT.WHITELIST_MODE]) {
+      if (fieldName !== 'channelId') return { match: null, value };
+      const allowlist = storageData.filterData.whitelist || [];
+      if (allowlist.some((entry) => entry && entry.test(value))) return { match: null, value };
+      if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
+        return { match: null, value };
+      }
+      return { match: { name: fieldName, value }, value };
+    }
+
     if (isPercentWatchedBlocked(fieldName, value, rendererKey)) {
       return { match: { name: fieldName, value }, value };
     }
@@ -852,12 +879,18 @@
       return false;
 
     let doBlock = false;
+    const whitelistMode = !!opts[OPT.WHITELIST_MODE];
     for (const fieldName of Object.keys(filterPaths)) {
       const filterPath = filterPaths[fieldName];
       if (filterPath === undefined) continue;
 
+      // Whitelist mode evaluates channelId against the allowlist even when
+      // the blacklist is empty (empty allowlist = block, not skip); every
+      // other field is bypassed without value extraction.
+      if (whitelistMode && fieldName !== 'channelId') continue;
       const filterEntries = fd[fieldName];
       if (
+        !whitelistMode &&
         regexPropsSet.has(fieldName) &&
         (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
       )
@@ -2602,6 +2635,19 @@
         });
       }
     });
+    // The allowlist is compiled with the exact-ID rule upstream; hydrate it
+    // the same way so channelId matching can test against RegExps.
+    if (has.call(data.filterData, 'whitelist') && Array.isArray(data.filterData.whitelist)) {
+      data.filterData.whitelist = data.filterData.whitelist.map((v) => {
+        if (!Array.isArray(v)) return undefined;
+        try {
+          return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
+        } catch (e) {
+          console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
+          return undefined;
+        }
+      });
+    }
   }
 
   function startHook() {
@@ -2724,6 +2770,10 @@
       const prop = data.filterData[regexProps[idx]];
       if (prop !== undefined && !Array.isArray(prop)) return;
     }
+    // The allowlist stays out of regexProps (so blacklist loops ignore it)
+    // but must still be an array when present.
+    if (data.filterData.whitelist !== undefined && !Array.isArray(data.filterData.whitelist))
+      return;
     if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
       return;
     if (
@@ -2742,7 +2792,10 @@
     // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
     // is MAIN-realm, so it grants no extra capability there (page scripts can
     // already eval); the gate exists to keep it a deliberate user opt-in.
-    const jsOptIn = storageData.options[OPT.ENABLE_JAVASCRIPT];
+    // Whitelist mode forces it off for the session: user JS that allows
+    // content back in would defeat the mode and complicate the audit.
+    const jsOptIn =
+      storageData.options[OPT.ENABLE_JAVASCRIPT] && !storageData.options[OPT.WHITELIST_MODE];
     if (jsOptIn && storageData.filterData.javascript) {
       try {
         jsFilter = blocktubeEval(storageData.filterData.javascript);

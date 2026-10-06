@@ -181,6 +181,19 @@
         });
       }
     });
+    // The allowlist is compiled with the exact-ID rule upstream; hydrate it
+    // the same way so channelId matching can test against RegExps.
+    if (has.call(data.filterData, 'whitelist') && Array.isArray(data.filterData.whitelist)) {
+      data.filterData.whitelist = data.filterData.whitelist.map((v) => {
+        if (!Array.isArray(v)) return undefined;
+        try {
+          return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
+        } catch (e) {
+          console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
+          return undefined;
+        }
+      });
+    }
   }
 
   function startHook() {
@@ -303,6 +316,10 @@
       const prop = data.filterData[regexProps[idx]];
       if (prop !== undefined && !Array.isArray(prop)) return;
     }
+    // The allowlist stays out of regexProps (so blacklist loops ignore it)
+    // but must still be an array when present.
+    if (data.filterData.whitelist !== undefined && !Array.isArray(data.filterData.whitelist))
+      return;
     if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
       return;
     if (
@@ -321,7 +338,10 @@
     // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
     // is MAIN-realm, so it grants no extra capability there (page scripts can
     // already eval); the gate exists to keep it a deliberate user opt-in.
-    const jsOptIn = storageData.options[OPT.ENABLE_JAVASCRIPT];
+    // Whitelist mode forces it off for the session: user JS that allows
+    // content back in would defeat the mode and complicate the audit.
+    const jsOptIn =
+      storageData.options[OPT.ENABLE_JAVASCRIPT] && !storageData.options[OPT.WHITELIST_MODE];
     if (jsOptIn && storageData.filterData.javascript) {
       try {
         jsFilter = blocktubeEval(storageData.filterData.javascript);
