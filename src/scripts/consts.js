@@ -41,7 +41,7 @@
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
   // content script and the background (page scripts can forge the type field).
-  const CONTEXT_BLOCK_TYPES = Object.freeze(['channelId', 'videoId']);
+  const CONTEXT_BLOCK_TYPES = Object.freeze(['channelId', 'videoId', 'whitelist']);
 
   globalThis.BLOCKTUBE_CONSTS = BLOCKTUBE_CONSTS;
   globalThis.CONTEXT_BLOCK_TYPES = CONTEXT_BLOCK_TYPES;

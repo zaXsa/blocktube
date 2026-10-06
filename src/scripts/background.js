@@ -292,8 +292,18 @@ chrome.runtime.onConnect.addListener((port) => {
         });
         if (safeEntries.length === 0 && comment === undefined) break;
 
-        const filterArr = storage.filterData[blockType];
-        if (!Array.isArray(filterArr)) break; // corrupt storage: never throw here
+        let filterArr = storage.filterData[blockType];
+        if (!Array.isArray(filterArr)) {
+          // Pre-whitelist stored blobs lack the allowlist: initialize it so
+          // menu allowlisting works without an options-page save first.
+          // Anything else non-array is corrupt storage: never throw here.
+          if (blockType === 'whitelist' && storage.filterData.whitelist === undefined) {
+            storage.filterData.whitelist = [];
+            filterArr = storage.filterData.whitelist;
+          } else {
+            break;
+          }
+        }
 
         // Throttle per tab + dedup + bound total, so a flood can't churn
         // storage.set / recompile / broadcast or grow storage without limit.

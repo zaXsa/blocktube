@@ -83,7 +83,10 @@
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 200);
-      const entries = [`// Blocked by context menu (${text}) (${now})`];
+      // Mode-aware provenance: allowlist entries read "Allowlisted", blocks
+      // read "Blocked". Keyed off the routed type (whitelist <=> allowlisting).
+      const verb = blockType === 'whitelist' ? 'Allowlisted' : 'Blocked';
+      const entries = [`// ${verb} by context menu (${text}) (${now})`];
       const ids = (Array.isArray(data.info.id) ? data.info.id : [data.info.id]).slice(0, 100);
       ids.forEach((id) => {
         if (typeof id === 'string' && id.length > 0 && id.length <= 255) {

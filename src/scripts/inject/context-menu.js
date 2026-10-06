@@ -1,3 +1,11 @@
+  // Whitelist mode (WHITELIST_PLAN.md Phase 3): the menu offers allowlisting
+  // instead of blocking — channel items post type `whitelist`, video items
+  // are hidden (videos can't be allowlisted). Never both at once.
+  function isWhitelistMenuMode(store) {
+    const opts = (store || storageData)?.options;
+    return !!opts?.[OPT.WHITELIST_MODE];
+  }
+
   // Mobile "up next" cards carry no block actions, so we inject full
   // menuServiceItemRenderer entries ourselves; YT renders the toast text
   // ("Channel blocked") in place after the tap.
@@ -108,17 +116,18 @@
       }
 
       if (!items) return;
+      const allowMode = isWhitelistMenuMode();
       if (channelData.id)
         items.push(
           buildBlockActionMenuItem(
             attr,
             'block_channel',
             channelData,
-            'Block Channel',
-            'Channel blocked',
+            allowMode ? 'Allow Channel' : 'Block Channel',
+            allowMode ? 'Channel allowed' : 'Channel blocked',
           ),
         );
-      if (videoData.id)
+      if (videoData.id && !allowMode)
         items.push(
           buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
         );
@@ -127,39 +136,43 @@
       // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
       const items = obj[attr].contents;
       if (!items) return;
+      const allowMode = isWhitelistMenuMode();
+      const channelLabel = allowMode ? 'Allow Channel' : 'Block Channel';
+      const videoButton = {
+        slimMetadataButtonRenderer: {
+          button: {
+            buttonRenderer: {
+              _btOriginalData: videoData,
+              _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
+              _btMenuAction: 'block_video',
+              style: 'STYLE_DEFAULT',
+              size: 'SIZE_DEFAULT',
+              isDisabled: false,
+              text: {
+                runs: [
+                  {
+                    text: 'Block Video',
+                  },
+                ],
+              },
+              accessibility: {
+                label: 'Block Video',
+              },
+              accessibilityData: {
+                accessibilityData: {
+                  label: 'Block Video',
+                },
+              },
+              navigationEndpoint: {},
+            },
+          },
+        },
+      };
       const mobileVideoMenu = {
         slimVideoActionBarRenderer: {
           buttons: [
-            {
-              slimMetadataButtonRenderer: {
-                button: {
-                  buttonRenderer: {
-                    _btOriginalData: videoData,
-                    _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
-                    _btMenuAction: 'block_video',
-                    style: 'STYLE_DEFAULT',
-                    size: 'SIZE_DEFAULT',
-                    isDisabled: false,
-                    text: {
-                      runs: [
-                        {
-                          text: 'Block Video',
-                        },
-                      ],
-                    },
-                    accessibility: {
-                      label: 'Block Video',
-                    },
-                    accessibilityData: {
-                      accessibilityData: {
-                        label: 'Block Video',
-                      },
-                    },
-                    navigationEndpoint: {},
-                  },
-                },
-              },
-            },
+            // Videos can't be allowlisted: no video button in whitelist mode.
+            ...(allowMode ? [] : [videoButton]),
             {
               slimMetadataButtonRenderer: {
                 button: {
@@ -173,16 +186,16 @@
                     text: {
                       runs: [
                         {
-                          text: 'Block Channel',
+                          text: channelLabel,
                         },
                       ],
                     },
                     accessibility: {
-                      label: 'Block Channel',
+                      label: channelLabel,
                     },
                     accessibilityData: {
                       accessibilityData: {
-                        label: 'Block Channel',
+                        label: channelLabel,
                       },
                     },
                     navigationEndpoint: {
@@ -342,11 +355,15 @@
     const cleanChannelContext = createCleanContext(items, store, true, currentObj);
     const cleanVideoContext = createCleanContext(items, store, false, currentObj);
 
-    const blockChannelItem = createLockupButtonItem('Block Channel', cleanChannelContext);
+    const blockChannelItem = createLockupButtonItem(
+      isWhitelistMenuMode(store) ? 'Allow Channel' : 'Block Channel',
+      cleanChannelContext,
+    );
     const blockVideoItem = createLockupButtonItem('Block Video', cleanVideoContext);
 
     if (hasChannel) items.push(blockChannelItem);
-    if (hasVideo) items.push(blockVideoItem);
+    // Videos can't be allowlisted: no video item in whitelist mode.
+    if (hasVideo && !isWhitelistMenuMode(store)) items.push(blockVideoItem);
 
     return true;
   }
@@ -373,7 +390,11 @@
     const baseContext = items[0]?.listItemViewModel?.rendererContext;
     if (!baseContext) return null;
 
-    const msg = isChannel ? 'Channel Blocked' : 'Video Blocked';
+    const msg = isChannel
+      ? isWhitelistMenuMode(store)
+        ? 'Channel Allowed'
+        : 'Channel Blocked'
+      : 'Video Blocked';
     const cleanContext = deepClone(baseContext);
 
     if (cleanContext.commandContext?.onTap) {
@@ -436,7 +457,9 @@
   }
 
   function injectStandardMenuButtons(items, hasChannel, hasVideo, store) {
-    const blockChannelItem = createStandardBlockItem('Block Channel');
+    const blockChannelItem = createStandardBlockItem(
+      isWhitelistMenuMode(store) ? 'Allow Channel' : 'Block Channel',
+    );
     const blockVideoItem = createStandardBlockItem('Block Video');
 
     if (store.options[OPT.BLOCK_FEEDBACK]) {
@@ -454,7 +477,8 @@
     }
 
     if (hasChannel) items.push(blockChannelItem);
-    if (hasVideo) items.push(blockVideoItem);
+    // Videos can't be allowlisted: no video item in whitelist mode.
+    if (hasVideo && !isWhitelistMenuMode(store)) items.push(blockVideoItem);
 
     return false;
   }
@@ -547,7 +571,7 @@
     let type;
     switch (data._btMenuAction) {
       case 'block_channel': {
-        type = 'channelId';
+        type = isWhitelistMenuMode() ? 'whitelist' : 'channelId';
         break;
       }
       case 'block_video': {
@@ -561,7 +585,8 @@
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
     if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
       document.getElementById('movie_player').stopVideo();
-      alert(`${type === 'videoId' ? 'Video' : 'Channel'} Blocked`);
+      const noun = type === 'videoId' ? 'Video' : 'Channel';
+      alert(`${noun} ${type === 'whitelist' ? 'Allowed' : 'Blocked'}`);
     }
     if (data._btOriginalAttr === 'commentRenderer') {
       const comments = document.querySelector('ytm-section-list-renderer');
@@ -646,6 +671,9 @@
     switch (menuAction) {
       case 'Block Channel':
         result = { type: 'channelId', data: channelData };
+        break;
+      case 'Allow Channel':
+        result = { type: 'whitelist', data: channelData };
         break;
       case 'Block Video':
         result = { type: 'videoId', data: videoData };
@@ -746,7 +774,7 @@
 
     const { isDataFromRightHandSide, menuAction } = getActionMenuData(this);
 
-    if (!['Block Channel', 'Block Video'].includes(menuAction)) {
+    if (!['Block Channel', 'Block Video', 'Allow Channel'].includes(menuAction)) {
       event.preventDefault();
       return;
     }
