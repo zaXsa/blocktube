@@ -22,7 +22,10 @@ Work while focused in one of the filter textareas:
 * **Lines starting with `//` are comments and are ignored** by the filter
   engine. BlockTube itself writes these when you block via the context menu
   (`// Blocked by context menu (…) (…)` with the date) or the Add box
-  (`// Blocked by direct add () (…)`). They are annotations, not rules: the
+  (`// Blocked by direct add () (…)`). Allowlist entries use the same shape
+  (`// Allowlisted by context menu (…) (…)` when you allow a channel).
+  Removing one via `Remove from Whitelist` writes no comment: the entry is
+  dropped and its now-orphaned annotation goes with it. They are annotations, not rules: the
   options page shows them locked in the table view (freely editable in raw
   mode) and preserves them across saves.
 * **`// Label: …` attaches a personal label** to the entry below it, shown

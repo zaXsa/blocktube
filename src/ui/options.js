@@ -1361,7 +1361,13 @@
   });
 
   // Whitelist mode preview: panel visibility flips with the checkbox before
-  // Save (dirty tracking still goes through the form-level change listener).
+  // Save (dirty tracking still goes through the form-level change listener,
+  // and saveForm persists the flag like every other option). Deliberately NOT
+  // written through here: isWhitelistModeOn() reads the checkbox, so the
+  // preview needs no persistence, and an immediate write would make Discard
+  // a lie for this one switch (storage already flipped) while every other
+  // control honestly waits for Save. A popup opened mid-edit shows the stored
+  // value — correct unsaved-changes semantics, converged on Save.
   $('whitelist_mode').addEventListener('change', () => {
     updateWhitelistUI();
   });

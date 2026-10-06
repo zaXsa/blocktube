@@ -80,7 +80,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Whitelist mode switch: read-modify-write the shared storageData blob
   // (same pre-existing pattern as theme/password writes), then reload so the
-  // new mode applies immediately.
+  // new mode applies immediately. The reload waits for the write to land so
+  // the fresh page (and the options page via onChanged) converges on the
+  // new value instead of racing it.
   whitelistCheckbox.addEventListener('change', (event) => {
     if (event.target instanceof HTMLInputElement) {
       const on = event.target.checked;
@@ -88,9 +90,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY] || {};
         if (!data.options || typeof data.options !== 'object') data.options = {};
         data.options[BLOCKTUBE_CONSTS.OPTIONS.WHITELIST_MODE] = on;
-        chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: data });
+        chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: data }, () => {
+          chrome.tabs.reload(); // Reload page to apply the new state
+        });
       });
-      chrome.tabs.reload(); // Reload page to apply the new state
     }
   });
 

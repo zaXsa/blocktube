@@ -245,6 +245,39 @@ const utils = {
   },
 };
 
+// Drop `//` annotation lines left without a rule after a whitelist removal.
+// An annotation block annotates the rules following it up to the next blank
+// line (the same grouping the options page relies on: comments precede their
+// ids, blank ends the group), so when every one of those rules is gone the
+// comment is an orphan. Blank separators are left alone — compileRegex
+// ignores them and the options editor owns the layout.
+function pruneOrphanAnnotations(lines) {
+  const keep = new Array(lines.length).fill(true);
+  let pending = [];
+  const flushOrphans = () => {
+    pending.forEach((idx) => {
+      keep[idx] = false;
+    });
+    pending = [];
+  };
+  lines.forEach((line, i) => {
+    if (typeof line === 'string' && line.trim() === '') {
+      // Blank ends the group: pending annotations with no rule under them
+      // are orphans.
+      flushOrphans();
+    } else if (typeof line === 'string' && line.trim().startsWith('//')) {
+      pending.push(i);
+    } else {
+      // A surviving rule (or a corrupt non-string entry, which must never
+      // cost a comment) claims the pending annotations.
+      pending = [];
+    }
+  });
+  // Trailing annotations with no rule below them are orphans too.
+  flushOrphans();
+  return lines.filter((_, i) => keep[i]);
+}
+
 chrome.storage.local.get(
   [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY, BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY],
   utils.initFromStorage,
@@ -293,11 +326,20 @@ chrome.runtime.onConnect.addListener((port) => {
         if (safeEntries.length === 0 && comment === undefined) break;
 
         let filterArr = storage.filterData[blockType];
+        // `unwhitelist` removes from the allowlist instead of adding to its
+        // own list.
+        const isRemoval = blockType === 'unwhitelist';
+        if (isRemoval) {
+          filterArr = storage.filterData.whitelist;
+        }
         if (!Array.isArray(filterArr)) {
           // Pre-whitelist stored blobs lack the allowlist: initialize it so
           // menu allowlisting works without an options-page save first.
           // Anything else non-array is corrupt storage: never throw here.
-          if (blockType === 'whitelist' && storage.filterData.whitelist === undefined) {
+          if (
+            (blockType === 'whitelist' || isRemoval) &&
+            storage.filterData.whitelist === undefined
+          ) {
             storage.filterData.whitelist = [];
             filterArr = storage.filterData.whitelist;
           } else {
@@ -311,9 +353,26 @@ chrome.runtime.onConnect.addListener((port) => {
         if (now - (blockTimestamps.get(key) || 0) < 1000) break;
         blockTimestamps.set(key, now);
 
+        if (isRemoval) {
+          // Removal never writes annotations: drop every listed id that is
+          // present, then drop the provenance comments left orphaned by the
+          // removal (same grouping the options page uses — see
+          // pruneOrphanAnnotations). Everything else stays byte-identical.
+          const doomed = new Set(safeEntries);
+          if (doomed.size === 0) break;
+          const kept = filterArr.filter((line) => !doomed.has(line));
+          if (kept.length === filterArr.length) break;
+          storage.filterData.whitelist = pruneOrphanAnnotations(kept);
+          chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: storage });
+          break;
+        }
+
         const existing = new Set(filterArr);
         const newEntries = safeEntries.filter((id) => !existing.has(id));
-        if (newEntries.length === 0 && comment === undefined) break;
+        // A repeat allowlist/block of an already-listed id must be a no-op:
+        // never store a lone provenance comment without its id (that is the
+        // comment-only duplication the menu produced on second tap).
+        if (newEntries.length === 0) break;
         if (comment !== undefined && !existing.has(comment)) newEntries.unshift(comment);
         if (newEntries.length === 0) break;
         filterArr.push(...newEntries);
