@@ -103,7 +103,7 @@
           </div>
           <div>
             <input id="disable_shorts" type="checkbox" />
-            <label for="disable_shorts">Block Youtube Shorts videos <span class="tooltip" title="This will also block access to the dedicated &quot;Shorts&quot; page">?</span></label>
+            <label for="disable_shorts">Block Youtube Shorts videos <span class="tooltip" title="Hides every Short across the site (shelves, reels and Shorts videos) and blocks the dedicated &quot;Shorts&quot; page">?</span></label>
           </div>
           <div>
             <input id="disable_movies" type="checkbox" />
@@ -143,15 +143,49 @@
 
             <section class="opt-panel" id="panel-whitelist" aria-label="Whitelist" style="display:none">
               <h2>Whitelist</h2>
-              <div id="whitelist_banner" class="whitelist-banner is-hidden">Whitelist active — only allowlisted channels show; other filters are bypassed, not deleted.</div>
-              <div id="whitelist_empty_hint" class="whitelist-hint is-hidden">Allowlist is empty — nothing with a channel will show until you add a channel ID.</div>
               <div class="add-row">
                 <input type="text" id="whitelist_add" class="add-input" placeholder="Paste a channel ID, then Add" autocomplete="off" spellcheck="false" />
                 <span id="whitelist_add_notice" class="add-notice is-hidden"></span>
                 <input type="button" id="whitelist_add_btn" value="+ Add" />
               </div>
+              <div class="table-toolbar">
+                <input type="search" id="whitelist_search" class="table-search" placeholder="Search this list…" autocomplete="off" />
+                <span id="whitelist_shown" class="table-shown"></span>
+                <span class="opt-head-spacer"></span>
+                <input type="button" id="whitelist_jump_top" value="⤒ Top" title="Go to top" />
+                <input type="button" id="whitelist_jump_end" value="⤓ End" title="Go to end" />
+                <input type="button" id="whitelist_raw_toggle" value="Raw list" />
+              </div>
               <div id="warning-whitelist" class="regex-warning is-hidden"></div>
-              <div>
+              <div id="whitelist_table_wrap" class="table-wrap fixed-view">
+                <div id="whitelist_table_scroll" class="table-scroll">
+                  <table class="entity-table">
+                    <thead>
+                      <tr>
+                        <th class="col-index">#</th>
+                        <th class="col-id">ID</th>
+                        <th>Label</th>
+                        <th>Date</th>
+                        <th class="col-action"><span class="visually-hidden">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody id="whitelist_rows"></tbody>
+                  </table>
+                </div>
+                <div class="table-footer">
+                  <span id="whitelist_range" class="table-shown"></span>
+                  <span class="opt-head-spacer"></span>
+                  <label class="table-shown" for="whitelist_page">Page</label>
+                  <input type="number" id="whitelist_page" class="page-input" min="1" value="1" />
+                  <span id="whitelist_pages" class="table-shown"></span>
+                  <input type="button" id="whitelist_top" value="⤒ Top" />
+                  <input type="button" id="whitelist_prev" value="‹ Prev" />
+                  <input type="button" id="whitelist_page_go" value="Go" />
+                  <input type="button" id="whitelist_next" value="Next ›" />
+                  <input type="button" id="whitelist_end" value="⤓ End" />
+                </div>
+              </div>
+              <div id="whitelist_editor_wrap" class="fixed-view" hidden>
                 <textarea id="whitelist"></textarea>
                 <div id="whitelist_resizer" class="cm-resizer"></div>
               </div>

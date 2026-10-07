@@ -47,10 +47,13 @@ Discard, and an `Unsaved changes` flag):
 * **Advanced** — the custom JavaScript filter behind `Enable advanced
   blocking`.
 * **Whitelist** — visible only while whitelist mode is on (the switch lives
-  in `General` and in the popup). One channel ID per line, plus an `Add`
-  box; an empty allowlist hides everything with a channel. While the mode
-  is on, all other panels hide and their filters are bypassed, not deleted
-  — the banner says so, and everything returns when you switch back.
+  in `General` and in the popup). Same searchable table + `Raw list` toggle
+  as the other ID panels: one channel ID per row with its date, source, and
+  an editable label, plus an `Add` box; an empty allowlist hides everything
+  with a channel (the panel says so until you add one). While the mode
+  is on, all other filter panels hide and their filters are bypassed, not
+  deleted — General and Export / Import stay available, and everything
+  returns when you switch back.
 * **Export / Import** — backup and restore (`blocktube_backup.json`).
 
 ## FAQ

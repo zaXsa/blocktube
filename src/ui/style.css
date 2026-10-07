@@ -716,6 +716,14 @@ input#import {
   opacity: .8;
 }
 
+/* Empty-list placeholder row inside the entity tables. */
+.cell-empty {
+  text-align: center;
+  color: #e8a33d;
+  font-size: 1.15em;
+  padding-block: 1.2em;
+}
+
 .cell-label .muted,
 .muted {
   opacity: .5;
@@ -791,12 +799,11 @@ input#import {
 }
 
 /* Invalid-regex warnings under the regex-evaluated editors.
-   The box keeps a single reserved line (visibility, not display) so
-   show/hide while typing never reflows the editor below it. */
+   Hidden boxes collapse entirely (display, not visibility) so they never
+   leave a dead gap between the toolbar and the list. */
 .regex-warning {
   margin-top: .4em;
   padding: .4em .6em;
-  min-height: 2.3em; /* one text line + vertical padding */
   font-size: small;
   color: #e8a33d;
   background: rgba(232, 163, 61, .12);
@@ -805,35 +812,7 @@ input#import {
 }
 
 .regex-warning.is-hidden {
-  visibility: hidden;
-}
-
-/* Whitelist mode: panel banner/hint.
-   Like .regex-warning above, the boxes keep a single reserved line
-   (visibility, not display) so show/hide never reflows the editor below. */
-.whitelist-banner {
-  padding: .4em .6em;
-  min-height: 2.3em; /* one text line + vertical padding */
-  font-size: small;
-  color: #4aa3ff;
-  background: rgba(0, 102, 204, .12);
-  border: 1px solid rgba(0, 102, 204, .5);
-  border-radius: .3em;
-}
-
-.whitelist-hint {
-  padding: .4em .6em;
-  min-height: 2.3em; /* one text line + vertical padding */
-  font-size: small;
-  color: #e8a33d;
-  background: rgba(232, 163, 61, .12);
-  border: 1px solid rgba(232, 163, 61, .5);
-  border-radius: .3em;
-}
-
-.whitelist-banner.is-hidden,
-.whitelist-hint.is-hidden {
-  visibility: hidden;
+  display: none;
 }
 
 input#discard_btn {
@@ -897,12 +876,4 @@ input#discard_btn {
 
 .alert-animate {
   display: block;
-}
-
-@media screen and (min-width: 1025px) {
-.multi-column-content {
-  column-count: 2; /* Divides the content into two columns */
-  column-gap: 20px; /* Adds a gap between the columns */
-  /* Other properties like column-rule can be added */
-}
 }

@@ -317,7 +317,6 @@
     const panelTotal = keys.reduce((sum, key) => sum + (perEditor[key] || 0), 0);
     $('opt_counts').textContent =
       keys.length > 0 ? `${panelTotal} in this panel · ${total} total` : `${total} total`;
-    updateWhitelistHint();
   }
 
   // Invalid-regex warnings under the regex-evaluated editors: lines that
@@ -377,25 +376,18 @@
   }
 
   // Whitelist mode (WHITELIST_PLAN.md Phase 1): one flag, two surfaces. Mode
-  // on -> the Whitelist panel and General stay usable (UI theme/password must
-  // never be locked out, and stored General values like block_message stay
-  // honored); every other panel hides. Mode off -> the Whitelist panel hides
+  // on -> the Whitelist panel, General, and Export / Import stay usable (UI
+  // theme/password must never be locked out, stored General values like
+  // block_message stay honored, and backup/restore stays available); every
+  // other panel hides. Mode off -> the Whitelist panel hides
   // and the normal UI returns. The inject realm ignores both the flag and the
   // list in this phase.
-  const WHITELIST_VISIBLE = ['panel-whitelist', 'panel-general'];
+  const WHITELIST_VISIBLE = ['panel-whitelist', 'panel-general', 'panel-data'];
 
   function isWhitelistModeOn() {
     const el = $('whitelist_mode');
     if (el) return el.checked === true;
     return !!get('options.whitelist_mode', false);
-  }
-
-  // Empty-allowlist hint: shown when no active (non-empty, non-`//`) entries.
-  function updateWhitelistHint() {
-    const hint = $('whitelist_empty_hint');
-    if (!hint || !jsEditors.whitelist) return;
-    const n = BLOCKTUBE_ANNOTATIONS.countActiveEntries(jsEditors.whitelist.getValue().split('\n'));
-    hint.classList.toggle('is-hidden', n !== 0);
   }
 
   function updateWhitelistUI() {
@@ -421,9 +413,6 @@
         panel.style.display = panel.id === activePanel ? 'block' : 'none';
       }
     });
-    const banner = $('whitelist_banner');
-    if (banner) banner.classList.toggle('is-hidden', !on);
-    updateWhitelistHint();
     // The newly shown panel's editor measured while hidden: refresh after
     // layout settles so the first render is never blank.
     if (jsEditors.whitelist) {
@@ -497,7 +486,8 @@
       const cm = jsEditors[editorKey];
       const current = cm.getValue();
       // Provenance comment mirroring the context-menu format
-      // (`// Blocked by context menu (<text>) (<date>)`). No handle is known
+      // (`// Blocked by context menu (<text>) (<date>)`, allowlist entries
+      // use `// Allowlisted …`). No handle is known
       // here, so that slot stays blank instead of repeating the ID, and the
       // locale date matches content_script.js. Groups are separated by a
       // blank line, like the context-menu groups.
@@ -509,7 +499,10 @@
         minute: 'numeric',
         second: 'numeric',
       }).format(new Date());
-      const annotation = `// Blocked by direct add () (${now})`;
+      const annotation =
+        editorKey === 'whitelist'
+          ? `// Allowlisted by direct add () (${now})`
+          : `// Blocked by direct add () (${now})`;
       const prefix = current.trim() === '' ? '' : `${current.replace(/\n+$/, '')}\n\n`;
       cm.setValue(`${prefix}${annotation}\n${id}\n`);
       applyReadOnlyMarks(editorKey);
@@ -644,6 +637,29 @@
       top: 'comment_top',
       end: 'comment_end',
     },
+    whitelist: {
+      rows: 'whitelist_rows',
+      scroll: 'whitelist_table_scroll',
+      search: 'whitelist_search',
+      shown: 'whitelist_shown',
+      toggle: 'whitelist_raw_toggle',
+      jumpTop: 'whitelist_jump_top',
+      jumpEnd: 'whitelist_jump_end',
+      tableWrap: 'whitelist_table_wrap',
+      editorWrap: 'whitelist_editor_wrap',
+      range: 'whitelist_range',
+      page: 'whitelist_page',
+      pages: 'whitelist_pages',
+      pageGo: 'whitelist_page_go',
+      prev: 'whitelist_prev',
+      next: 'whitelist_next',
+      top: 'whitelist_top',
+      end: 'whitelist_end',
+      // Empty-state message rendered as a placeholder row inside the table
+      // (not a box above it): it vanishes on its own once items are added.
+      emptyText:
+        'Allowlist is empty — nothing with a channel will show until you add a channel ID.',
+    },
   };
   const tableState = {};
 
@@ -701,6 +717,15 @@
     const end = Math.min(state.renderStart + TABLE_CHUNK, state.filtered.length);
     for (let i = state.renderStart; i < end; i++) {
       fragment.appendChild(buildTableRow(key, state.filtered[i], i + 1));
+    }
+    if (state.filtered.length === 0 && state.rows.length === 0 && t.emptyText) {
+      const tr = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 5;
+      cell.className = 'cell-empty';
+      cell.textContent = t.emptyText;
+      tr.appendChild(cell);
+      fragment.appendChild(tr);
     }
     $(t.rows).textContent = '';
     $(t.rows).appendChild(fragment);
@@ -803,8 +828,6 @@
   }
 
   function updateRawSearch(key) {
-    // Table-less editors (e.g. the Phase 1 Whitelist textarea) have an Add
-    // box but no table: nothing to highlight in place.
     if (!TABLE_EDITORS[key] || !tableState[key]) return;
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
@@ -883,7 +906,8 @@
     const idCell = document.createElement('td');
     // Exact IDs are short and stay on one line; patterns (names, titles,
     // comments) may be long, so they wrap instead of widening the table.
-    idCell.className = key === 'channelId' || key === 'videoId' ? 'cell-id' : 'cell-pattern';
+    idCell.className =
+      key === 'channelId' || key === 'videoId' || key === 'whitelist' ? 'cell-id' : 'cell-pattern';
     idCell.title = String(row.id);
     idCell.textContent = String(row.id);
     tr.appendChild(idCell);
@@ -1125,9 +1149,9 @@
   }
 
   // Lock `//` annotation lines inside the editors via read-only marks.
-  // Only table-less editors (Comments) take locks: table-backed editors are
-  // hidden in table mode (marks invisible and irrelevant) and free editing
-  // in raw mode — this also avoids re-marking tens of thousands of lines.
+  // All six filter editors are table-backed now, so none take locks: hidden
+  // in table mode (marks invisible and irrelevant) and free editing in raw
+  // mode — this also avoids re-marking tens of thousands of lines.
   // Marks die on setValue; the save path preserves text regardless.
   const readOnlyMarks = {};
 
@@ -1153,7 +1177,7 @@
       // Table-backed editors never take locks: hidden in table mode (marks
       // invisible and irrelevant — saving preserves text regardless), free
       // editing in raw mode. This also avoids re-marking tens of thousands
-      // of lines on every edit. Only table-less editors lock annotations.
+      // of lines on every edit.
       if (TABLE_EDITORS[key]) {
         clearReadOnlyMarks(key);
         return;
@@ -1462,5 +1486,6 @@
   setupTable('channelName');
   setupTable('title');
   setupTable('comment');
+  setupTable('whitelist');
   updateCounts();
 })();
