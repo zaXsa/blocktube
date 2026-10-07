@@ -6,6 +6,14 @@
     return !!opts?.[OPT.WHITELIST_MODE];
   }
 
+  // Per-entry menu visibility (General toggles, default shown): a missing key
+  // (stored blobs predate the toggles) reads as visible — the same fail-open
+  // direction as the rest of the menu.
+  function showMenuEntry(key, store) {
+    const opts = (store || storageData)?.options;
+    return opts?.[key] !== false;
+  }
+
   // Mobile "up next" cards carry no block actions, so we inject full
   // menuServiceItemRenderer entries ourselves; YT renders the toast text
   // ("Channel blocked") in place after the tap.
@@ -18,6 +26,7 @@
     label,
     toastText,
     hideContainer = true,
+    iconType = 'NOT_INTERESTED',
   ) {
     return {
       menuServiceItemRenderer: {
@@ -25,7 +34,7 @@
         _btMenuAction: menuAction,
         _btOriginalData: originalData,
         text: { runs: [{ text: label }] },
-        icon: { iconType: 'NOT_INTERESTED' },
+        icon: { iconType },
         trackingParams: 'Cg==',
         serviceEndpoint: {
           commandMetadata: {
@@ -163,13 +172,15 @@
               channelData,
               'Remove from Whitelist',
               'Removed from whitelist',
+              true,
+              'REMOVE',
             ),
           );
         return;
       }
       // Block mode additionally offers allowlisting, so the allowlist can be
       // built while browsing normally.
-      if (channelData.id)
+      if (channelData.id && showMenuEntry(OPT.MENU_BLOCK_CHANNEL))
         items.push(
           buildBlockActionMenuItem(
             attr,
@@ -179,11 +190,11 @@
             'Channel blocked',
           ),
         );
-      if (videoData.id)
+      if (videoData.id && showMenuEntry(OPT.MENU_BLOCK_VIDEO))
         items.push(
           buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
         );
-      if (channelData.id)
+      if (channelData.id && showMenuEntry(OPT.MENU_ALLOW_CHANNEL))
         items.push(
           buildBlockActionMenuItem(
             attr,
@@ -192,6 +203,7 @@
             'Allow Channel',
             'Channel allowed',
             false,
+            'CHECK',
           ),
         );
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
@@ -211,12 +223,14 @@
             {
               action: 'block_channel',
               label: 'Block Channel',
+              option: OPT.MENU_BLOCK_CHANNEL,
             },
             {
               action: 'allow_channel',
               label: 'Allow Channel',
+              option: OPT.MENU_ALLOW_CHANNEL,
             },
-          ];
+          ].filter(({ option }) => option === undefined || showMenuEntry(option));
       const videoButton = {
         slimMetadataButtonRenderer: {
           button: {
@@ -284,7 +298,7 @@
         slimVideoActionBarRenderer: {
           buttons: [
             // Videos can't be allowlisted: no video button in whitelist mode.
-            ...(allowMode ? [] : [videoButton]),
+            ...(allowMode || !showMenuEntry(OPT.MENU_BLOCK_VIDEO) ? [] : [videoButton]),
             ...channelButtonsRendered,
           ],
           overflowMenuText: {
@@ -445,6 +459,7 @@
       const removeChannelItem = createLockupButtonItem(
         'Remove from Whitelist',
         createCleanContext(items, store, true, currentObj, true, true),
+        'REMOVE',
       );
       if (hasChannel) items.push(removeChannelItem);
       return true;
@@ -456,10 +471,11 @@
     const allowChannelItem = createLockupButtonItem(
       'Allow Channel',
       createCleanContext(items, store, true, currentObj, true),
+      'CHECK',
     );
-    if (hasChannel) items.push(blockChannelItem);
-    if (hasVideo) items.push(blockVideoItem);
-    if (hasChannel) items.push(allowChannelItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
+    if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
 
     return true;
   }
@@ -553,12 +569,12 @@
     return cleanContext;
   }
 
-  function createLockupButtonItem(title, rendererContext) {
+  function createLockupButtonItem(title, rendererContext, imageName = 'NOT_INTERESTED') {
     const item = {
       listItemViewModel: {
         title: { content: title },
         leadingImage: {
-          sources: [{ clientResource: { imageName: 'NOT_INTERESTED' } }],
+          sources: [{ clientResource: { imageName } }],
         },
         rendererContext,
       },
@@ -571,8 +587,8 @@
     const allowMode = isWhitelistMenuMode(store);
     const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
-    const allowChannelItem = createStandardBlockItem('Allow Channel');
-    const removeChannelItem = createStandardBlockItem('Remove from Whitelist');
+    const allowChannelItem = createStandardBlockItem('Allow Channel', 'CHECK');
+    const removeChannelItem = createStandardBlockItem('Remove from Whitelist', 'REMOVE');
 
     if (store.options[OPT.BLOCK_FEEDBACK]) {
       for (const item of items) {
@@ -598,9 +614,9 @@
     // Block mode additionally offers allowlisting, so the allowlist can be
     // built while browsing normally (an empty allowlist hides everything, so
     // there would be nothing left to allowlist from).
-    if (hasChannel) items.push(blockChannelItem);
-    if (hasVideo) items.push(blockVideoItem);
-    if (hasChannel) items.push(allowChannelItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
+    if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
 
     return false;
   }
@@ -608,11 +624,11 @@
   // Desktop overflow menu: a minimal menuServiceItemRenderer entry appended to
   // the video's existing overflow menu (endpoint cloned from a feedback item
   // when block_feedback is on, see injectStandardMenuButtons).
-  function createStandardBlockItem(text) {
+  function createStandardBlockItem(text, iconType = 'NOT_INTERESTED') {
     return {
       menuServiceItemRenderer: {
         text: { runs: [{ text }] },
-        icon: { iconType: 'NOT_INTERESTED' },
+        icon: { iconType },
       },
     };
   }

@@ -59,6 +59,9 @@
     { id: 'disable_you_there',     path: `options.${OPT.DISABLE_YOU_THERE}`,    type: 'checkbox', default: false },
     { id: 'suggestions_only',      path: `options.${OPT.SUGGESTIONS_ONLY}`,     type: 'checkbox', default: false },
     { id: 'block_feedback',        path: `options.${OPT.BLOCK_FEEDBACK}`,       type: 'checkbox', default: false },
+    { id: 'menu_allow_channel',    path: `options.${OPT.MENU_ALLOW_CHANNEL}`,   type: 'checkbox', default: true  },
+    { id: 'menu_block_channel',    path: `options.${OPT.MENU_BLOCK_CHANNEL}`,   type: 'checkbox', default: true  },
+    { id: 'menu_block_video',      path: `options.${OPT.MENU_BLOCK_VIDEO}`,     type: 'checkbox', default: true  },
     { id: 'enable_javascript',     path: `options.${OPT.ENABLE_JAVASCRIPT}`,    type: 'checkbox', default: false },
     { id: 'whitelist_mode',        path: `options.${OPT.WHITELIST_MODE}`,       type: 'checkbox', default: false },
 

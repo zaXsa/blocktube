@@ -36,6 +36,9 @@
       VIDLENGTH_TYPE: 'vidLength_type',
       PERCENT_WATCHED_HIDE: 'percent_watched_hide',
       WHITELIST_MODE: 'whitelist_mode',
+      MENU_ALLOW_CHANNEL: 'menu_allow_channel',
+      MENU_BLOCK_CHANNEL: 'menu_block_channel',
+      MENU_BLOCK_VIDEO: 'menu_block_video',
     }),
   });
 

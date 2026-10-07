@@ -34,6 +34,9 @@ const DEFAULT_OPTIONS = {
   [OPTS.VIDLENGTH_TYPE]: 'allow',
   [OPTS.PERCENT_WATCHED_HIDE]: NaN,
   [OPTS.WHITELIST_MODE]: false,
+  [OPTS.MENU_ALLOW_CHANNEL]: true,
+  [OPTS.MENU_BLOCK_CHANNEL]: true,
+  [OPTS.MENU_BLOCK_VIDEO]: true,
 };
 
 // keyed by (contextId || frameId) of the sender -> still-open content-script port
