@@ -689,14 +689,28 @@ input#import {
   padding: .35em .6em;
   border-bottom: 1px solid var(--borders);
   vertical-align: middle;
+  line-height: 1.5;
 }
 
-.entity-table tr:last-child td {
+/* While scrollable AND parked at the very bottom, the last row's divider
+   would stack on the box edge into a 2px line — so it yields and the box
+   edge alone is the single closing line. (Toggled from options.js; short
+   lists never get the class, keeping their closing line under the row.) */
+.table-scroll.is-bottom .entity-table tr:last-child td {
   border-bottom: none;
 }
 
-.cell-id {
+/* Shared base for the value column: identical type metrics on every ID
+   panel, so Channel/Video ID rows measure exactly like Channel Name,
+   Video Title and Comments rows. Only the wrapping modifier differs. */
+.cell-id,
+.cell-pattern {
   font-family: monospace;
+  font-size: 1em;
+  line-height: 1.5;
+}
+
+.cell-id {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -707,13 +721,20 @@ input#import {
 }
 
 .cell-pattern {
-  font-family: monospace;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .cell-date {
   white-space: nowrap;
   opacity: .8;
+  line-height: 1.4;
+}
+
+/* Date cells always hold two lines (date + provenance kind), even when
+   there is no provenance, so single-line "—" rows never render shorter. */
+.cell-date-via:empty::after {
+  content: '\00a0';
 }
 
 /* Empty-list placeholder row inside the entity tables. */

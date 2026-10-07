@@ -745,6 +745,20 @@
 
   // True paging: exactly one page lives in the DOM. Nothing mutates while
   // scrolling, so the view cannot jitter, drift, or cascade.
+  // Single closing line: the last row keeps its divider (closing line for
+  // short lists), but once scrollable AND parked at the very bottom that
+  // divider would stack on the box edge into a 2px line — so the box gets
+  // an `is-bottom` flag there and CSS yields the row divider, leaving the
+  // box edge as the one line.
+  function updateTableBottomEdge(key) {
+    const t = TABLE_EDITORS[key];
+    const scroller = $(t.scroll);
+    if (!scroller) return;
+    const scrollable = scroller.scrollHeight > scroller.clientHeight + 1;
+    const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
+    scroller.classList.toggle('is-bottom', scrollable && atBottom);
+  }
+
   function renderTablePage(key) {
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
@@ -766,6 +780,7 @@
     $(t.rows).appendChild(fragment);
     state.shown = end;
     updateTableShown(key);
+    updateTableBottomEdge(key);
   }
 
   // Jump to a 1-based page of TABLE_CHUNK rows: renders just that window
@@ -955,8 +970,9 @@
     return indexCell;
   }
 
-  // The date/provenance cell: stored date (or a muted dash for pre-date
-  // entries) plus the small provenance-kind line; full line as the title.
+  // The date/provenance cell: always two lines (date + kind) so every
+  // row measures the same whether provenance exists or not; the kind line
+  // stays empty (but present, via CSS) for manual entries. Full line as title.
   function buildDateCell(row) {
     const dateCell = document.createElement('td');
     dateCell.className = 'cell-date';
@@ -971,12 +987,18 @@
       }
       dateCell.appendChild(date);
       const via = document.createElement('div');
-      via.className = 'muted small';
+      via.className = 'muted small cell-date-via';
       via.textContent = provenanceKind(row.provenance.kind);
       dateCell.appendChild(via);
       dateCell.title = row.provenanceLine;
     } else {
-      dateCell.textContent = '—';
+      const date = document.createElement('div');
+      date.textContent = '—';
+      dateCell.appendChild(date);
+      const via = document.createElement('div');
+      via.className = 'muted small cell-date-via';
+      via.textContent = '';
+      dateCell.appendChild(via);
       if (row.provenanceLine !== '') dateCell.title = row.provenanceLine;
     }
     return dateCell;
@@ -1134,6 +1156,7 @@
       const sync = () => {
         st.scrollTick = false;
         syncTablePage(key);
+        updateTableBottomEdge(key);
       };
       if (window.requestAnimationFrame) window.requestAnimationFrame(sync);
       else sync();
@@ -1592,6 +1615,7 @@
         activePanel = btn.getAttribute('aria-controls');
         $('opt_title').textContent = btn.textContent;
         updateCounts();
+        (PANEL_EDITORS[activePanel] || []).forEach(updateTableBottomEdge);
 
         panel.querySelectorAll('textarea').forEach((txtarea) => {
           const areaName = txtarea.getAttribute('id');
@@ -1639,5 +1663,9 @@
   setupTable('title');
   setupTable('comment');
   setupTable('whitelist');
+  // Viewport resizes change scrollable/at-bottom without any scroll event.
+  window.addEventListener('resize', () => {
+    Object.keys(TABLE_EDITORS).forEach(updateTableBottomEdge);
+  });
   updateCounts();
 })();
