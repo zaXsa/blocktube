@@ -37,6 +37,7 @@ const DEFAULT_OPTIONS = {
   [OPTS.MENU_ALLOW_CHANNEL]: true,
   [OPTS.MENU_BLOCK_CHANNEL]: true,
   [OPTS.MENU_BLOCK_VIDEO]: true,
+  [OPTS.SAVE_SHORTCUT]: false,
 };
 
 // keyed by (contextId || frameId) of the sender -> still-open content-script port

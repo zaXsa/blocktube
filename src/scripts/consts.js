@@ -39,6 +39,7 @@
       MENU_ALLOW_CHANNEL: 'menu_allow_channel',
       MENU_BLOCK_CHANNEL: 'menu_block_channel',
       MENU_BLOCK_VIDEO: 'menu_block_video',
+      SAVE_SHORTCUT: 'save_shortcut',
     }),
   });
 

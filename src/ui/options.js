@@ -62,6 +62,7 @@
     { id: 'menu_allow_channel',    path: `options.${OPT.MENU_ALLOW_CHANNEL}`,   type: 'checkbox', default: true  },
     { id: 'menu_block_channel',    path: `options.${OPT.MENU_BLOCK_CHANNEL}`,   type: 'checkbox', default: true  },
     { id: 'menu_block_video',      path: `options.${OPT.MENU_BLOCK_VIDEO}`,     type: 'checkbox', default: true  },
+    { id: 'save_shortcut',         path: `options.${OPT.SAVE_SHORTCUT}`,        type: 'checkbox', default: false },
     { id: 'enable_javascript',     path: `options.${OPT.ENABLE_JAVASCRIPT}`,    type: 'checkbox', default: false },
     { id: 'whitelist_mode',        path: `options.${OPT.WHITELIST_MODE}`,       type: 'checkbox', default: false },
 
@@ -1352,6 +1353,21 @@
     if (evt.target.classList.contains('disabled-btn')) return;
     saveForm();
   });
+
+  // Ctrl+S / Cmd+S saves when the option is on (default off preserves the
+  // browser's save-page dialog). Based on upstream PR #665 by Kenqr.
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== 's') return;
+      if (!storageData.options || !storageData.options[OPT.SAVE_SHORTCUT]) return;
+      if (!isLoggedIn) return;
+      event.preventDefault();
+      if ($('save_btn').classList.contains('disabled-btn')) return;
+      saveForm();
+    },
+    true,
+  );
 
   $('discard_btn').addEventListener('click', () => {
     if ($('save_btn').classList.contains('disabled-btn')) return;
