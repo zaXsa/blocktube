@@ -322,9 +322,10 @@
       keys.length > 0 ? `${panelTotal} in this panel · ${total} total` : `${total} total`;
   }
 
-  // Invalid-regex warnings under the regex-evaluated editors: lines that
+  // Invalid-regex warnings below the regex-evaluated editors (after the
+  // table/raw views, so showing them never shifts the list): lines that
   // would fail RegExp construction downstream (and so never match).
-  // Invalid-ID warnings under the ID editors: ID lines are wrapped raw
+  // Invalid-ID warnings below the ID editors: ID lines are wrapped raw
   // (`^id$`), so a line outside the ID charset either never matches or —
   // like `.*` — matches far more than intended. Informational only in both
   // cases — saving is never blocked.

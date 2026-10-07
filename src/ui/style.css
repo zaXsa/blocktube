@@ -798,9 +798,10 @@ input#import {
   font-style: italic;
 }
 
-/* Invalid-regex warnings under the regex-evaluated editors.
+/* Invalid-regex warnings below the filter lists (after the table/raw views,
+   so showing them never shifts the list up or down).
    Hidden boxes collapse entirely (display, not visibility) so they never
-   leave a dead gap between the toolbar and the list. */
+   leave a dead gap below the list. */
 .regex-warning {
   margin-top: .4em;
   padding: .4em .6em;

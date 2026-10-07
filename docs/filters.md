@@ -32,7 +32,7 @@ Work while focused in one of the filter textareas:
   in the table and editable there with the ✎ button. Like all `//` lines it
   never affects filtering, import, or export.
 * **Invalid regex is flagged, not fatal.** A `/pattern/flags` line that fails
-  `RegExp` construction shows a warning under the editor naming the line
+  `RegExp` construction shows a warning below the list naming the line
   numbers — it simply never matches. Saving is never blocked.
 
 ## Keyword boundaries
