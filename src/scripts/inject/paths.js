@@ -32,6 +32,81 @@
     }
   }
 
+  // Collect EVERY value at a dotted path, not just the first. getObjectByPath
+  // resolves an ARRAY node to its first element owning the key, so a second
+  // collaborator id in a byline/dialog list is invisible to it. This walker
+  // fans out across all array elements instead (numeric [idx] segments still
+  // select one element). Used by getFlattenByPathAll for channelId/channelName,
+  // where ANY listed channel may match (see upstream PR #674).
+  function getAllByPath(obj, path) {
+    const compiled = compiledPath(path);
+    let values = [obj];
+    for (let i = 0; i < compiled.length; i += 1) {
+      const seg = compiled[i];
+      const next = [];
+      for (let v = 0; v < values.length; v += 1) {
+        const cur = values[v];
+        if (cur === undefined || cur === null) continue;
+        if (seg.indices === undefined) {
+          if (cur instanceof Array) {
+            for (let k = 0; k < cur.length; k += 1) {
+              const el = cur[k];
+              if (el && typeof el === 'object' && has.call(el, seg.key)) next.push(el[seg.key]);
+            }
+          } else if (typeof cur === 'object' && has.call(cur, seg.key)) {
+            next.push(cur[seg.key]);
+          }
+        } else {
+          let base = cur;
+          if (seg.key !== undefined) {
+            if (!base || typeof base !== 'object' || !has.call(base, seg.key)) continue;
+            base = base[seg.key];
+          }
+          let arr = [base];
+          let ok = true;
+          for (let k = 0; k < seg.indices.length; k += 1) {
+            const idx = seg.indices[k];
+            const collected = [];
+            for (let a = 0; a < arr.length; a += 1) {
+              const av = arr[a];
+              if (Array.isArray(av) && idx >= 0 && idx < av.length) collected.push(av[idx]);
+            }
+            arr = collected;
+            if (arr.length === 0) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) {
+            for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
+          }
+        }
+      }
+      values = next;
+      if (values.length === 0) return values;
+    }
+    return values;
+  }
+
+  // Like getFlattenByPath, but returns every flattened value across every
+  // path in the array — so a blocked collaborator listed second still matches.
+  function getFlattenByPathAll(obj, filterPath) {
+    if (filterPath === undefined) return [];
+    if (typeof filterPath === 'function') {
+      const single = flattenRuns(filterPath(obj));
+      return single === undefined ? [] : [single];
+    }
+    const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
+    const out = [];
+    for (let i = 0; i < filterPathArr.length; i += 1) {
+      const vals = getAllByPath(obj, filterPathArr[i]);
+      for (let j = 0; j < vals.length; j += 1) {
+        const flat = flattenRuns(vals[j]);
+        if (flat !== undefined) out.push(flat);
+      }
+    }
+    return out;
+  }
   // Collect every collaborator channel id from a lockupViewModel avatar stack.
   // Collab videos render one card per creator, and getFlattenByPath only
   // returns the first channelId it resolves.

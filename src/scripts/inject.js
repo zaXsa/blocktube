@@ -48,6 +48,7 @@
       MENU_ALLOW_CHANNEL: 'menu_allow_channel',
       MENU_BLOCK_CHANNEL: 'menu_block_channel',
       MENU_BLOCK_VIDEO: 'menu_block_video',
+      SAVE_SHORTCUT: 'save_shortcut',
     }),
   });
 
@@ -123,11 +124,43 @@
     related,
   });
 
+  // Search-result collaborator channels (YouTube Collaborations): a video with
+  // several creators exposes the extra channels behind a byline dialog, not
+  // the usual byline browseEndpoint. Based on upstream PR #674 by Sonicegorsan.
+  const collabBylinePaths = ['shortBylineText', 'longBylineText', 'ownerText', 'bylineText'];
+  const collabDialogPath =
+    'runs.navigationEndpoint.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
+  const collabChannelIdPaths = collabBylinePaths.map(
+    (path) =>
+      `${path}.${collabDialogPath}.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+  );
+  const collabChannelNamePaths = collabBylinePaths.map(
+    (path) => `${path}.${collabDialogPath}.title.content`,
+  );
+  const avatarCollabPath =
+    'avatar.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
+
   const baseRules = {
     videoId: 'videoId',
-    channelId: 'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+    channelId: [
+      'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'longBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'ownerText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'bylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'channelThumbnailSupportedRenderers.channelThumbnailWithLinkRenderer.navigationEndpoint.browseEndpoint.browseId',
+      'avatar.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+      `${avatarCollabPath}.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+      ...collabChannelIdPaths,
+    ],
     channelBadges: 'ownerBadges',
-    channelName: ['shortBylineText', 'longBylineText'],
+    channelName: [
+      'shortBylineText',
+      'longBylineText',
+      'ownerText',
+      'bylineText',
+      `${avatarCollabPath}.title.content`,
+      ...collabChannelNamePaths,
+    ],
     title: ['title'],
     vidLength: ['thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text'],
     viewCount: ['viewCountText'],
@@ -512,6 +545,81 @@
     }
   }
 
+  // Collect EVERY value at a dotted path, not just the first. getObjectByPath
+  // resolves an ARRAY node to its first element owning the key, so a second
+  // collaborator id in a byline/dialog list is invisible to it. This walker
+  // fans out across all array elements instead (numeric [idx] segments still
+  // select one element). Used by getFlattenByPathAll for channelId/channelName,
+  // where ANY listed channel may match (see upstream PR #674).
+  function getAllByPath(obj, path) {
+    const compiled = compiledPath(path);
+    let values = [obj];
+    for (let i = 0; i < compiled.length; i += 1) {
+      const seg = compiled[i];
+      const next = [];
+      for (let v = 0; v < values.length; v += 1) {
+        const cur = values[v];
+        if (cur === undefined || cur === null) continue;
+        if (seg.indices === undefined) {
+          if (cur instanceof Array) {
+            for (let k = 0; k < cur.length; k += 1) {
+              const el = cur[k];
+              if (el && typeof el === 'object' && has.call(el, seg.key)) next.push(el[seg.key]);
+            }
+          } else if (typeof cur === 'object' && has.call(cur, seg.key)) {
+            next.push(cur[seg.key]);
+          }
+        } else {
+          let base = cur;
+          if (seg.key !== undefined) {
+            if (!base || typeof base !== 'object' || !has.call(base, seg.key)) continue;
+            base = base[seg.key];
+          }
+          let arr = [base];
+          let ok = true;
+          for (let k = 0; k < seg.indices.length; k += 1) {
+            const idx = seg.indices[k];
+            const collected = [];
+            for (let a = 0; a < arr.length; a += 1) {
+              const av = arr[a];
+              if (Array.isArray(av) && idx >= 0 && idx < av.length) collected.push(av[idx]);
+            }
+            arr = collected;
+            if (arr.length === 0) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) {
+            for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
+          }
+        }
+      }
+      values = next;
+      if (values.length === 0) return values;
+    }
+    return values;
+  }
+
+  // Like getFlattenByPath, but returns every flattened value across every
+  // path in the array — so a blocked collaborator listed second still matches.
+  function getFlattenByPathAll(obj, filterPath) {
+    if (filterPath === undefined) return [];
+    if (typeof filterPath === 'function') {
+      const single = flattenRuns(filterPath(obj));
+      return single === undefined ? [] : [single];
+    }
+    const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
+    const out = [];
+    for (let i = 0; i < filterPathArr.length; i += 1) {
+      const vals = getAllByPath(obj, filterPathArr[i]);
+      for (let j = 0; j < vals.length; j += 1) {
+        const flat = flattenRuns(vals[j]);
+        if (flat !== undefined) out.push(flat);
+      }
+    }
+    return out;
+  }
   // Collect every collaborator channel id from a lockupViewModel avatar stack.
   // Collab videos render one card per creator, and getFlattenByPath only
   // returns the first channelId it resolves.
@@ -891,6 +999,22 @@
     );
   }
 
+  // Test one compiled filter entry against one value. Resets lastIndex first:
+  // a user-supplied /g flag makes RegExp.test stateful, and testing the same
+  // entry against several candidate values would otherwise alternate hits.
+  function testFilterEntry(entry, value) {
+    if (!entry) return false;
+    entry.lastIndex = 0;
+    return entry.test(value);
+  }
+
+  // True when any entry matches any candidate value (search-result collab
+  // videos list several channels; the first one must not decide alone).
+  function entriesMatchAnyValue(entries, values) {
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) => entry && values.some((v) => testFilterEntry(entry, v)));
+  }
+
   // Collab videos (avatar stack): a blocked collaborator other than the first
   // creator isn't caught by the single channelId above, so test every
   // collaborator in the stack as well.
@@ -954,14 +1078,15 @@
   // The blocking rules for one field, in priority order. Returns `match` - the
   // descriptor for matchedFilterField, or null - plus `value`, the form of the
   // value the custom JS filter should receive.
-  function matchField(fieldName, value, filterEntries, obj, rendererKey) {
+  function matchField(fieldName, value, filterEntries, obj, rendererKey, allValues) {
     // Whitelist mode inverts channelId: block iff NO allowlist entry tests
     // positive. Every other field is bypassed here (the caller additionally
     // skips their value extraction, so only channelId costs a read).
     if (storageData.options[OPT.WHITELIST_MODE]) {
       if (fieldName !== 'channelId') return { match: null, value };
       const allowlist = storageData.filterData.whitelist || [];
-      if (allowlist.some((entry) => entry && entry.test(value))) return { match: null, value };
+      const candidates = allValues && allValues.length > 0 ? allValues : [value];
+      if (entriesMatchAnyValue(allowlist, candidates)) return { match: null, value };
       if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
         return { match: null, value };
       }
@@ -983,7 +1108,12 @@
     }
 
     if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
-      const matchedEntry = filterEntries.find((entry) => entry && entry.test(value));
+      // channelId/channelName may carry several channels (search-result collab
+      // dialogs); a blocked one listed second must still match.
+      const candidates = allValues && allValues.length > 0 ? allValues : [value];
+      const matchedEntry = filterEntries.find(
+        (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
+      );
       if (matchedEntry) {
         return {
           match: { name: fieldName, value: String(matchedEntry).slice(0, 40) },
@@ -1076,6 +1206,11 @@
         filterEntries,
         obj,
         rendererKey,
+        // channelId/channelName can list several channels (collab dialogs);
+        // collect them all so a non-first match still blocks/allows.
+        fieldName === 'channelId' || fieldName === 'channelName'
+          ? getFlattenByPathAll(obj, filterPath)
+          : undefined,
       );
       if (match) {
         matchedFilterField = match;

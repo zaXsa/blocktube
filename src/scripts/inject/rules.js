@@ -60,11 +60,43 @@
     related,
   });
 
+  // Search-result collaborator channels (YouTube Collaborations): a video with
+  // several creators exposes the extra channels behind a byline dialog, not
+  // the usual byline browseEndpoint. Based on upstream PR #674 by Sonicegorsan.
+  const collabBylinePaths = ['shortBylineText', 'longBylineText', 'ownerText', 'bylineText'];
+  const collabDialogPath =
+    'runs.navigationEndpoint.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
+  const collabChannelIdPaths = collabBylinePaths.map(
+    (path) =>
+      `${path}.${collabDialogPath}.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+  );
+  const collabChannelNamePaths = collabBylinePaths.map(
+    (path) => `${path}.${collabDialogPath}.title.content`,
+  );
+  const avatarCollabPath =
+    'avatar.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
+
   const baseRules = {
     videoId: 'videoId',
-    channelId: 'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+    channelId: [
+      'shortBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'longBylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'ownerText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'bylineText.runs.navigationEndpoint.browseEndpoint.browseId',
+      'channelThumbnailSupportedRenderers.channelThumbnailWithLinkRenderer.navigationEndpoint.browseEndpoint.browseId',
+      'avatar.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+      `${avatarCollabPath}.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+      ...collabChannelIdPaths,
+    ],
     channelBadges: 'ownerBadges',
-    channelName: ['shortBylineText', 'longBylineText'],
+    channelName: [
+      'shortBylineText',
+      'longBylineText',
+      'ownerText',
+      'bylineText',
+      `${avatarCollabPath}.title.content`,
+      ...collabChannelNamePaths,
+    ],
     title: ['title'],
     vidLength: ['thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text'],
     viewCount: ['viewCountText'],

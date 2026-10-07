@@ -83,6 +83,22 @@
     );
   }
 
+  // Test one compiled filter entry against one value. Resets lastIndex first:
+  // a user-supplied /g flag makes RegExp.test stateful, and testing the same
+  // entry against several candidate values would otherwise alternate hits.
+  function testFilterEntry(entry, value) {
+    if (!entry) return false;
+    entry.lastIndex = 0;
+    return entry.test(value);
+  }
+
+  // True when any entry matches any candidate value (search-result collab
+  // videos list several channels; the first one must not decide alone).
+  function entriesMatchAnyValue(entries, values) {
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) => entry && values.some((v) => testFilterEntry(entry, v)));
+  }
+
   // Collab videos (avatar stack): a blocked collaborator other than the first
   // creator isn't caught by the single channelId above, so test every
   // collaborator in the stack as well.
@@ -146,14 +162,15 @@
   // The blocking rules for one field, in priority order. Returns `match` - the
   // descriptor for matchedFilterField, or null - plus `value`, the form of the
   // value the custom JS filter should receive.
-  function matchField(fieldName, value, filterEntries, obj, rendererKey) {
+  function matchField(fieldName, value, filterEntries, obj, rendererKey, allValues) {
     // Whitelist mode inverts channelId: block iff NO allowlist entry tests
     // positive. Every other field is bypassed here (the caller additionally
     // skips their value extraction, so only channelId costs a read).
     if (storageData.options[OPT.WHITELIST_MODE]) {
       if (fieldName !== 'channelId') return { match: null, value };
       const allowlist = storageData.filterData.whitelist || [];
-      if (allowlist.some((entry) => entry && entry.test(value))) return { match: null, value };
+      const candidates = allValues && allValues.length > 0 ? allValues : [value];
+      if (entriesMatchAnyValue(allowlist, candidates)) return { match: null, value };
       if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
         return { match: null, value };
       }
@@ -175,7 +192,13 @@
     }
 
     if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
-      const matchedEntry = filterEntries.find((entry) => entry && entry.test(value));
+      // channelId/channelName may carry several channels (search-result collab
+      // dialogs); a blocked one listed second must still match.
+      const candidates =
+        allValues && allValues.length > 0 ? allValues : [value];
+      const matchedEntry = filterEntries.find(
+        (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
+      );
       if (matchedEntry) {
         return {
           match: { name: fieldName, value: String(matchedEntry).slice(0, 40) },
@@ -268,6 +291,11 @@
         filterEntries,
         obj,
         rendererKey,
+        // channelId/channelName can list several channels (collab dialogs);
+        // collect them all so a non-first match still blocks/allows.
+        fieldName === 'channelId' || fieldName === 'channelName'
+          ? getFlattenByPathAll(obj, filterPath)
+          : undefined,
       );
       if (match) {
         matchedFilterField = match;
