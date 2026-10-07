@@ -622,6 +622,32 @@
   // cards can never misread the view count. Pass 3 covers channel-type lockups
   // (LOCKUP_CONTENT_TYPE_CHANNEL): they have no channel row at all, the
   // channel name IS the card title.
+  // Pass 1b covers link-less channel rows: some home-feed/continuation
+  // lockups omit the commandRuns browseEndpoint link on the channel part
+  // (no avatar link to resolve), so the precise pass above finds nothing
+  // even though the channel text is present. NewPipe reads the same shape
+  // index-first (first metadata row = uploader, last row = views/date),
+  // so when 2+ rows with metadataParts exist the first row's first part is
+  // the channel by position. Single-row cards stay undefined (channel-less
+  // cards on a channel's own tabs carry only views/date — returning that
+  // row would misread the view count as the channel).
+  function lockupFirstRowChannelName(rows) {
+    const partRows = [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (Array.isArray(parts)) partRows.push(parts);
+    }
+    if (partRows.length < 2) return undefined;
+    const first = partRows[0][0];
+    if (!first || typeof first !== 'object') return undefined;
+    const text = first.text;
+    if (!text || typeof text !== 'object') return undefined;
+    if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+    const runs = flattenRuns(text);
+    if (typeof runs === 'string' && runs.length > 0) return runs;
+    return undefined;
+  }
+
   function lockupChannelName(renderer) {
     const rows = getObjectByPath(
       renderer,
@@ -646,6 +672,8 @@
           if (typeof runs === 'string' && runs.length > 0) return runs;
         }
       }
+      const firstRow = lockupFirstRowChannelName(rows);
+      if (firstRow !== undefined) return firstRow;
       if (rows.length >= 2) {
         for (let i = 0; i < rows.length; i += 1) {
           const parts = rows[i] && rows[i].metadataParts;
