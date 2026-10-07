@@ -79,10 +79,18 @@
         second: 'numeric',
       };
       const now = new Intl.DateTimeFormat(undefined, options).format(new Date());
-      const text = String(data.info.text || '')
+      let text = String(data.info.text || '')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 200);
+      // Extraction can still miss the label on layouts the rules don't know
+      // yet (the channelId resolves via the avatar while the name path
+      // doesn't). Never store an empty `()` — fall back to the blocked id so
+      // the annotation stays parseable and carries at least the identity.
+      if (!text) {
+        const firstId = Array.isArray(data.info.id) ? data.info.id[0] : data.info.id;
+        if (typeof firstId === 'string' && firstId.length > 0) text = firstId.slice(0, 200);
+      }
       // Mode-aware provenance: allowlist entries read "Allowlisted", removals
       // read "Removed from whitelist", blocks read "Blocked". Keyed off the
       // routed type (whitelist <=> allowlisting).

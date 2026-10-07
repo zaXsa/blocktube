@@ -133,29 +133,64 @@
   // "From <channel>" shelves) drop that row, so
   // `metadataRows.metadataParts.text.content` silently resolves to the VIEW
   // COUNT ("3.4M") instead — the wrong annotation on allowlist/block entries
-  // and false channelName-filter hits on view counts. The channel part is the
-  // one whose text is a bare label: view/time parts always carry a part-level
-  // accessibilityLabel (views additionally a leadingIcon), the channel part
-  // never does. Single-row cards have no channel row at all.
+  // and false channelName-filter hits on view counts. Pass 1 is the precise
+  // signal: the channel part links to the channel (its text carries a
+  // commandRuns browseEndpoint id, the same path the channelId rule reads), so
+  // it survives accessibilityLabel changes that defeat the bare-label proxy.
+  // Pass 2 keeps the legacy bare-label heuristic (a part with neither
+  // accessibilityLabel nor leadingIcon), gated on >= 2 rows so single-row
+  // cards can never misread the view count. Pass 3 covers channel-type lockups
+  // (LOCKUP_CONTENT_TYPE_CHANNEL): they have no channel row at all, the
+  // channel name IS the card title.
   function lockupChannelName(renderer) {
     const rows = getObjectByPath(
       renderer,
       'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows',
     );
-    if (!Array.isArray(rows) || rows.length < 2) return undefined;
-    for (let i = 0; i < rows.length; i += 1) {
-      const parts = rows[i] && rows[i].metadataParts;
-      if (!Array.isArray(parts)) continue;
-      for (let j = 0; j < parts.length; j += 1) {
-        const part = parts[j];
-        if (!part || typeof part !== 'object') continue;
-        if (part.accessibilityLabel !== undefined || part.leadingIcon !== undefined) continue;
-        const text = part.text;
-        if (!text || typeof text !== 'object') continue;
-        if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-        const runs = flattenRuns(text);
-        if (typeof runs === 'string' && runs.length > 0) return runs;
+    if (Array.isArray(rows)) {
+      for (let i = 0; i < rows.length; i += 1) {
+        const parts = rows[i] && rows[i].metadataParts;
+        if (!Array.isArray(parts)) continue;
+        for (let j = 0; j < parts.length; j += 1) {
+          const part = parts[j];
+          if (!part || typeof part !== 'object') continue;
+          const linkId = getObjectByPath(
+            part,
+            'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
+          );
+          if (typeof linkId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(linkId)) continue;
+          const text = part.text;
+          if (!text || typeof text !== 'object') continue;
+          if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+          const runs = flattenRuns(text);
+          if (typeof runs === 'string' && runs.length > 0) return runs;
+        }
       }
+      if (rows.length >= 2) {
+        for (let i = 0; i < rows.length; i += 1) {
+          const parts = rows[i] && rows[i].metadataParts;
+          if (!Array.isArray(parts)) continue;
+          for (let j = 0; j < parts.length; j += 1) {
+            const part = parts[j];
+            if (!part || typeof part !== 'object') continue;
+            if (part.accessibilityLabel !== undefined || part.leadingIcon !== undefined) continue;
+            const text = part.text;
+            if (!text || typeof text !== 'object') continue;
+            if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+            const runs = flattenRuns(text);
+            if (typeof runs === 'string' && runs.length > 0) return runs;
+          }
+        }
+      }
+    }
+    const contentType = getObjectByPath(renderer, 'contentType');
+    if (typeof contentType === 'string' && contentType.includes('CHANNEL')) {
+      const title = getObjectByPath(renderer, 'metadata.lockupMetadataViewModel.title');
+      if (typeof title === 'string' && title.length > 0) return title;
+      if (title && typeof title.content === 'string' && title.content.length > 0)
+        return title.content;
+      const flat = flattenRuns(title);
+      if (typeof flat === 'string' && flat.length > 0) return flat;
     }
     return undefined;
   }
