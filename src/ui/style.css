@@ -241,21 +241,42 @@ fieldset:last-of-type div {
   z-index: 999999999999;
 }
 
-/* Codeblock resizers */
+/* Codeblock resizers — visible bottom-edge drag handles for the filter
+   tables, raw editors, and the Advanced editor. An explicit height (not 0px)
+   keeps the hit area usable; the grip glyph signals draggability. */
 .cm-resizer {
   background: var(--light);
-  height: 0px;
+  height: 16px;
+  line-height: 16px;
+  flex: none;
   user-select: none;
   cursor: row-resize;
   text-align: center;
+  touch-action: none;
+  border: 1px solid var(--borders);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
 }
 
 .cm-resizer:before {
   content: '\2261'; /* https://en.wikipedia.org/wiki/Triple_bar */
   color: #999;
   text-align: center;
-  padding: .7em;
+  padding-inline: .7em;
   transition: 200ms all;
+}
+
+.cm-resizer:hover:before {
+  color: var(--white);
+}
+
+/* Table handles sit below the footer buttons, detached from any box, so
+   they read as a separate pill: rounded on all corners with a small gap
+   above (raw/advanced handles stay attached under CodeMirror instead). */
+.table-wrap > .cm-resizer {
+  border-top: 1px solid var(--borders);
+  border-radius: 8px;
+  margin-top: 4px;
 }
 
 /* DATA PANEL BUTTONS */

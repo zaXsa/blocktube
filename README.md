@@ -40,7 +40,9 @@ Discard, and an `Unsaved changes` flag):
 * **Channel ID / Video ID / Channel Name / Video Title / Comments** — each
   list as a searchable table (one row per entry with its date, source, and
   an editable label; single-click remove; paging for large lists) plus a
-  `Raw list` toggle for direct text editing. ID panels take raw IDs only;
+  `Raw list` toggle for direct text editing. Drag the grip below either
+  view to resize the list; the height is shared across panels and
+  remembered per browser. ID panels take raw IDs only;
   name/title/comment panels take keywords or `/regex/flags` (invalid regex
   is flagged without blocking save). An `Add` box appends entries with a
   dated provenance comment.

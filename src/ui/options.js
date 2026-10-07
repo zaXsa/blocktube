@@ -1420,29 +1420,190 @@
     reader.readAsText(f);
   }
 
+  // Filter-list heights: the table and raw views share one resizable box
+  // per panel (`.fixed-view`), so dragging either handle resizes both and a
+  // toggle never jumps. The old `cmResizer` sized the CodeMirror wrapper
+  // directly, which the fixed parent swallowed — hence dragging appeared to
+  // do nothing. Heights persist in localStorage (UI-only, never backup).
+  const LIST_HEIGHT_KEY = 'blocktube_list_height';
+  const LIST_HEIGHT_MIN = 220;
+  const LIST_HEIGHT_MAX = 1600;
+
+  function getStoredListHeight() {
+    try {
+      const raw = window.localStorage.getItem(LIST_HEIGHT_KEY);
+      if (raw === null) return null;
+      const parsed = parseInt(raw, 10);
+      if (isNaN(parsed)) return null;
+      return Math.max(LIST_HEIGHT_MIN, Math.min(LIST_HEIGHT_MAX, parsed));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Apply one height to every list box (table + raw on all six panels) so
+  // switching panels never jumps; refreshes only the visible editors
+  // (measuring a hidden CodeMirror yields 0 and blanks it on return).
+  // `onlyKey` limits the (expensive) CodeMirror refresh to the dragged
+  // panel during a drag; the release pass refreshes everything.
+  function applyListHeight(height, persist, onlyKey) {
+    const clamped = Math.max(LIST_HEIGHT_MIN, Math.min(LIST_HEIGHT_MAX, height));
+    Object.values(TABLE_EDITORS).forEach((t) => {
+      const tableWrap = $(t.tableWrap);
+      const editorWrap = $(t.editorWrap);
+      if (tableWrap) tableWrap.style.height = `${clamped}px`;
+      if (editorWrap) editorWrap.style.height = `${clamped}px`;
+    });
+    if (persist === true) {
+      try {
+        window.localStorage.setItem(LIST_HEIGHT_KEY, String(clamped));
+      } catch (e) {
+        // Private mode etc: resizing still works for the session.
+      }
+    }
+    const refreshKeys = onlyKey !== undefined ? [onlyKey] : Object.keys(TABLE_EDITORS);
+    refreshKeys.forEach((key) => {
+      const cm = jsEditors[key];
+      const editorWrap = $(TABLE_EDITORS[key].editorWrap);
+      if (cm && editorWrap && !editorWrap.hidden && editorWrap.offsetParent !== null) {
+        cm.refresh();
+      }
+    });
+    Object.keys(TABLE_EDITORS).forEach((key) => {
+      updateTableBottomEdge(key);
+    });
+  }
+
+  // One drag at a time: a second pointerdown while a resize is active is
+  // ignored so overlapping pointer-capture streams cannot fight.
+  let listDragActive = false;
+
+  function wireListResizer(key) {
+    const tableResizer = $(`${key}_table_resizer`);
+    const rawResizer = $(`${key}_resizer`);
+    const handles = [tableResizer, rawResizer].filter((el) => el !== null);
+    if (handles.length === 0) return;
+    handles.forEach((handle) => {
+      // Pointer events + capture (not body mousemove): fast drags and drags
+      // that leave the window keep delivering to the handle. The anchor is
+      // the handle's own box — never the sibling view, which is hidden
+      // (height 0) in the other mode and used to collapse the drag to min.
+      handle.addEventListener('pointerdown', (e) => {
+        if (listDragActive) return;
+        if (e.button !== undefined && e.button !== 0) return;
+        const wrap = handle.closest('.fixed-view');
+        if (!wrap) return;
+        e.preventDefault();
+        listDragActive = true;
+        const startY = e.clientY;
+        const startH = wrap.getBoundingClientRect().height;
+        let pendingH = startH;
+        let rafId = 0;
+        let settled = false;
+        const prevUserSelect = document.body.style.userSelect;
+        document.body.style.userSelect = 'none';
+        try {
+          handle.setPointerCapture(e.pointerId);
+        } catch (err) {
+          // No capture (old browser): window-level move/up still tracks.
+        }
+        const flush = () => {
+          rafId = 0;
+          applyListHeight(pendingH, false, key);
+        };
+        const onMove = (ev) => {
+          pendingH = startH + ev.clientY - startY;
+          if (rafId === 0) {
+            if (window.requestAnimationFrame) rafId = window.requestAnimationFrame(flush);
+            else flush();
+          }
+        };
+        const cleanup = () => {
+          if (settled) return;
+          settled = true;
+          handle.removeEventListener('pointermove', onMove);
+          handle.removeEventListener('pointerup', cleanup);
+          handle.removeEventListener('pointercancel', cleanup);
+          document.body.style.userSelect = prevUserSelect;
+          if (rafId !== 0) {
+            if (window.cancelAnimationFrame) window.cancelAnimationFrame(rafId);
+            rafId = 0;
+          }
+          listDragActive = false;
+          applyListHeight(pendingH, true);
+        };
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', cleanup);
+        handle.addEventListener('pointercancel', cleanup);
+      });
+    });
+  }
+
+  function initListHeights() {
+    const stored = getStoredListHeight();
+    if (stored !== null) applyListHeight(stored, false);
+    Object.keys(TABLE_EDITORS).forEach(wireListResizer);
+  }
+
   function cmResizer(cm, resizer) {
     const MIN_HEIGHT = 220;
+    if (!resizer) return;
 
     function heightOf(element) {
       return parseInt(window.getComputedStyle(element).height.replace(/px$/, ''));
     }
 
-    function onDrag(e) {
-      cm.display.scroller.style.maxHeight = '100%';
-      cm.setSize(null, `${Math.max(MIN_HEIGHT, cm.start_h + e.y - cm.start_y)}px`);
-    }
-
-    function onRelease(e) {
-      document.body.removeEventListener('mousemove', onDrag);
-      window.removeEventListener('mouseup', onRelease);
-    }
-
-    resizer.addEventListener('mousedown', function (e) {
-      cm.start_y = e.y;
-      cm.start_h = heightOf(cm.display.wrapper);
-
-      document.body.addEventListener('mousemove', onDrag);
-      window.addEventListener('mouseup', onRelease);
+    // Pointer events + capture so fast drags keep tracking; rAF-throttled
+    // so the editor resize cannot fall behind the pointer.
+    resizer.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = heightOf(cm.display.wrapper);
+      // Kept for the F11/Esc fullscreen toggle below, which restores the
+      // pre-fullscreen scroller cap from cm.start_h.
+      cm.start_y = startY;
+      cm.start_h = `${startH}px`;
+      let pendingH = startH;
+      let rafId = 0;
+      let settled = false;
+      const prevUserSelect = document.body.style.userSelect;
+      document.body.style.userSelect = 'none';
+      try {
+        resizer.setPointerCapture(e.pointerId);
+      } catch (err) {
+        // No capture: move/up listeners below still track.
+      }
+      const flush = () => {
+        rafId = 0;
+        cm.display.scroller.style.maxHeight = '100%';
+        cm.setSize(null, `${Math.max(MIN_HEIGHT, pendingH)}px`);
+      };
+      const onMove = (ev) => {
+        pendingH = startH + ev.clientY - startY;
+        if (rafId === 0) {
+          if (window.requestAnimationFrame) rafId = window.requestAnimationFrame(flush);
+          else flush();
+        }
+      };
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        resizer.removeEventListener('pointermove', onMove);
+        resizer.removeEventListener('pointerup', cleanup);
+        resizer.removeEventListener('pointercancel', cleanup);
+        document.body.style.userSelect = prevUserSelect;
+        if (rafId !== 0) {
+          if (window.cancelAnimationFrame) window.cancelAnimationFrame(rafId);
+          rafId = 0;
+          cm.display.scroller.style.maxHeight = '100%';
+          cm.setSize(null, `${Math.max(MIN_HEIGHT, pendingH)}px`);
+        }
+        cm.start_h = `${Math.max(MIN_HEIGHT, pendingH)}px`;
+      };
+      resizer.addEventListener('pointermove', onMove);
+      resizer.addEventListener('pointerup', cleanup);
+      resizer.addEventListener('pointercancel', cleanup);
     });
   }
 
@@ -1477,6 +1638,8 @@
 
   // Create one filter-list editor (or the JS editor): CodeMirror instance
   // with resizer and a change forwarder that marks the form dirty.
+  // Table-backed lists size via their `.fixed-view` box (see wireListResizer):
+  // sizing CodeMirror directly there is swallowed by the fixed parent.
   function createFilterEditor(v) {
     jsEditors[v] = CodeMirror.fromTextArea($(v), {
       mode: v === 'javascript' ? 'javascript' : 'blocktube',
@@ -1487,7 +1650,9 @@
       lineWrapping: true,
       extraKeys: filterEditorExtraKeys(),
     });
-    cmResizer(jsEditors[v], $(`${v}_resizer`));
+    if (!TABLE_EDITORS[v]) {
+      cmResizer(jsEditors[v], $(`${v}_resizer`));
+    }
     jsEditors[v].on('change', () => {
       $('options').dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -1663,6 +1828,7 @@
   setupTable('title');
   setupTable('comment');
   setupTable('whitelist');
+  initListHeights();
   // Viewport resizes change scrollable/at-bottom without any scroll event.
   window.addEventListener('resize', () => {
     Object.keys(TABLE_EDITORS).forEach(updateTableBottomEdge);
