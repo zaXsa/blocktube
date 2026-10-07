@@ -124,6 +124,39 @@
     });
   }
 
+  // Mobile watch-next feed section: the itemSectionRenderer whose target is
+  // the watch-next feed, or undefined when the feed has no such section.
+  function findWatchNextSection(nextResults) {
+    for (const [, v] of nextResults.entries()) {
+      if (
+        has.call(v, 'itemSectionRenderer') &&
+        v.itemSectionRenderer.targetId === 'watch-next-feed'
+      ) {
+        return v.itemSectionRenderer;
+      }
+    }
+    return undefined;
+  }
+
+  // Copy the next-video renderer fields onto the mobile autoplay overlay so
+  // playback continues from the right video after the block.
+  function applyNextVideoToOverlay(playerOverlay, nextVideoRenderer) {
+    playerOverlay.videoTitle = nextVideoRenderer.headline;
+    playerOverlay.byline = nextVideoRenderer.shortBylineText;
+    playerOverlay.background = nextVideoRenderer.thumbnail;
+    playerOverlay.nextButton.buttonRenderer.navigationEndpoint =
+      nextVideoRenderer.navigationEndpoint;
+    playerOverlay.thumbnailOverlays = nextVideoRenderer.thumbnailOverlays;
+    playerOverlay.videoId = nextVideoRenderer.videoId;
+    playerOverlay.shortViewCountText = nextVideoRenderer.shortViewCountText;
+  }
+
+  // Point the mobile autoplay set at the next video's endpoints.
+  function applyNextVideoToAutoplaySet(autoplaySet, nextVideoRenderer) {
+    autoplaySet.commandMetadata = nextVideoRenderer.navigationEndpoint.commandMetadata;
+    autoplaySet.watchEndpoint = nextVideoRenderer.navigationEndpoint.watchEndpoint;
+  }
+
   function fixAutoPlayMobile() {
     const playerOverlay = getObjectByPath(
       this.object,
@@ -137,27 +170,11 @@
     );
     if (!nextResults) return;
 
-    let nextSection;
-    for (const [, v] of nextResults.entries()) {
-      if (
-        has.call(v, 'itemSectionRenderer') &&
-        v.itemSectionRenderer.targetId === 'watch-next-feed'
-      ) {
-        nextSection = v.itemSectionRenderer;
-      }
-    }
-
+    const nextSection = findWatchNextSection(nextResults);
     const nextVideoRenderer = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
     if (!nextVideoRenderer) return;
 
-    playerOverlay.videoTitle = nextVideoRenderer.headline;
-    playerOverlay.byline = nextVideoRenderer.shortBylineText;
-    playerOverlay.background = nextVideoRenderer.thumbnail;
-    playerOverlay.nextButton.buttonRenderer.navigationEndpoint =
-      nextVideoRenderer.navigationEndpoint;
-    playerOverlay.thumbnailOverlays = nextVideoRenderer.thumbnailOverlays;
-    playerOverlay.videoId = nextVideoRenderer.videoId;
-    playerOverlay.shortViewCountText = nextVideoRenderer.shortViewCountText;
+    applyNextVideoToOverlay(playerOverlay, nextVideoRenderer);
 
     const autoplaySet = getObjectByPath(
       this.object,
@@ -165,8 +182,17 @@
     );
     if (!autoplaySet) return;
 
-    autoplaySet.commandMetadata = nextVideoRenderer.navigationEndpoint.commandMetadata;
-    autoplaySet.watchEndpoint = nextVideoRenderer.navigationEndpoint.watchEndpoint;
+    applyNextVideoToAutoplaySet(autoplaySet, nextVideoRenderer);
+  }
+
+  // Mobile next-video redirect: navigate to the feed's next video and drop
+  // the blocked contents. No-op on playlists (they provide the next row).
+  function redirectMobileToNextVideo(nextSection) {
+    const nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
+    if (!nextAutoPlayObj) return;
+
+    document.location = `watch?v=${nextAutoPlayObj.videoId}`;
+    delete this.object.contents;
   }
 
   function redirectToNextMobile() {
@@ -190,23 +216,8 @@
       return;
     }
 
-    let nextSection;
-    for (const [, v] of nextResults.entries()) {
-      if (
-        has.call(v, 'itemSectionRenderer') &&
-        v.itemSectionRenderer.targetId === 'watch-next-feed'
-      ) {
-        nextSection = v.itemSectionRenderer;
-      }
-    }
-
-    if (!nextSection) nextSection = nextResults;
-
-    const nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
-    if (!nextAutoPlayObj) return;
-
-    document.location = `watch?v=${nextAutoPlayObj.videoId}`;
-    delete this.object.contents;
+    const nextSection = findWatchNextSection(nextResults) || nextResults;
+    redirectMobileToNextVideo.call(this, nextSection);
   }
 
   // Break out of the playlist context check / navigation decision: playlists

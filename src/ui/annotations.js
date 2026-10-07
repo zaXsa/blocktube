@@ -160,6 +160,41 @@
     return { kind, text: '', date: '', raw: line };
   }
 
+  // Fold one annotation-ish line into the pending provenance: blanks end
+  // the group (clear it), parsed provenance comments arm it, unknown `//`
+  // formats leave it untouched. Returns true when the line was annotation-ish.
+  function foldAnnotationLine(line, index, state) {
+    if (!(typeof line === 'string' && isAnnotationLine(line))) return false;
+    if (line.trim() === '') {
+      state.pendingProvenance = null;
+    } else {
+      const parsed = parseProvenance(line);
+      if (parsed !== null) state.pendingProvenance = { line, index, parsed };
+    }
+    return true;
+  }
+
+  // Build one rule row: the label attaches only from the immediately
+  // preceding `// Label:` line; the pending provenance (if any) rides along.
+  function buildRuleRow(lines, line, index, pendingProvenance) {
+    let label = '';
+    let labelIndex = -1;
+    const attached = readLabel(lines[index - 1]);
+    if (attached !== null) {
+      label = attached;
+      labelIndex = index - 1;
+    }
+    return {
+      ruleIndex: index,
+      id: line,
+      label,
+      labelIndex,
+      provenance: pendingProvenance === null ? null : pendingProvenance.parsed,
+      provenanceLine: pendingProvenance === null ? '' : pendingProvenance.line,
+      provenanceIndex: pendingProvenance === null ? -1 : pendingProvenance.index,
+    };
+  }
+
   // Split stored lines into one row per rule (blocked ID). A `// Label:` line
   // attaches only when immediately above its rule; a `// Blocked …` line
   // attaches to following rules until a blank line ends the group (context
@@ -171,33 +206,10 @@
       throw new TypeError('parseRuleRows expects an array of lines');
     }
     const rows = [];
-    let pendingProvenance = null;
+    const state = { pendingProvenance: null };
     lines.forEach((line, index) => {
-      if (typeof line === 'string' && isAnnotationLine(line)) {
-        if (line.trim() === '') {
-          pendingProvenance = null;
-        } else {
-          const parsed = parseProvenance(line);
-          if (parsed !== null) pendingProvenance = { line, index, parsed };
-        }
-        return;
-      }
-      let label = '';
-      let labelIndex = -1;
-      const attached = readLabel(lines[index - 1]);
-      if (attached !== null) {
-        label = attached;
-        labelIndex = index - 1;
-      }
-      rows.push({
-        ruleIndex: index,
-        id: line,
-        label,
-        labelIndex,
-        provenance: pendingProvenance === null ? null : pendingProvenance.parsed,
-        provenanceLine: pendingProvenance === null ? '' : pendingProvenance.line,
-        provenanceIndex: pendingProvenance === null ? -1 : pendingProvenance.index,
-      });
+      if (foldAnnotationLine(line, index, state)) return;
+      rows.push(buildRuleRow(lines, line, index, state.pendingProvenance));
     });
     return rows;
   }

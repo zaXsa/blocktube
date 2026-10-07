@@ -151,6 +151,11 @@ npm run check:inject
 npm run lint
 npm run fmt:check
 
+# Advisory readability scan: functions over 30 lines or nested deeper than 4
+# (file-scope IIFE wrappers excluded; existing violations are grandfathered
+# until touched — never blocks)
+npm run check:length
+
 # Build package
 ./tools/build.sh firefox
 ./tools/build.sh chrome

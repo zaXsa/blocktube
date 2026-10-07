@@ -27,49 +27,78 @@
     }
   }
 
+  // One SPF part carrying an embedded player: hydrate the raw response and
+  // run the player filter. Guards the JSON parse — a malformed payload passes
+  // through unfiltered.
+  function filterSpfPlayer(obj) {
+    try {
+      const player_resp = getObjectByPath(obj.player, 'args.player_response');
+      obj.player.args.raw_player_response = JSON.parse(player_resp);
+    } catch (e) {}
+    playerHasBeenBlocked = false;
+    ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
+  }
+
+  // One SPF part carrying a top-level playerResponse: filter it directly.
+  function filterSpfPlayerResponse(obj) {
+    playerHasBeenBlocked = false;
+    ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
+  }
+
+  // Resolve the rule set + post actions for an SPF response/data part from
+  // the request pathname. Watch pages reuse the main rules with autoplay
+  // fixups; unknown paths fall through to main as well.
+  function spfRulesFor(pathname) {
+    let rules;
+    let postActions = [];
+    switch (pathname) {
+      case '/guide_ajax':
+        rules = filterRules.guide;
+        break;
+      case '/comment_service_ajax':
+      case '/live_chat/get_live_chat':
+        rules = filterRules.comments;
+        break;
+      case '/watch':
+        postActions = [fixAutoplay];
+        if (playerHasBeenBlocked) postActions.push(redirectToNext);
+      // the watch page uses the same catch-all rule set below
+      // falls through
+      default:
+        rules = filterRules.main;
+    }
+    return { rules, postActions };
+  }
+
+  // One SPF part carrying response/data: filter it with the pathname's rules.
+  function filterSpfPayload(obj, pathname) {
+    const { rules, postActions } = spfRulesFor(pathname);
+    ObjectFilter(obj.response || obj.data, rules, postActions, true);
+  }
+
+  // Filter one SPF part: player, playerResponse, and response/data shapes
+  // each get their own helper above.
+  function filterSpfPart(obj, pathname) {
+    if (has.call(obj, 'player')) {
+      filterSpfPlayer(obj);
+    }
+
+    if (has.call(obj, 'playerResponse')) {
+      filterSpfPlayerResponse(obj);
+    }
+
+    if (has.call(obj, 'response') || has.call(obj, 'data')) {
+      filterSpfPayload(obj, pathname);
+    }
+  }
+
   function spfFilter(url, resp) {
     if (storageData === undefined) return;
 
     let ytDataArr = resp.part || resp.response.parts || resp.response;
     ytDataArr = ytDataArr instanceof Array ? ytDataArr : [ytDataArr];
 
-    ytDataArr.forEach((obj) => {
-      if (has.call(obj, 'player')) {
-        try {
-          const player_resp = getObjectByPath(obj.player, 'args.player_response');
-          obj.player.args.raw_player_response = JSON.parse(player_resp);
-        } catch (e) {}
-        playerHasBeenBlocked = false;
-        ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
-      }
-
-      if (has.call(obj, 'playerResponse')) {
-        playerHasBeenBlocked = false;
-        ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
-      }
-
-      if (has.call(obj, 'response') || has.call(obj, 'data')) {
-        let rules;
-        let postActions = [];
-        switch (url.pathname) {
-          case '/guide_ajax':
-            rules = filterRules.guide;
-            break;
-          case '/comment_service_ajax':
-          case '/live_chat/get_live_chat':
-            rules = filterRules.comments;
-            break;
-          case '/watch':
-            postActions = [fixAutoplay];
-            if (playerHasBeenBlocked) postActions.push(redirectToNext);
-          // the watch page uses the same catch-all rule set below
-          // falls through
-          default:
-            rules = filterRules.main;
-        }
-        ObjectFilter(obj.response || obj.data, rules, postActions, true);
-      }
-    });
+    ytDataArr.forEach((obj) => filterSpfPart(obj, url.pathname));
   }
 
   function blockMixes(data) {

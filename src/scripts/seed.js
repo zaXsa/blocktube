@@ -8,40 +8,57 @@
   window.blockTubeDispatched = false;
   const isMobileInterface = document.location.hostname.startsWith('m.');
 
+  // Wrap one hooked method so it waits for blockTubeReady when the
+  // extension isn't armed yet, then calls through with the live arguments.
+  function deferUntilReady(value) {
+    return function () {
+      if (window.blockTubeDispatched) return value.apply(null, arguments);
+      window.addEventListener('blockTubeReady', value.bind(null, arguments));
+    };
+  }
+
+  // The get trap for a proxy hook: descend one path segment, proxying the
+  // child so the leaf set trap can arm. Each node proxies once (isProxy_).
+  function proxyHookGet(target, key, nextPath, hookKeys) {
+    if (
+      key === nextPath[0] &&
+      typeof target[key] === 'object' &&
+      target[key] !== null &&
+      !target[key].isProxy_
+    ) {
+      nextPath.shift();
+      target[key] = new Proxy(target[key], getHandler(nextPath, nextPath.length === 0, hookKeys));
+      target[key].isProxy_ = true;
+    }
+    return target[key];
+  }
+
+  // The set trap for a proxy hook: at the leaf, hooked keys are deferred
+  // until blockTubeReady; everything else assigns through.
+  function proxyHookSet(target, key, value, enableHook, hookKeys) {
+    if (enableHook && hookKeys.includes(key)) {
+      target[key] = deferUntilReady(value);
+    } else {
+      target[key] = value;
+    }
+    return true;
+  }
+
+  function getHandler(nextPath, enableHook, hookKeys) {
+    return {
+      get(target, key) {
+        return proxyHookGet(target, key, nextPath, hookKeys);
+      },
+      set(target, key, value) {
+        return proxyHookSet(target, key, value, enableHook, hookKeys);
+      },
+    };
+  }
+
   function createProxyHook(path, hookKeys) {
     path = path.split('.');
 
-    function getHandler(nextPath, enableHook) {
-      return {
-        get(target, key) {
-          if (
-            key === nextPath[0] &&
-            typeof target[key] === 'object' &&
-            target[key] !== null &&
-            !target[key].isProxy_
-          ) {
-            nextPath.shift();
-            target[key] = new Proxy(target[key], getHandler(nextPath, nextPath.length === 0));
-            target[key].isProxy_ = true;
-          }
-          return target[key];
-        },
-        set(target, key, value) {
-          if (enableHook && hookKeys.includes(key)) {
-            const hook_ = function () {
-              if (window.blockTubeDispatched) return value.apply(null, arguments);
-              window.addEventListener('blockTubeReady', value.bind(null, arguments));
-            };
-            target[key] = hook_;
-          } else {
-            target[key] = value;
-          }
-          return true;
-        },
-      };
-    }
-
-    return new Proxy({}, getHandler(path, path.length === 1));
+    return new Proxy({}, getHandler(path, path.length === 1, hookKeys));
   }
 
   // SPF (XHR) endpoints that still deliver content as JSON we need to filter
@@ -165,6 +182,56 @@
     return undefined;
   }
 
+  // Filter one parsed fetch body, then re-serialize with the original status
+  // and content-type while dropping length/encoding headers (the body bytes
+  // changed). Filter throws never break the caller — data passes through.
+  function sendFilteredFetch(url, jsonResp, resp, resolve) {
+    try {
+      window.blockTubeExports.fetchFilter(url, jsonResp);
+    } catch (e) {
+      console.error('BlockTube fetchFilter exception (passing data through)', e);
+    }
+    // Re-serialize with the original status and content-type while
+    // dropping length/encoding headers (the body bytes changed).
+    const headers = new Headers(resp.headers);
+    headers.delete('content-length');
+    headers.delete('content-encoding');
+    resolve(new Response(JSON.stringify(jsonResp), { status: resp.status, headers }));
+  }
+
+  // Handle one parsed fetch JSON body: filter once armed (deferred otherwise),
+  // or pass the raw response through when the body isn't parseable JSON.
+  function handleFetchJson(url, jsonResp, resp, resolve) {
+    const sendFiltered = function () {
+      sendFilteredFetch(url, jsonResp, resp, resolve);
+    };
+    if (window.blockTubeDispatched) sendFiltered();
+    else window.addEventListener('blockTubeReady', sendFiltered, { once: true });
+  }
+
+  // Handle one fetch response: non-JSON bodies (error pages, redirects, 204s)
+  // carry no video data — hand the original through untouched instead of
+  // rejecting. JSON bodies are parsed, filtered, and re-serialized.
+  function handleFetchResponse(url, resp, resolve) {
+    // Non-JSON bodies (error pages, redirects, 204s) carry no video data:
+    // hand the original response through untouched instead of rejecting.
+    if (!resp.ok || !(resp.headers.get('content-type') || '').includes('json')) {
+      resolve(resp);
+      return;
+    }
+    resp
+      .json()
+      .then(function (jsonResp) {
+        handleFetchJson(url, jsonResp, resp, resolve);
+      })
+      // A body that claims JSON but fails to parse shouldn't take down
+      // YouTube's caller either — pass the raw response through.
+      .then(
+        () => {},
+        () => resolve(resp),
+      );
+  }
+
   window.fetch = function (resource, init = undefined) {
     const resourceUrl = getResourceUrl(resource);
     if (resourceUrl === undefined || !fetchUris.some((u) => resourceUrl.includes(u))) {
@@ -182,37 +249,7 @@
     return new Promise((resolve, reject) => {
       originalFetch(resource, init)
         .then(function (resp) {
-          // Non-JSON bodies (error pages, redirects, 204s) carry no video data:
-          // hand the original response through untouched instead of rejecting.
-          if (!resp.ok || !(resp.headers.get('content-type') || '').includes('json')) {
-            resolve(resp);
-            return;
-          }
-          resp
-            .json()
-            .then(function (jsonResp) {
-              const sendFiltered = function () {
-                try {
-                  window.blockTubeExports.fetchFilter(url, jsonResp);
-                } catch (e) {
-                  console.error('BlockTube fetchFilter exception (passing data through)', e);
-                }
-                // Re-serialize with the original status and content-type while
-                // dropping length/encoding headers (the body bytes changed).
-                const headers = new Headers(resp.headers);
-                headers.delete('content-length');
-                headers.delete('content-encoding');
-                resolve(new Response(JSON.stringify(jsonResp), { status: resp.status, headers }));
-              };
-              if (window.blockTubeDispatched) sendFiltered();
-              else window.addEventListener('blockTubeReady', sendFiltered, { once: true });
-            })
-            // A body that claims JSON but fails to parse shouldn't take down
-            // YouTube's caller either — pass the raw response through.
-            .then(
-              () => {},
-              () => resolve(resp),
-            );
+          handleFetchResponse(url, resp, resolve);
         })
         .catch(reject);
     });

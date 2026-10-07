@@ -32,6 +32,59 @@
     }
   }
 
+  // Plain token fan-out: every array element owning the key contributes its
+  // value; a plain object contributes its own-key value. Misses add nothing.
+  function collectPlainKey(cur, key, next) {
+    if (cur instanceof Array) {
+      for (let k = 0; k < cur.length; k += 1) {
+        const el = cur[k];
+        if (el && typeof el === 'object' && has.call(el, key)) next.push(el[key]);
+      }
+    } else if (typeof cur === 'object' && has.call(cur, key)) {
+      next.push(cur[key]);
+    }
+  }
+
+  // Walk one numeric index across every candidate array, collecting hits.
+  // Out-of-range/non-array candidates contribute nothing.
+  function collectIndexStep(arr, idx) {
+    const collected = [];
+    for (let a = 0; a < arr.length; a += 1) {
+      const av = arr[a];
+      if (Array.isArray(av) && idx >= 0 && idx < av.length) collected.push(av[idx]);
+    }
+    return collected;
+  }
+
+  // Indexed token fan-out: own-key lookup on the token (when present), then
+  // indices in order. An empty intermediate set is a miss (adds nothing).
+  function collectIndexedKey(cur, seg, next) {
+    let base = cur;
+    if (seg.key !== undefined) {
+      if (!base || typeof base !== 'object' || !has.call(base, seg.key)) return;
+      base = base[seg.key];
+    }
+    let arr = [base];
+    for (let k = 0; k < seg.indices.length; k += 1) {
+      arr = collectIndexStep(arr, seg.indices[k]);
+      if (arr.length === 0) return;
+    }
+    for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
+  }
+
+  // One compiled-segment step: fan every current value out into `next`
+  // through the plain or indexed collector above.
+  function stepPathValues(values, seg) {
+    const next = [];
+    for (let v = 0; v < values.length; v += 1) {
+      const cur = values[v];
+      if (cur === undefined || cur === null) continue;
+      if (seg.indices === undefined) collectPlainKey(cur, seg.key, next);
+      else collectIndexedKey(cur, seg, next);
+    }
+    return next;
+  }
+
   // Collect EVERY value at a dotted path, not just the first. getObjectByPath
   // resolves an ARRAY node to its first element owning the key, so a second
   // collaborator id in a byline/dialog list is invisible to it. This walker
@@ -42,47 +95,7 @@
     const compiled = compiledPath(path);
     let values = [obj];
     for (let i = 0; i < compiled.length; i += 1) {
-      const seg = compiled[i];
-      const next = [];
-      for (let v = 0; v < values.length; v += 1) {
-        const cur = values[v];
-        if (cur === undefined || cur === null) continue;
-        if (seg.indices === undefined) {
-          if (cur instanceof Array) {
-            for (let k = 0; k < cur.length; k += 1) {
-              const el = cur[k];
-              if (el && typeof el === 'object' && has.call(el, seg.key)) next.push(el[seg.key]);
-            }
-          } else if (typeof cur === 'object' && has.call(cur, seg.key)) {
-            next.push(cur[seg.key]);
-          }
-        } else {
-          let base = cur;
-          if (seg.key !== undefined) {
-            if (!base || typeof base !== 'object' || !has.call(base, seg.key)) continue;
-            base = base[seg.key];
-          }
-          let arr = [base];
-          let ok = true;
-          for (let k = 0; k < seg.indices.length; k += 1) {
-            const idx = seg.indices[k];
-            const collected = [];
-            for (let a = 0; a < arr.length; a += 1) {
-              const av = arr[a];
-              if (Array.isArray(av) && idx >= 0 && idx < av.length) collected.push(av[idx]);
-            }
-            arr = collected;
-            if (arr.length === 0) {
-              ok = false;
-              break;
-            }
-          }
-          if (ok) {
-            for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
-          }
-        }
-      }
-      values = next;
+      values = stepPathValues(values, compiled[i]);
       if (values.length === 0) return values;
     }
     return values;
@@ -156,76 +169,111 @@
 
   // THE canonical dotted-path walker for this codebase (options.js `get` is a
   // mirror for the options page — it cannot import this bundle — and MUST stay
-  // in sync). Semantics, in order per `seg`:
-  //   1. plain token     -> own-key lookup; at an ARRAY node it resolves the
-  //      FIRST element that owns the key (`[].find(has)`). Trap: on a miss it
-  //      returns `def`, so typos and shape changes fail silently; and an array
-  //      of non-objects can never match. Never evaluates past a miss.
-  //   2. token[idx..]    -> own-key lookup on the token, then numeric indices
-  //      in order; out-of-range/negative/undefined -> `def`.
-  // Passing an array of paths walks each segment list in order (used per
-  // renderer rule where one property may live at several possible paths).
+  // in sync). Plain tokens do an own-key lookup (at an ARRAY node: the FIRST
+  // element owning the key); token[idx..] does the lookup then numeric indices
+  // in order. Any miss returns `def`, so typos/shape changes fail silently.
   // String paths are compiled once and cached (see compiledPath/pathCache).
+  // Miss sentinel: payload values come from JSON and can never be this
+  // reference, so an explicit `undefined` value still reads as a hit.
+  const PATH_MISS = {};
+
+  // Plain token (no brackets): own-key lookup, or first array element owning
+  // the key. Returns PATH_MISS on a miss, the value (possibly undefined) on
+  // a hit.
+  function readPlainKey(node, key) {
+    if (node instanceof Array) {
+      const found = node.find((o) => o !== null && o !== undefined && has.call(o, key));
+      if (found === undefined) return PATH_MISS;
+      return found[key];
+    }
+    if (!node || !has.call(node, key)) return PATH_MISS;
+    return node[key];
+  }
+
+  // Token with numeric indices: own-key lookup on the token (when present),
+  // then indices in order. Out-of-range/negative/non-array reads are misses.
+  function readIndexedKey(node, key, indices) {
+    let base = node;
+    if (key !== undefined) {
+      if (!base || !has.call(base, key)) return PATH_MISS;
+      base = base[key];
+    }
+    for (let k = 0; k < indices.length; k += 1) {
+      const idx = indices[k];
+      if (!Array.isArray(base) || idx < 0 || idx >= base.length) return PATH_MISS;
+      base = base[idx];
+    }
+    return base;
+  }
+
   function getObjectByPath(obj, path, def = undefined) {
     const compiled = compiledPath(path);
     let nextObj = obj;
-
     for (let i = 0; i < compiled.length; i += 1) {
       const seg = compiled[i];
-
-      if (seg.indices === undefined) {
-        // segment is a plain token (no bracket)
-        if (nextObj instanceof Array) {
-          // when we have an array of objects, find an element that contains the key v
-          const found = nextObj.find((o) => has.call(o, seg.key));
-          if (found === undefined) return def;
-          nextObj = found[seg.key];
-        } else {
-          if (!nextObj || !has.call(nextObj, seg.key)) return def;
-          nextObj = nextObj[seg.key];
-        }
-      } else {
-        // navigate to base property first (if present)
-        if (seg.key !== undefined) {
-          if (!nextObj || !has.call(nextObj, seg.key)) return def;
-          nextObj = nextObj[seg.key];
-        }
-        // then apply numeric indices in order
-        for (let k = 0; k < seg.indices.length; k += 1) {
-          const idx = seg.indices[k];
-          if (!Array.isArray(nextObj) || idx < 0 || idx >= nextObj.length) return def;
-          nextObj = nextObj[idx];
-        }
-      }
+      nextObj =
+        seg.indices === undefined
+          ? readPlainKey(nextObj, seg.key)
+          : readIndexedKey(nextObj, seg.key, seg.indices);
+      if (nextObj === PATH_MISS) return def;
     }
-
     return nextObj;
   }
 
-  // The channel a lockupViewModel card attributes itself to, or undefined.
-  // A static dotted path cannot express this: channel cards carry the channel
-  // in metadataRows[0], but channel-less cards (a channel's own /videos tab,
-  // "From <channel>" shelves) drop that row, so
-  // `metadataRows.metadataParts.text.content` silently resolves to the VIEW
-  // COUNT ("3.4M") instead — the wrong annotation on allowlist/block entries
-  // and false channelName-filter hits on view counts. Pass 1 is the precise
-  // signal: the channel part links to the channel (its text carries a
-  // commandRuns browseEndpoint id, the same path the channelId rule reads), so
-  // it survives accessibilityLabel changes that defeat the bare-label proxy.
-  // Pass 2 keeps the legacy bare-label heuristic (a part with neither
-  // accessibilityLabel nor leadingIcon), gated on >= 2 rows so single-row
-  // cards can never misread the view count. Pass 3 covers channel-type lockups
-  // (LOCKUP_CONTENT_TYPE_CHANNEL): they have no channel row at all, the
-  // channel name IS the card title.
-  // Pass 1b covers link-less channel rows: some home-feed/continuation
-  // lockups omit the commandRuns browseEndpoint link on the channel part
-  // (no avatar link to resolve), so the precise pass above finds nothing
-  // even though the channel text is present. NewPipe reads the same shape
-  // index-first (first metadata row = uploader, last row = views/date),
-  // so when 2+ rows with metadataParts exist the first row's first part is
-  // the channel by position. Single-row cards stay undefined (channel-less
-  // cards on a channel's own tabs carry only views/date — returning that
-  // row would misread the view count as the channel).
+  const BROWSE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  const LOCKUP_ROWS_PATH =
+    'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
+  const PART_LINK_PATH = 'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId';
+  const LOCKUP_TITLE_PATH = 'metadata.lockupMetadataViewModel.title';
+
+  // A metadata text node -> channel name, or undefined. Prefers `content`,
+  // falls back to runs-joined text (flattenRuns also covers simpleText).
+  function channelTextOf(text) {
+    if (!text || typeof text !== 'object') return undefined;
+    if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+    const runs = flattenRuns(text);
+    if (typeof runs === 'string' && runs.length > 0) return runs;
+    return undefined;
+  }
+
+  // Precise channel signal: the part links to the channel (same browseId path
+  // the channelId rule reads), so it survives accessibilityLabel changes.
+  function partHasChannelLink(part) {
+    const linkId = getObjectByPath(part, PART_LINK_PATH);
+    return typeof linkId === 'string' && BROWSE_ID_RE.test(linkId);
+  }
+
+  // Legacy heuristic: a part with neither accessibilityLabel nor leadingIcon.
+  function isBarePart(part) {
+    return part.accessibilityLabel === undefined && part.leadingIcon === undefined;
+  }
+
+  // Shared metadataRows walker: first part (in row order) matching `isMatch`
+  // that yields text wins.
+  function findPartName(rows, isMatch) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      for (let j = 0; j < parts.length; j += 1) {
+        const part = parts[j];
+        if (!part || typeof part !== 'object' || !isMatch(part)) continue;
+        const name = channelTextOf(part.text);
+        if (name !== undefined) return name;
+      }
+    }
+    return undefined;
+  }
+
+  // Pass 1: the linked channel part (see partHasChannelLink).
+  function lockupLinkedChannelName(rows) {
+    return findPartName(rows, partHasChannelLink);
+  }
+
+  // Pass 1b: link-less channel rows (home-feed/continuation lockups omit the
+  // browseEndpoint link). Like NewPipe, read index-first: with 2+ rows the
+  // first row's first part is the channel by position. Single-row cards stay
+  // undefined — on a channel's own tabs that row is only views/date, and
+  // returning it would misread the view count as the channel.
   function lockupFirstRowChannelName(rows) {
     const partRows = [];
     for (let i = 0; i < rows.length; i += 1) {
@@ -235,67 +283,43 @@
     if (partRows.length < 2) return undefined;
     const first = partRows[0][0];
     if (!first || typeof first !== 'object') return undefined;
-    const text = first.text;
-    if (!text || typeof text !== 'object') return undefined;
-    if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-    const runs = flattenRuns(text);
-    if (typeof runs === 'string' && runs.length > 0) return runs;
-    return undefined;
+    return channelTextOf(first.text);
   }
 
-  function lockupChannelName(renderer) {
-    const rows = getObjectByPath(
-      renderer,
-      'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows',
-    );
-    if (Array.isArray(rows)) {
-      for (let i = 0; i < rows.length; i += 1) {
-        const parts = rows[i] && rows[i].metadataParts;
-        if (!Array.isArray(parts)) continue;
-        for (let j = 0; j < parts.length; j += 1) {
-          const part = parts[j];
-          if (!part || typeof part !== 'object') continue;
-          const linkId = getObjectByPath(
-            part,
-            'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
-          );
-          if (typeof linkId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(linkId)) continue;
-          const text = part.text;
-          if (!text || typeof text !== 'object') continue;
-          if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-          const runs = flattenRuns(text);
-          if (typeof runs === 'string' && runs.length > 0) return runs;
-        }
-      }
-      const firstRow = lockupFirstRowChannelName(rows);
-      if (firstRow !== undefined) return firstRow;
-      if (rows.length >= 2) {
-        for (let i = 0; i < rows.length; i += 1) {
-          const parts = rows[i] && rows[i].metadataParts;
-          if (!Array.isArray(parts)) continue;
-          for (let j = 0; j < parts.length; j += 1) {
-            const part = parts[j];
-            if (!part || typeof part !== 'object') continue;
-            if (part.accessibilityLabel !== undefined || part.leadingIcon !== undefined) continue;
-            const text = part.text;
-            if (!text || typeof text !== 'object') continue;
-            if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-            const runs = flattenRuns(text);
-            if (typeof runs === 'string' && runs.length > 0) return runs;
-          }
-        }
-      }
-    }
+  // Pass 2: legacy bare-label heuristic (see isBarePart), gated on >= 2 rows
+  // so single-row cards can never misread the view count.
+  function lockupBareChannelName(rows) {
+    if (rows.length < 2) return undefined;
+    return findPartName(rows, isBarePart);
+  }
+
+  // Pass 3: channel-type lockups (LOCKUP_CONTENT_TYPE_CHANNEL) have no channel
+  // row at all — the channel name IS the card title.
+  function lockupTitleChannelName(renderer) {
     const contentType = getObjectByPath(renderer, 'contentType');
-    if (typeof contentType === 'string' && contentType.includes('CHANNEL')) {
-      const title = getObjectByPath(renderer, 'metadata.lockupMetadataViewModel.title');
-      if (typeof title === 'string' && title.length > 0) return title;
-      if (title && typeof title.content === 'string' && title.content.length > 0)
-        return title.content;
-      const flat = flattenRuns(title);
-      if (typeof flat === 'string' && flat.length > 0) return flat;
+    if (typeof contentType !== 'string' || !contentType.includes('CHANNEL')) return undefined;
+    const title = getObjectByPath(renderer, LOCKUP_TITLE_PATH);
+    if (typeof title === 'string') return title.length > 0 ? title : undefined;
+    return channelTextOf(title);
+  }
+
+  // The channel a lockupViewModel card attributes itself to, or undefined.
+  // No static dotted path expresses this: channel-less cards (a channel's own
+  // /videos tab, "From <channel>" shelves) drop the channel row, so a naive
+  // metadataRows path silently resolves to the VIEW COUNT instead — the wrong
+  // annotation and false channelName-filter hits. Tries linked -> positional
+  // -> bare-label -> channel-type title, in that order.
+  function lockupChannelName(renderer) {
+    const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
+    if (Array.isArray(rows)) {
+      const linked = lockupLinkedChannelName(rows);
+      if (linked !== undefined) return linked;
+      const positional = lockupFirstRowChannelName(rows);
+      if (positional !== undefined) return positional;
+      const bare = lockupBareChannelName(rows);
+      if (bare !== undefined) return bare;
     }
-    return undefined;
+    return lockupTitleChannelName(renderer);
   }
 
   // The channel that owns the current page (channel pages only), remembered

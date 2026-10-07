@@ -61,6 +61,46 @@
     },
   };
 
+  // Mode-aware provenance verb for a block type: allowlist entries read
+  // "Allowlisted", removals "Removed from whitelist", blocks "Blocked". Keyed
+  // off the routed type (whitelist <=> allowlisting).
+  function blockProvenanceVerb(blockType) {
+    if (blockType === 'whitelist') return 'Allowlisted';
+    if (blockType === 'unwhitelist') return 'Removed from whitelist';
+    return 'Blocked';
+  }
+
+  // Resolve the annotation text for a block: the sanitized info text, or the
+  // first id when extraction missed the label (never store an empty `()` —
+  // fall back to the blocked id so the annotation stays parseable).
+  function blockAnnotationText(info) {
+    let text = String(info.text || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200);
+    // Extraction can still miss the label on layouts the rules don't know
+    // yet (the channelId resolves via the avatar while the name path
+    // doesn't). Never store an empty `()` — fall back to the blocked id so
+    // the annotation stays parseable and carries at least the identity.
+    if (!text) {
+      const firstId = Array.isArray(info.id) ? info.id[0] : info.id;
+      if (typeof firstId === 'string' && firstId.length > 0) text = firstId.slice(0, 200);
+    }
+    return text;
+  }
+
+  // Collect up to 100 non-empty string ids from the block info.
+  function blockEntryIds(info) {
+    const ids = (Array.isArray(info.id) ? info.id : [info.id]).slice(0, 100);
+    const entries = [];
+    ids.forEach((id) => {
+      if (typeof id === 'string' && id.length > 0 && id.length <= 255) {
+        entries.push(id);
+      }
+    });
+    return entries;
+  }
+
   // Handlers for messages coming from the injected page script
   const messageHandlers = {
     handleContextBlock(data) {
@@ -79,34 +119,10 @@
         second: 'numeric',
       };
       const now = new Intl.DateTimeFormat(undefined, options).format(new Date());
-      let text = String(data.info.text || '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 200);
-      // Extraction can still miss the label on layouts the rules don't know
-      // yet (the channelId resolves via the avatar while the name path
-      // doesn't). Never store an empty `()` — fall back to the blocked id so
-      // the annotation stays parseable and carries at least the identity.
-      if (!text) {
-        const firstId = Array.isArray(data.info.id) ? data.info.id[0] : data.info.id;
-        if (typeof firstId === 'string' && firstId.length > 0) text = firstId.slice(0, 200);
-      }
-      // Mode-aware provenance: allowlist entries read "Allowlisted", removals
-      // read "Removed from whitelist", blocks read "Blocked". Keyed off the
-      // routed type (whitelist <=> allowlisting).
-      const verb =
-        blockType === 'whitelist'
-          ? 'Allowlisted'
-          : blockType === 'unwhitelist'
-            ? 'Removed from whitelist'
-            : 'Blocked';
+      const text = blockAnnotationText(data.info);
+      const verb = blockProvenanceVerb(blockType);
       const entries = [`// ${verb} by context menu (${text}) (${now})`];
-      const ids = (Array.isArray(data.info.id) ? data.info.id : [data.info.id]).slice(0, 100);
-      ids.forEach((id) => {
-        if (typeof id === 'string' && id.length > 0 && id.length <= 255) {
-          entries.push(id);
-        }
-      });
+      entries.push(...blockEntryIds(data.info));
       entries.push('');
       utils.safePortPost({
         type: BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK,
@@ -114,6 +130,43 @@
       });
     },
   };
+
+  // Handle background-port messages: FILTERS arms the page, RELOAD forwards
+  // the reactivation notice. Unknown types are ignored.
+  function handlePortMessage(msg) {
+    switch (msg.type) {
+      case BLOCKTUBE_CONSTS.MESSAGES.FILTERS: {
+        if (msg.data) {
+          filtersReady = true;
+          globalStorage = msg.data.storage;
+          compiledStorage = msg.data.compiledStorage;
+          enabled = msg.data.enabled;
+          utils.sendStorage();
+        }
+        break;
+      }
+      case BLOCKTUBE_CONSTS.MESSAGES.RELOAD: {
+        utils.sendReload();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // Reconnect when the background drops the port (SW restart), unless a
+  // pagehide-driven disconnect is in progress or the extension is gone.
+  function handlePortDisconnect(local) {
+    if (chrome.runtime) {
+      const le = chrome.runtime.lastError;
+      if (le) void le.message;
+    }
+    if (local !== port) return;
+    portValid = false;
+    if (suppressReconnect) return;
+    if (!chrome.runtime || !chrome.runtime.id) return;
+    connectToPort();
+  }
 
   function connectToPort() {
     if (portValid || suppressReconnect) return;
@@ -127,38 +180,8 @@
     port = local;
     portValid = true;
     // Listen for messages from background page
-    local.onMessage.addListener((msg) => {
-      switch (msg.type) {
-        case BLOCKTUBE_CONSTS.MESSAGES.FILTERS: {
-          if (msg.data) {
-            filtersReady = true;
-            globalStorage = msg.data.storage;
-            compiledStorage = msg.data.compiledStorage;
-            enabled = msg.data.enabled;
-            utils.sendStorage();
-          }
-          break;
-        }
-        case BLOCKTUBE_CONSTS.MESSAGES.RELOAD: {
-          utils.sendReload();
-          break;
-        }
-        default:
-          break;
-      }
-    });
-
-    local.onDisconnect.addListener(() => {
-      if (chrome.runtime) {
-        const le = chrome.runtime.lastError;
-        if (le) void le.message;
-      }
-      if (local !== port) return;
-      portValid = false;
-      if (suppressReconnect) return;
-      if (!chrome.runtime || !chrome.runtime.id) return;
-      connectToPort();
-    });
+    local.onMessage.addListener(handlePortMessage);
+    local.onDisconnect.addListener(() => handlePortDisconnect(local));
   }
 
   connectToPort();

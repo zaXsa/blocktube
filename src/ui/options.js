@@ -205,13 +205,16 @@
     }
   }
 
-  function populateForms(obj = undefined) {
-    // Pre-whitelist stored blobs and backups lack the allowlist: default to
-    // an empty list so the editor, export, and counts see [] (Phase 1: the
-    // inject realm still ignores both the flag and the list).
+  // Pre-whitelist stored blobs and backups lack the allowlist: default to
+  // an empty list so the editor, export, and counts see [].
+  function ensureWhitelistArray() {
     if (storageData.filterData && !Array.isArray(storageData.filterData.whitelist)) {
       storageData.filterData.whitelist = [];
     }
+  }
+
+  // Fill the filter-list editors + the custom-JS editor from storage.
+  function populateFilterEditors(obj) {
     textAreas.forEach((v) => {
       const content = get(`filterData.${v}`, [], obj);
       jsEditors[v].setValue(content.join('\n'));
@@ -219,28 +222,28 @@
 
     const jsContent = get('filterData.javascript', defaultJSFunction, obj);
     jsEditors['javascript'].setValue(jsContent);
+  }
 
-    OPTION_BINDINGS.forEach((b) => {
-      const el = $(b.id);
-      if (!el) return;
-      const val = get(b.path, b.default, obj);
-      if (b.type === 'checkbox') {
-        el.checked = !!val;
-      } else if (b.type === 'array') {
-        const arr = Array.isArray(val) ? val : [b.default, b.default];
-        el.value = arr[b.index];
-      } else if (b.type === 'number') {
-        // keep NaN as-is for empty number fields
-        el.value = isNaN(val) ? '' : val;
-      } else if (b.type === 'text' || b.type === 'select') {
-        el.value = val;
-      }
-    });
-
-    if ($('enable_javascript').checked) {
-      $('advanced_tab').style.removeProperty('display');
+  // Apply one option binding to its element: checkbox/array/number/text.
+  function applyOptionBinding(b, obj) {
+    const el = $(b.id);
+    if (!el) return;
+    const val = get(b.path, b.default, obj);
+    if (b.type === 'checkbox') {
+      el.checked = !!val;
+    } else if (b.type === 'array') {
+      const arr = Array.isArray(val) ? val : [b.default, b.default];
+      el.value = arr[b.index];
+    } else if (b.type === 'number') {
+      // keep NaN as-is for empty number fields
+      el.value = isNaN(val) ? '' : val;
+    } else if (b.type === 'text' || b.type === 'select') {
+      el.value = val;
     }
+  }
 
+  // Refresh tables, counts, warnings and the dirty/save UI after a populate.
+  function finishPopulate() {
     // refresh CodeMirror editors after the panel becomes visible (a/19970695)
     setTimeout(() => Object.values(jsEditors).forEach((v) => v.refresh()), 1);
     $('save_btn').classList.add('disabled-btn');
@@ -256,6 +259,18 @@
       if (!$(TABLE_EDITORS[key].editorWrap).hidden) clearReadOnlyMarks(key);
     });
     updateWhitelistUI();
+  }
+
+  function populateForms(obj = undefined) {
+    ensureWhitelistArray();
+    populateFilterEditors(obj);
+    OPTION_BINDINGS.forEach((b) => applyOptionBinding(b, obj));
+
+    if ($('enable_javascript').checked) {
+      $('advanced_tab').style.removeProperty('display');
+    }
+
+    finishPopulate();
   }
 
   // !! Helpers
@@ -468,6 +483,65 @@
     return bad.length > 0 ? 'Invalid regex — check the pattern and flags.' : null;
   }
 
+  // Reject duplicates against existing non-annotation lines (shows the
+  // notice). True when the add must stop.
+  function rejectDuplicateAdd(editorKey, id, noticeId) {
+    const existing = BLOCKTUBE_ANNOTATIONS.splitAnnotations(
+      jsEditors[editorKey].getValue().split('\n'),
+    ).rules.map((line) => line.trim());
+    if (existing.includes(id)) {
+      showAddNotice(noticeId, 'Already in the list.');
+      return true;
+    }
+    return false;
+  }
+
+  // Append the entry with a dated provenance comment mirroring the
+  // context-menu format. Groups are separated by a blank line, like the
+  // context-menu groups. No handle is known here, so that slot stays blank
+  // instead of repeating the ID, and the locale date matches content_script.
+  function appendAddEntry(editorKey, id) {
+    const cm = jsEditors[editorKey];
+    const current = cm.getValue();
+    const now = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    }).format(new Date());
+    const annotation =
+      editorKey === 'whitelist'
+        ? `// Allowlisted by direct add () (${now})`
+        : `// Blocked by direct add () (${now})`;
+    const prefix = current.trim() === '' ? '' : `${current.replace(/\n+$/, '')}\n\n`;
+    cm.setValue(`${prefix}${annotation}\n${id}\n`);
+    applyReadOnlyMarks(editorKey);
+    // The Add box stays visible in raw mode: adding must not re-lock it.
+    if (TABLE_EDITORS[editorKey] && !$(TABLE_EDITORS[editorKey].editorWrap).hidden) {
+      clearReadOnlyMarks(editorKey);
+    }
+  }
+
+  // Reveal the added entry: clear a lingering search filter (it would hide
+  // the new row), refresh, jump to it in table mode, sync raw matches.
+  function revealAddedEntry(editorKey, id) {
+    // A lingering search filter would hide the new row: clear it. Reveal
+    // it now in table mode, or on return when adding from raw mode.
+    if (TABLE_EDITORS[editorKey]) {
+      const t = TABLE_EDITORS[editorKey];
+      $(t.search).value = '';
+      tableState[editorKey].query = '';
+      tableState[editorKey].pendingAddedId = id;
+    }
+    refreshTable(editorKey, true);
+    if (TABLE_EDITORS[editorKey] && !$(TABLE_EDITORS[editorKey].tableWrap).hidden) {
+      jumpToAddedRow(editorKey);
+    }
+    updateRawSearch(editorKey);
+  }
+
   // One-line Add box for an editor: raw IDs or keywords/regex (per
   // validator), trimmed, validated, deduped against existing non-annotation
   // lines. Appends the entry with a dated provenance comment and marks dirty
@@ -481,53 +555,9 @@
         showAddNotice(noticeId, problem);
         return;
       }
-      const existing = BLOCKTUBE_ANNOTATIONS.splitAnnotations(
-        jsEditors[editorKey].getValue().split('\n'),
-      ).rules.map((line) => line.trim());
-      if (existing.includes(id)) {
-        showAddNotice(noticeId, 'Already in the list.');
-        return;
-      }
-      const cm = jsEditors[editorKey];
-      const current = cm.getValue();
-      // Provenance comment mirroring the context-menu format
-      // (`// Blocked by context menu (<text>) (<date>)`, allowlist entries
-      // use `// Allowlisted …`). No handle is known
-      // here, so that slot stays blank instead of repeating the ID, and the
-      // locale date matches content_script.js. Groups are separated by a
-      // blank line, like the context-menu groups.
-      const now = new Intl.DateTimeFormat(undefined, {
-        year: 'numeric',
-        month: 'numeric',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: 'numeric',
-        second: 'numeric',
-      }).format(new Date());
-      const annotation =
-        editorKey === 'whitelist'
-          ? `// Allowlisted by direct add () (${now})`
-          : `// Blocked by direct add () (${now})`;
-      const prefix = current.trim() === '' ? '' : `${current.replace(/\n+$/, '')}\n\n`;
-      cm.setValue(`${prefix}${annotation}\n${id}\n`);
-      applyReadOnlyMarks(editorKey);
-      // The Add box stays visible in raw mode: adding must not re-lock it.
-      if (TABLE_EDITORS[editorKey] && !$(TABLE_EDITORS[editorKey].editorWrap).hidden) {
-        clearReadOnlyMarks(editorKey);
-      }
-      // A lingering search filter would hide the new row: clear it. Reveal
-      // it now in table mode, or on return when adding from raw mode.
-      if (TABLE_EDITORS[editorKey]) {
-        const t = TABLE_EDITORS[editorKey];
-        $(t.search).value = '';
-        tableState[editorKey].query = '';
-        tableState[editorKey].pendingAddedId = id;
-      }
-      refreshTable(editorKey, true);
-      if (TABLE_EDITORS[editorKey] && !$(TABLE_EDITORS[editorKey].tableWrap).hidden) {
-        jumpToAddedRow(editorKey);
-      }
-      updateRawSearch(editorKey);
+      if (rejectDuplicateAdd(editorKey, id, noticeId)) return;
+      appendAddEntry(editorKey, id);
+      revealAddedEntry(editorKey, id);
       input.value = '';
       input.focus();
     };
@@ -832,23 +862,10 @@
     state.rawIndex = -1;
   }
 
-  function updateRawSearch(key) {
-    if (!TABLE_EDITORS[key] || !tableState[key]) return;
-    const t = TABLE_EDITORS[key];
+  // Collect up to RAW_SEARCH_MAX matches for the query via CodeMirror's
+  // search cursor, then highlight them with the Ctrl-F mark class.
+  function collectRawMatches(key, cm, query) {
     const state = tableState[key];
-    clearRawSearch(key);
-    // Fresh rows: raw typing changes lines without touching table state.
-    state.rows = BLOCKTUBE_ANNOTATIONS.parseRuleRows(tableLines(key));
-    if ($(t.editorWrap).hidden) {
-      updateTableShown(key);
-      return;
-    }
-    const query = state.query.trim();
-    if (query === '') {
-      updateTableShown(key);
-      return;
-    }
-    const cm = jsEditors[key];
     const matches = [];
     const cursor = cm.getSearchCursor(query, { line: 0, ch: 0 }, true);
     while (matches.length < RAW_SEARCH_MAX && cursor.findNext()) {
@@ -865,6 +882,25 @@
       cm.setSelection(matches[0].from, matches[0].to);
       cm.scrollIntoView({ from: matches[0].from, to: matches[0].to }, 20);
     }
+  }
+
+  function updateRawSearch(key) {
+    if (!TABLE_EDITORS[key] || !tableState[key]) return;
+    const t = TABLE_EDITORS[key];
+    const state = tableState[key];
+    clearRawSearch(key);
+    // Fresh rows: raw typing changes lines without touching table state.
+    state.rows = BLOCKTUBE_ANNOTATIONS.parseRuleRows(tableLines(key));
+    if ($(t.editorWrap).hidden) {
+      updateTableShown(key);
+      return;
+    }
+    const query = state.query.trim();
+    if (query === '') {
+      updateTableShown(key);
+      return;
+    }
+    collectRawMatches(key, jsEditors[key], query);
     updateTableShown(key);
   }
 
@@ -898,16 +934,9 @@
     if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
-  function buildTableRow(key, row, displayIndex) {
-    const tr = document.createElement('tr');
-    tr.dataset.ruleIndex = String(row.ruleIndex);
-    tr.dataset.entryId = String(row.id);
-
-    const indexCell = document.createElement('td');
-    indexCell.className = 'cell-index muted';
-    indexCell.textContent = String(displayIndex);
-    tr.appendChild(indexCell);
-
+  // The id cell: exact IDs stay on one line; patterns (names, titles,
+  // comments) may be long, so they wrap instead of widening the table.
+  function buildIdCell(key, row) {
     const idCell = document.createElement('td');
     // Exact IDs are short and stay on one line; patterns (names, titles,
     // comments) may be long, so they wrap instead of widening the table.
@@ -915,12 +944,20 @@
       key === 'channelId' || key === 'videoId' || key === 'whitelist' ? 'cell-id' : 'cell-pattern';
     idCell.title = String(row.id);
     idCell.textContent = String(row.id);
-    tr.appendChild(idCell);
+    return idCell;
+  }
 
-    const labelCell = document.createElement('td');
-    renderLabelCell(labelCell, row);
-    tr.appendChild(labelCell);
+  // The index cell: the row's display position in the current filter view.
+  function buildIndexCell(displayIndex) {
+    const indexCell = document.createElement('td');
+    indexCell.className = 'cell-index muted';
+    indexCell.textContent = String(displayIndex);
+    return indexCell;
+  }
 
+  // The date/provenance cell: stored date (or a muted dash for pre-date
+  // entries) plus the small provenance-kind line; full line as the title.
+  function buildDateCell(row) {
     const dateCell = document.createElement('td');
     dateCell.className = 'cell-date';
     if (row.provenance !== null) {
@@ -942,8 +979,11 @@
       dateCell.textContent = '—';
       if (row.provenanceLine !== '') dateCell.title = row.provenanceLine;
     }
-    tr.appendChild(dateCell);
+    return dateCell;
+  }
 
+  // The action cell: a single remove button bound by delegated row clicks.
+  function buildActionCell() {
     const actionCell = document.createElement('td');
     actionCell.className = 'col-action';
     const removeBtn = document.createElement('button');
@@ -953,7 +993,23 @@
     removeBtn.title = 'Remove this entry';
     removeBtn.dataset.action = 'remove';
     actionCell.appendChild(removeBtn);
-    tr.appendChild(actionCell);
+    return actionCell;
+  }
+
+  function buildTableRow(key, row, displayIndex) {
+    const tr = document.createElement('tr');
+    tr.dataset.ruleIndex = String(row.ruleIndex);
+    tr.dataset.entryId = String(row.id);
+
+    tr.appendChild(buildIndexCell(displayIndex));
+    tr.appendChild(buildIdCell(key, row));
+
+    const labelCell = document.createElement('td');
+    renderLabelCell(labelCell, row);
+    tr.appendChild(labelCell);
+
+    tr.appendChild(buildDateCell(row));
+    tr.appendChild(buildActionCell());
     return tr;
   }
 
@@ -999,13 +1055,9 @@
     return row !== undefined && String(row.id) === id ? row : null;
   }
 
-  function startLabelEdit(key, ruleIndex, id, tr) {
-    const row = findLiveRow(key, ruleIndex, id);
-    if (!row) {
-      refreshTable(key);
-      return;
-    }
-    const cell = tr.children[2];
+  // Build the inline label editor (captioned input prefilled with the row
+  // label) inside the label cell, focused and selected for immediate typing.
+  function buildLabelInput(cell, label) {
     cell.textContent = '';
     // Captioned so the input unmistakably edits the label, not the ID.
     const caption = document.createElement('div');
@@ -1015,11 +1067,17 @@
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'label-input';
-    input.value = row.label;
+    input.value = label;
     input.setAttribute('maxlength', '200');
     cell.appendChild(input);
     input.focus();
     input.select();
+    return input;
+  }
+
+  // Wire commit keys for the inline label editor: Enter saves, Escape
+  // cancels, blur saves. Exactly-once via the done latch.
+  function wireLabelCommit(input, key, ruleIndex) {
     let done = false;
     const commit = (save) => {
       if (done) return;
@@ -1040,9 +1098,19 @@
     input.addEventListener('blur', () => commit(true));
   }
 
-  function setupTable(key) {
-    const t = TABLE_EDITORS[key];
-    tableState[key] = { query: '', rows: [], filtered: [], shown: 0, renderStart: 0 };
+  function startLabelEdit(key, ruleIndex, id, tr) {
+    const row = findLiveRow(key, ruleIndex, id);
+    if (!row) {
+      refreshTable(key);
+      return;
+    }
+    const input = buildLabelInput(tr.children[2], row.label);
+    wireLabelCommit(input, key, ruleIndex);
+  }
+
+  // Search box: table mode filters rows, raw mode searches editor text
+  // (Enter steps through raw matches).
+  function wireTableSearch(key, t) {
     $(t.search).addEventListener('input', (evt) => {
       tableState[key].query = evt.target.value;
       if ($(t.editorWrap).hidden) applyTableQuery(key);
@@ -1054,8 +1122,11 @@
         stepRawSearch(key, evt.shiftKey ? -1 : 1);
       }
     });
-    // One page lives in the DOM, so scrolling never mutates anything: the
-    // handler only syncs the page number (rAF-throttled).
+  }
+
+  // One page lives in the DOM, so scrolling never mutates anything: the
+  // handler only syncs the page number (rAF-throttled).
+  function wireTableScroll(key, t) {
     $(t.scroll).addEventListener('scroll', () => {
       const st = tableState[key];
       if (st.scrollTick) return;
@@ -1067,23 +1138,51 @@
       if (window.requestAnimationFrame) window.requestAnimationFrame(sync);
       else sync();
     });
-    $(t.rows).addEventListener('click', (evt) => {
-      const btn = evt.target.closest('button[data-action]');
-      if (!btn) return;
-      const tr = btn.closest('tr');
-      if (!tr) return;
-      const ruleIndex = parseInt(tr.dataset.ruleIndex, 10);
-      const id = tr.dataset.entryId;
-      if (btn.dataset.action === 'remove') {
-        if (findLiveRow(key, ruleIndex, id) === null) {
-          refreshTable(key);
-          return;
-        }
-        writeTableLines(key, BLOCKTUBE_ANNOTATIONS.removeRuleLines(tableLines(key), ruleIndex));
-      } else if (btn.dataset.action === 'edit-label') {
-        startLabelEdit(key, ruleIndex, id, tr);
+  }
+
+  // Delegated row clicks: remove (re-parsed live, so concurrent menu blocks
+  // can't delete the wrong line) or inline label edit.
+  function handleTableRowClick(key, evt) {
+    const btn = evt.target.closest('button[data-action]');
+    if (!btn) return;
+    const tr = btn.closest('tr');
+    if (!tr) return;
+    const ruleIndex = parseInt(tr.dataset.ruleIndex, 10);
+    const id = tr.dataset.entryId;
+    if (btn.dataset.action === 'remove') {
+      if (findLiveRow(key, ruleIndex, id) === null) {
+        refreshTable(key);
+        return;
       }
-    });
+      writeTableLines(key, BLOCKTUBE_ANNOTATIONS.removeRuleLines(tableLines(key), ruleIndex));
+    } else if (btn.dataset.action === 'edit-label') {
+      startLabelEdit(key, ruleIndex, id, tr);
+    }
+  }
+
+  // Switch to the raw editor: refresh after layout settles (rAF + timeout),
+  // otherwise the first render can come up blank. Raw mode is free editing.
+  function showRawEditor(key, t) {
+    const cm = jsEditors[key];
+    cm.refresh();
+    if (window.requestAnimationFrame) {
+      window.requestAnimationFrame(() => cm.refresh());
+    }
+    setTimeout(() => cm.refresh(), 50);
+    clearReadOnlyMarks(key);
+    updateRawSearch(key);
+  }
+
+  // Switch to the table view and reveal any just-added row.
+  function showTableView(key) {
+    clearRawSearch(key);
+    applyReadOnlyMarks(key);
+    refreshTable(key);
+    jumpToAddedRow(key);
+  }
+
+  // Table/raw toggle: pre-click state decides the direction.
+  function wireTableToggle(key, t) {
     $(t.toggle).addEventListener('click', () => {
       const tableWrap = $(t.tableWrap);
       const editorWrap = $(t.editorWrap);
@@ -1096,22 +1195,17 @@
         // Now showing raw: measure after layout settles (rAF + timeout),
         // otherwise the first render can come up blank until the next click
         // forces a re-render. Raw mode is free editing.
-        const cm = jsEditors[key];
-        cm.refresh();
-        if (window.requestAnimationFrame) {
-          window.requestAnimationFrame(() => cm.refresh());
-        }
-        setTimeout(() => cm.refresh(), 50);
-        clearReadOnlyMarks(key);
-        updateRawSearch(key);
+        showRawEditor(key, t);
       } else {
         // Now showing table.
-        clearRawSearch(key);
-        applyReadOnlyMarks(key);
-        refreshTable(key);
-        jumpToAddedRow(key);
+        showTableView(key);
       }
     });
+  }
+
+  // Page navigation: go-to input, prev/next steppers (clamped in
+  // goToTablePage), and top/end shortcuts.
+  function wireTablePaging(key, t) {
     const goToPageInput = () => goToTablePage(key, parseInt($(t.page).value, 10));
     $(t.pageGo).addEventListener('click', goToPageInput);
     const stepPage = (direction) => {
@@ -1128,7 +1222,10 @@
       goToTablePage(key, Math.ceil(tableState[key].filtered.length / TABLE_CHUNK));
       $(t.scroll).scrollTop = $(t.scroll).scrollHeight;
     });
-    // Toolbar jumps work in both views: table pages vs raw first/last line.
+  }
+
+  // Toolbar jumps work in both views: table pages vs raw first/last line.
+  function wireTableJumps(key, t) {
     $(t.jumpTop).addEventListener('click', () => {
       if ($(t.editorWrap).hidden) {
         goToTablePage(key, 1);
@@ -1150,6 +1247,17 @@
       cm.setCursor({ line: last, ch: endCh });
       cm.scrollIntoView({ line: last, ch: endCh }, 20);
     });
+  }
+
+  function setupTable(key) {
+    const t = TABLE_EDITORS[key];
+    tableState[key] = { query: '', rows: [], filtered: [], shown: 0, renderStart: 0 };
+    wireTableSearch(key, t);
+    wireTableScroll(key, t);
+    $(t.rows).addEventListener('click', (evt) => handleTableRowClick(key, evt));
+    wireTableToggle(key, t);
+    wireTablePaging(key, t);
+    wireTableJumps(key, t);
     refreshTable(key);
   }
 
@@ -1233,6 +1341,41 @@
     );
   }
 
+  // Warn when the backup carried a custom JS filter that now sits inert:
+  // non-blank imported JavaScript with advanced blocking left disabled.
+  // Hidden again once the user re-enables it.
+  function showImportJsWarning(importedJs) {
+    const warn = $('import_js_warning');
+    if (importedJs.trim() !== '') {
+      warn.textContent =
+        'This backup contained a custom JavaScript filter. Advanced blocking was left ' +
+        'disabled for safety — review it under Advanced, then re-check Enable advanced ' +
+        'blocking if you trust it.';
+      warn.classList.remove('is-hidden');
+    } else {
+      warn.classList.add('is-hidden');
+      warn.textContent = '';
+    }
+  }
+
+  // Apply a parsed backup: populate, keep code execution off, warn about any
+  // inert custom filter, then persist.
+  function applyImportedBackup(json) {
+    if (!isValidBackup(json)) throw new Error('bad shape');
+    populateForms(json);
+    // Importing a backup must not silently enable code execution.
+    $('enable_javascript').checked = false;
+    // Remind only when there is actually a custom filter to miss:
+    // non-blank imported JavaScript that now sits inert until
+    // re-enabled. Hidden again once the user re-enables it.
+    const importedJs =
+      json.filterData && typeof json.filterData.javascript === 'string'
+        ? json.filterData.javascript
+        : '';
+    showImportJsWarning(importedJs);
+    saveForm();
+  }
+
   function importOptions(evt) {
     const files = evt.target.files;
     const f = files && files[0];
@@ -1245,32 +1388,8 @@
     reader.onerror = () => alert('Could not read the backup file');
 
     reader.onload = function (e) {
-      let json;
       try {
-        json = JSON.parse(e.target.result);
-        if (!isValidBackup(json)) throw new Error('bad shape');
-        populateForms(json);
-        // Importing a backup must not silently enable code execution.
-        $('enable_javascript').checked = false;
-        // Remind only when there is actually a custom filter to miss:
-        // non-blank imported JavaScript that now sits inert until
-        // re-enabled. Hidden again once the user re-enables it.
-        const importedJs =
-          json.filterData && typeof json.filterData.javascript === 'string'
-            ? json.filterData.javascript
-            : '';
-        const warn = $('import_js_warning');
-        if (importedJs.trim() !== '') {
-          warn.textContent =
-            'This backup contained a custom JavaScript filter. Advanced blocking was left ' +
-            'disabled for safety — review it under Advanced, then re-check Enable advanced ' +
-            'blocking if you trust it.';
-          warn.classList.remove('is-hidden');
-        } else {
-          warn.classList.add('is-hidden');
-          warn.textContent = '';
-        }
-        saveForm();
+        applyImportedBackup(JSON.parse(e.target.result));
       } catch (ex) {
         alert('This is not a valid BlockTube backup');
       }
@@ -1304,7 +1423,38 @@
     });
   }
 
-  textAreas.concat('javascript').forEach((v) => {
+  // Extra editor keys: persistent search replaces the one-shot default
+  // (Ctrl-F -> find) without touching cm/ vendor files. Dialog stays open,
+  // Enter/Shift+Enter = next/prev, all matches highlighted via overlay.
+  function filterEditorExtraKeys() {
+    return {
+      // Persistent search: dialog stays open, Enter/Shift+Enter = next/prev,
+      // all matches highlighted via the search overlay. Replaces the
+      // one-shot default (Ctrl-F -> find) without touching cm/ vendor files.
+      'Ctrl-F': 'findPersistent',
+      'Cmd-F': 'findPersistent',
+      'Ctrl-G': 'findPersistentNext',
+      'Shift-Ctrl-G': 'findPersistentPrev',
+      F11(cm) {
+        if (cm.getOption('fullScreen')) {
+          cm.display.scroller.style.maxHeight = cm.start_h || '200px';
+        } else {
+          cm.display.scroller.style.maxHeight = '100%';
+        }
+        cm.setOption('fullScreen', !cm.getOption('fullScreen'));
+      },
+      Esc(cm) {
+        if (cm.getOption('fullScreen')) {
+          cm.display.scroller.style.maxHeight = cm.start_h || '200px';
+          cm.setOption('fullScreen', false);
+        }
+      },
+    };
+  }
+
+  // Create one filter-list editor (or the JS editor): CodeMirror instance
+  // with resizer and a change forwarder that marks the form dirty.
+  function createFilterEditor(v) {
     jsEditors[v] = CodeMirror.fromTextArea($(v), {
       mode: v === 'javascript' ? 'javascript' : 'blocktube',
       matchBrackets: true,
@@ -1312,34 +1462,16 @@
       lineNumbers: true,
       styleActiveLine: true,
       lineWrapping: true,
-      extraKeys: {
-        // Persistent search: dialog stays open, Enter/Shift+Enter = next/prev,
-        // all matches highlighted via the search overlay. Replaces the
-        // one-shot default (Ctrl-F -> find) without touching cm/ vendor files.
-        'Ctrl-F': 'findPersistent',
-        'Cmd-F': 'findPersistent',
-        'Ctrl-G': 'findPersistentNext',
-        'Shift-Ctrl-G': 'findPersistentPrev',
-        F11(cm) {
-          if (cm.getOption('fullScreen')) {
-            cm.display.scroller.style.maxHeight = cm.start_h || '200px';
-          } else {
-            cm.display.scroller.style.maxHeight = '100%';
-          }
-          cm.setOption('fullScreen', !cm.getOption('fullScreen'));
-        },
-        Esc(cm) {
-          if (cm.getOption('fullScreen')) {
-            cm.display.scroller.style.maxHeight = cm.start_h || '200px';
-            cm.setOption('fullScreen', false);
-          }
-        },
-      },
+      extraKeys: filterEditorExtraKeys(),
     });
     cmResizer(jsEditors[v], $(`${v}_resizer`));
     jsEditors[v].on('change', () => {
       $('options').dispatchEvent(new Event('change', { bubbles: true }));
     });
+  }
+
+  textAreas.concat('javascript').forEach((v) => {
+    createFilterEditor(v);
   });
 
   // !! Start

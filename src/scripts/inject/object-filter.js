@@ -159,6 +159,56 @@
     return badges;
   }
 
+  // Whitelist-mode branch of matchField: only channelId is evaluated (every
+  // other field is bypassed), against the allowlist first, then the collab
+  // stack, then the fail-open ID-charset gate for structural renderers.
+  function matchFieldWhitelist(fieldName, value, obj, rendererKey, allValues) {
+    if (fieldName !== 'channelId') return { match: null, value };
+    const allowlist = storageData.filterData.whitelist || [];
+    const candidates = allValues && allValues.length > 0 ? allValues : [value];
+    if (entriesMatchAnyValue(allowlist, candidates)) return { match: null, value };
+    if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
+      return { match: null, value };
+    }
+    // Fail-open on non-attribution values: structural renderers carry URLs
+    // (tabRenderer), icon types (chips) or other non-IDs in the channelId
+    // slot. Those can never match an exact-ID allowlist entry, so blocking
+    // them deletes page chrome instead of content — channel tabs vanish and
+    // the channel page looks like it never loads. Real channel ids and the
+    // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
+    // the check below via the shared ID charset.
+    if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
+      return { match: null, value };
+    }
+    return { match: { name: fieldName, value }, value };
+  }
+
+  // Regex-props branch of matchField: channelId/channelName may carry several
+  // channels (search-result collab dialogs); a blocked one listed second must
+  // still match. Returns the match descriptor or null.
+  function matchFieldRegex(fieldName, value, filterEntries, allValues) {
+    // channelId/channelName may carry several channels (search-result collab
+    // dialogs); a blocked one listed second must still match.
+    const candidates = allValues && allValues.length > 0 ? allValues : [value];
+    const matchedEntry = filterEntries.find(
+      (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
+    );
+    if (matchedEntry) {
+      return { name: fieldName, value: String(matchedEntry).slice(0, 40) };
+    }
+    return null;
+  }
+
+  // VidLength branch of matchField: parses the duration and tests the
+  // mandatory [min, max] range. Returns match descriptor + numeric value.
+  function matchFieldDuration(fieldName, value, filterEntries) {
+    const vidLen = parseTime(value);
+    const match = matchesDurationRange(vidLen, filterEntries)
+      ? { name: fieldName, value: vidLen }
+      : null;
+    return { match, value: vidLen };
+  }
+
   // The blocking rules for one field, in priority order. Returns `match` - the
   // descriptor for matchedFilterField, or null - plus `value`, the form of the
   // value the custom JS filter should receive.
@@ -167,24 +217,7 @@
     // positive. Every other field is bypassed here (the caller additionally
     // skips their value extraction, so only channelId costs a read).
     if (storageData.options[OPT.WHITELIST_MODE]) {
-      if (fieldName !== 'channelId') return { match: null, value };
-      const allowlist = storageData.filterData.whitelist || [];
-      const candidates = allValues && allValues.length > 0 ? allValues : [value];
-      if (entriesMatchAnyValue(allowlist, candidates)) return { match: null, value };
-      if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
-        return { match: null, value };
-      }
-      // Fail-open on non-attribution values: structural renderers carry URLs
-      // (tabRenderer), icon types (chips) or other non-IDs in the channelId
-      // slot. Those can never match an exact-ID allowlist entry, so blocking
-      // them deletes page chrome instead of content — channel tabs vanish and
-      // the channel page looks like it never loads. Real channel ids and the
-      // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
-      // the check below via the shared ID charset.
-      if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
-        return { match: null, value };
-      }
-      return { match: { name: fieldName, value }, value };
+      return matchFieldWhitelist(fieldName, value, obj, rendererKey, allValues);
     }
 
     if (isPercentWatchedBlocked(fieldName, value, rendererKey)) {
@@ -192,19 +225,8 @@
     }
 
     if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
-      // channelId/channelName may carry several channels (search-result collab
-      // dialogs); a blocked one listed second must still match.
-      const candidates =
-        allValues && allValues.length > 0 ? allValues : [value];
-      const matchedEntry = filterEntries.find(
-        (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
-      );
-      if (matchedEntry) {
-        return {
-          match: { name: fieldName, value: String(matchedEntry).slice(0, 40) },
-          value,
-        };
-      }
+      const match = matchFieldRegex(fieldName, value, filterEntries, allValues);
+      if (match) return { match, value };
     }
 
     if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
@@ -212,11 +234,7 @@
     }
 
     if (fieldName === 'vidLength') {
-      const vidLen = parseTime(value);
-      const match = matchesDurationRange(vidLen, filterEntries)
-        ? { name: fieldName, value: vidLen }
-        : null;
-      return { match, value: vidLen };
+      return matchFieldDuration(fieldName, value, filterEntries);
     }
 
     return { match: null, value };
@@ -240,6 +258,119 @@
     'compactVideoRenderer',
   ]);
 
+  // Skip fields with nothing to test: undefined paths, non-channelId fields
+  // in whitelist mode, and regex props with no entries and no JS filter.
+  function shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode) {
+    if (filterPath === undefined) return true;
+    // Whitelist mode evaluates channelId against the allowlist even when
+    // the blacklist is empty (empty allowlist = block, not skip); every
+    // other field is bypassed without value extraction.
+    if (whitelistMode && fieldName !== 'channelId') return true;
+    return (
+      !whitelistMode &&
+      regexPropsSet.has(fieldName) &&
+      (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
+    );
+  }
+
+  // Resolve one field's value, falling back to the page channel for
+  // unattributed per-video cards on a channel's own page (see
+  // pageChannelFallbackRenderers). Returns undefined when there is nothing.
+  function resolveFieldValue(obj, filterPath, fieldName, rendererKey) {
+    const value = getFlattenByPath(obj, filterPath);
+    if (value !== undefined) return value;
+    // On a channel's own page its video cards carry no channel id; without
+    // the page fallback they can neither be blacklisted nor (in whitelist
+    // mode) hidden for being non-allowlisted — the page looks unblockable.
+    // Structural renderers keep the fail-open rule (see
+    // pageChannelFallbackRenderers): only per-video cards inherit the page.
+    if (
+      fieldName === 'channelId' &&
+      pageChannel !== null &&
+      pageChannelFallbackRenderers.has(rendererKey)
+    ) {
+      return pageChannel.id;
+    }
+    return undefined;
+  }
+
+  // Evaluate one field against its filter entries. Sets matchedFilterField and
+  // returns true on a block; otherwise records the JS-filter value and false.
+  function evaluateOneField(fieldName, value, filterEntries, obj, rendererKey, allValues) {
+    const { match, value: jsValue } = matchField(
+      fieldName,
+      value,
+      filterEntries,
+      obj,
+      rendererKey,
+      allValues,
+    );
+    if (match) {
+      matchedFilterField = match;
+      return { blocked: true, jsValue };
+    }
+    return { blocked: false, jsValue };
+  }
+
+  // Run the user JS filter over the friendly object. Forces the return into
+  // boolean and records the jsFilter match descriptor on a block.
+  function applyJsFilter(friendlyVideoObj, rendererKey) {
+    let doBlock = false;
+    // force return value into boolean just in case someone tries returning something else
+    try {
+      doBlock = !!jsFilter(friendlyVideoObj, rendererKey);
+    } catch (e) {
+      console.error(
+        'Custom function exception',
+        e,
+        'friendlyVideoObj: ',
+        friendlyVideoObj,
+        'rendererKey: ',
+        rendererKey,
+      );
+    }
+    if (doBlock) {
+      matchedFilterField = { name: 'jsFilter' };
+    }
+    return doBlock;
+  }
+
+  // Collect multi-channel candidates for collab dialogs so a non-first
+  // match still blocks/allows; every other field needs no extra lookup.
+  function collabCandidates(obj, filterPath, fieldName) {
+    // channelId/channelName can list several channels (collab dialogs);
+    // collect them all so a non-first match still blocks/allows.
+    return fieldName === 'channelId' || fieldName === 'channelName'
+      ? getFlattenByPathAll(obj, filterPath)
+      : undefined;
+  }
+
+  // Scan every field in filterPaths: resolve, evaluate, record JS values.
+  // Returns the block flag; matchedFilterField is set on a property match.
+  function scanFilterFields(filterPaths, obj, rendererKey, fd, whitelistMode, friendlyVideoObj) {
+    for (const fieldName of Object.keys(filterPaths)) {
+      const filterPath = filterPaths[fieldName];
+      const filterEntries = fd[fieldName];
+      if (shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode)) continue;
+
+      const value = resolveFieldValue(obj, filterPath, fieldName, rendererKey);
+      if (value === undefined) continue;
+
+      const { blocked, jsValue } = evaluateOneField(
+        fieldName,
+        value,
+        filterEntries,
+        obj,
+        rendererKey,
+        collabCandidates(obj, filterPath, fieldName),
+      );
+      if (blocked) return true;
+
+      if (jsFilterEnabled) friendlyVideoObj[fieldName] = normalizeForJsFilter(fieldName, jsValue);
+    }
+    return false;
+  }
+
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
@@ -249,80 +380,18 @@
     if (document.location.pathname === '/feed/history' && opts[OPT.DISABLE_ON_HISTORY])
       return false;
 
-    let doBlock = false;
     const whitelistMode = !!opts[OPT.WHITELIST_MODE];
-    for (const fieldName of Object.keys(filterPaths)) {
-      const filterPath = filterPaths[fieldName];
-      if (filterPath === undefined) continue;
-
-      // Whitelist mode evaluates channelId against the allowlist even when
-      // the blacklist is empty (empty allowlist = block, not skip); every
-      // other field is bypassed without value extraction.
-      if (whitelistMode && fieldName !== 'channelId') continue;
-      const filterEntries = fd[fieldName];
-      if (
-        !whitelistMode &&
-        regexPropsSet.has(fieldName) &&
-        (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
-      )
-        continue;
-
-      let value = getFlattenByPath(obj, filterPath);
-      if (value === undefined) {
-        // On a channel's own page its video cards carry no channel id; without
-        // the page fallback they can neither be blacklisted nor (in whitelist
-        // mode) hidden for being non-allowlisted — the page looks unblockable.
-        // Structural renderers keep the fail-open rule (see
-        // pageChannelFallbackRenderers): only per-video cards inherit the page.
-        if (
-          fieldName === 'channelId' &&
-          pageChannel !== null &&
-          pageChannelFallbackRenderers.has(rendererKey)
-        ) {
-          value = pageChannel.id;
-        } else {
-          continue;
-        }
-      }
-
-      const { match, value: jsValue } = matchField(
-        fieldName,
-        value,
-        filterEntries,
-        obj,
-        rendererKey,
-        // channelId/channelName can list several channels (collab dialogs);
-        // collect them all so a non-first match still blocks/allows.
-        fieldName === 'channelId' || fieldName === 'channelName'
-          ? getFlattenByPathAll(obj, filterPath)
-          : undefined,
-      );
-      if (match) {
-        matchedFilterField = match;
-        doBlock = true;
-        break;
-      }
-
-      if (jsFilterEnabled) friendlyVideoObj[fieldName] = normalizeForJsFilter(fieldName, jsValue);
-    }
+    let doBlock = scanFilterFields(
+      filterPaths,
+      obj,
+      rendererKey,
+      fd,
+      whitelistMode,
+      friendlyVideoObj,
+    );
 
     if (!doBlock && jsFilterEnabled) {
-      // force return value into boolean just in case someone tries returning something else
-      try {
-        doBlock = !!jsFilter(friendlyVideoObj, rendererKey);
-      } catch (e) {
-        console.error(
-          'Custom function exception',
-          e,
-          'friendlyVideoObj: ',
-          friendlyVideoObj,
-          'rendererKey: ',
-          rendererKey,
-        );
-      }
-      if (doBlock) {
-        matchedFilterField = { name: 'jsFilter' };
-      }
+      doBlock = applyJsFilter(friendlyVideoObj, rendererKey);
     }
     if (doBlock && rendererKey === 'commentEntityPayload') {
       this.blockedComments.push(obj.properties.commentId);
@@ -475,6 +544,109 @@
     return false;
   }
 
+  // Run one matched rule's customFunc (if any) and delete the renderer on
+  // success. Returns the rule's related flag (or true) when deleted.
+  function applyMatchedRule(filterCtx, obj, rule) {
+    let customRet = true;
+    if (rule.customFunc !== undefined) {
+      try {
+        customRet = rule.customFunc.call(filterCtx, obj, rule.name);
+      } catch (e) {
+        console.error('customFunc Exception (renderer left in place)');
+        console.error(e);
+        customRet = false;
+      }
+    }
+    if (customRet) {
+      delete obj[rule.name];
+      return rule.related || true;
+    }
+    return false;
+  }
+
+  // Match this node's renderers against the rule table and delete hits.
+  // Returns the deletePrev flag for the pruned parent, or false for arrays
+  // (numerically keyed: they can never match a rule name — skipped here).
+  function matchAndDeleteRules(filterCtx, obj, keys) {
+    let deletePrev = false;
+    if (keys === undefined) return deletePrev;
+    // object filtering
+    let matchedRules = [];
+    try {
+      matchedRules = filterCtx.matchFilterRule(obj, keys);
+    } catch (e) {
+      console.error('matchFilterRule Exception (renderer left in place)');
+      console.error(e);
+    }
+    matchedRules.forEach((r) => {
+      const deleted = applyMatchedRule(filterCtx, obj, r);
+      if (deleted) deletePrev = deleted;
+    });
+    return deletePrev;
+  }
+
+  // Filter one child subtree, returning its delete flag (or undefined for
+  // primitives, which can never match a renderer). Child throws leave the
+  // subtree in place.
+  function filterOneChild(filterCtx, child) {
+    if (typeof child !== 'object' || child === null) return undefined;
+    try {
+      return filterCtx.filter(child);
+    } catch (e) {
+      console.error('ObjectFilter child exception (subtree left in place)');
+      console.error(e);
+      return false;
+    }
+  }
+
+  // Splice a deleted array child (plus its related sibling when the flag is
+  // a key name — the missing-data hack). No-op for object children.
+  function spliceDeletedChild(obj, idx, childDel, keys) {
+    if (!childDel || keys !== undefined) return;
+    obj.splice(idx, 1);
+    // Hack for deleting related objects with missing data
+    if (typeof childDel === 'string' && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
+      obj.splice(idx, 1);
+    }
+  }
+
+  // Walk children backwards (easier splice), filtering each subtree and
+  // pruning emptied containers. Returns true when a child was deleted.
+  function filterChildren(filterCtx, obj, keys, len) {
+    let deleted = false;
+    // loop backwards for easier splice
+    for (let i = len - 1; i >= 0; i -= 1) {
+      const idx = keys ? keys[i] : i;
+      if (obj[idx] === undefined) continue;
+
+      // filter next child (skip primitives: they can never match a renderer)
+      // also if current object is an array, splice child
+      const childDel = filterOneChild(filterCtx, obj[idx]);
+      if (childDel && keys === undefined) {
+        deleted = true;
+        spliceDeletedChild(obj, idx, childDel, keys);
+      }
+
+      // if next child is an empty array that we filtered, mark parent for removal.
+      if (collapseEmptyContainers(obj, idx, childDel)) {
+        deleted = true;
+      }
+    }
+    return deleted;
+  }
+
+  // Attach context-menu entries to this node when the filter runs with menus
+  // enabled. Menu throws never break filtering — they are logged only.
+  function maybeAddContextMenus(filterCtx, obj, keys) {
+    if (!filterCtx.contextMenus) return;
+    try {
+      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+    } catch (e) {
+      console.error('addContextMenus Exception');
+      console.error(e);
+    }
+  }
+
   ObjectFilter.prototype.filter = function (obj = this.object) {
     let deletePrev = false;
 
@@ -493,75 +665,12 @@
     } else {
       keys = Object.keys(obj);
       len = keys.length;
-
-      // object filtering
-      let matchedRules = [];
-      try {
-        matchedRules = this.matchFilterRule(obj, keys);
-      } catch (e) {
-        console.error('matchFilterRule Exception (renderer left in place)');
-        console.error(e);
-      }
-      matchedRules.forEach((r) => {
-        let customRet = true;
-        if (r.customFunc !== undefined) {
-          try {
-            customRet = r.customFunc.call(this, obj, r.name);
-          } catch (e) {
-            console.error('customFunc Exception (renderer left in place)');
-            console.error(e);
-            customRet = false;
-          }
-        }
-        if (customRet) {
-          delete obj[r.name];
-          deletePrev = r.related || true;
-        }
-      });
+      const matched = matchAndDeleteRules(this, obj, keys);
+      if (matched) deletePrev = matched;
     }
 
-    // loop backwards for easier splice
-    for (let i = len - 1; i >= 0; i -= 1) {
-      const idx = keys ? keys[i] : i;
-      if (obj[idx] === undefined) continue;
+    if (filterChildren(this, obj, keys, len)) deletePrev = true;
 
-      // filter next child (skip primitives: they can never match a renderer)
-      // also if current object is an array, splice child
-      const child = obj[idx];
-      let childDel;
-      if (typeof child === 'object' && child !== null) {
-        try {
-          childDel = this.filter(child);
-        } catch (e) {
-          console.error('ObjectFilter child exception (subtree left in place)');
-          console.error(e);
-          childDel = false;
-        }
-      } else {
-        childDel = undefined;
-      }
-      if (childDel && keys === undefined) {
-        deletePrev = true;
-        obj.splice(idx, 1);
-        // Hack for deleting related objects with missing data
-        if (typeof childDel === 'string' && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
-          obj.splice(idx, 1);
-        }
-      }
-
-      // if next child is an empty array that we filtered, mark parent for removal.
-      if (collapseEmptyContainers(obj, idx, childDel)) {
-        deletePrev = true;
-      }
-    }
-
-    if (this.contextMenus) {
-      try {
-        !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
-      } catch (e) {
-        console.error('addContextMenus Exception');
-        console.error(e);
-      }
-    }
+    maybeAddContextMenus(this, obj, keys);
     return deletePrev;
   };

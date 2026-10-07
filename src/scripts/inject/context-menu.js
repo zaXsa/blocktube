@@ -14,6 +14,54 @@
     return opts?.[key] !== false;
   }
 
+  // The toast notification item shown after a mobile block tap ("Channel
+  // blocked" rendered in place by YouTube).
+  function buildToastNotificationItem(toastText) {
+    return {
+      notificationMultiActionRenderer: {
+        responseText: {
+          runs: [{ text: toastText }],
+          accessibility: {
+            accessibilityData: {
+              label: toastText,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  // The feedback endpoint for a mobile block entry: optionally hides the
+  // enclosing card and shows the toast notification above.
+  function buildBlockFeedbackEndpoint(toastText, hideContainer) {
+    return {
+      uiActions: {
+        hideEnclosingContainer: hideContainer,
+      },
+      actions: [
+        {
+          replaceEnclosingAction: {
+            item: buildToastNotificationItem(toastText),
+          },
+        },
+      ],
+    };
+  }
+
+  // The service endpoint stub mobile block entries carry (a no-op data URL —
+  // the real work happens in menuOnTapMobile via the _bt* fields).
+  function buildBlockServiceEndpoint(hideContainer, toastText) {
+    return {
+      commandMetadata: {
+        webCommandMetadata: {
+          sendPost: true,
+          apiUrl: 'data:text/plain;base64,Cg==',
+        },
+      },
+      feedbackEndpoint: buildBlockFeedbackEndpoint(toastText, hideContainer),
+    };
+  }
+
   // Mobile "up next" cards carry no block actions, so we inject full
   // menuServiceItemRenderer entries ourselves; YT renders the toast text
   // ("Channel blocked") in place after the tap.
@@ -36,37 +84,7 @@
         text: { runs: [{ text: label }] },
         icon: { iconType },
         trackingParams: 'Cg==',
-        serviceEndpoint: {
-          commandMetadata: {
-            webCommandMetadata: {
-              sendPost: true,
-              apiUrl: 'data:text/plain;base64,Cg==',
-            },
-          },
-          feedbackEndpoint: {
-            uiActions: {
-              hideEnclosingContainer: hideContainer,
-            },
-            actions: [
-              {
-                replaceEnclosingAction: {
-                  item: {
-                    notificationMultiActionRenderer: {
-                      responseText: {
-                        runs: [{ text: toastText }],
-                        accessibility: {
-                          accessibilityData: {
-                            label: toastText,
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        },
+        serviceEndpoint: buildBlockServiceEndpoint(hideContainer, toastText),
       },
     };
   }
@@ -127,6 +145,197 @@
     };
   }
 
+  // Mobile renderers whose cards ship no block actions (see
+  // buildBlockActionMenuItem): the menu entries are built from scratch.
+  const MOBILE_UP_NEXT_ATTRS = [
+    'videoWithContextRenderer',
+    'compactVideoRenderer',
+    'movieRenderer',
+    'compactMovieRenderer',
+    'playlistVideoRenderer',
+    'reelItemRenderer',
+    'commentRenderer',
+  ];
+
+  // Resolve the mutable menu-items array for a mobile up-next card, creating
+  // the actionMenu for comments. Undefined when the card has no menu at all.
+  function resolveMobileUpNextItems(obj, attr) {
+    let items;
+    if (has.call(obj[attr], 'menu')) {
+      items = getObjectByPath(obj[attr], 'menu.menuRenderer.items');
+    }
+    if (has.call(obj[attr], 'actionMenu')) {
+      items = obj[attr].actionMenu.menuRenderer.items;
+    } else if (attr === 'commentRenderer') {
+      obj[attr].actionMenu = { menuRenderer: { items: [] } };
+      items = obj[attr].actionMenu.menuRenderer.items;
+    }
+    return items;
+  }
+
+  // Whitelist mode: the visible cards are already allowlisted, so an
+  // "Allow Channel" entry would be pointless — offer removal instead.
+  function pushMobileRemovalEntry(items, attr, channelData) {
+    if (channelData.id)
+      items.push(
+        buildBlockActionMenuItem(
+          attr,
+          'unallow_channel',
+          channelData,
+          'Remove from Whitelist',
+          'Removed from whitelist',
+          true,
+          'REMOVE',
+        ),
+      );
+  }
+
+  // Block mode additionally offers allowlisting, so the allowlist can be
+  // built while browsing normally.
+  function pushMobileBlockEntries(items, attr, channelData, videoData) {
+    if (channelData.id && showMenuEntry(OPT.MENU_BLOCK_CHANNEL))
+      items.push(
+        buildBlockActionMenuItem(attr, 'block_channel', channelData, 'Block Channel', 'Channel blocked'),
+      );
+    if (videoData.id && showMenuEntry(OPT.MENU_BLOCK_VIDEO))
+      items.push(
+        buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
+      );
+    if (channelData.id && showMenuEntry(OPT.MENU_ALLOW_CHANNEL))
+      items.push(
+        buildBlockActionMenuItem(
+          attr,
+          'allow_channel',
+          channelData,
+          'Allow Channel',
+          'Channel allowed',
+          false,
+          'CHECK',
+        ),
+      );
+  }
+
+  // Mobile Up Next videos: same menuServiceItemRenderer type the desktop
+  // overflow menu uses, but these cards ship no block actions, so we build
+  // the full entries ourselves (see buildBlockActionMenuItem).
+  function addMobileUpNextMenus(obj, attr, channelData, videoData) {
+    const items = resolveMobileUpNextItems(obj, attr);
+    if (!items) return;
+    if (isWhitelistMenuMode()) {
+      pushMobileRemovalEntry(items, attr, channelData);
+      return;
+    }
+    pushMobileBlockEntries(items, attr, channelData, videoData);
+  }
+
+  // Channel-button definitions for the mobile video-page action bar. In
+  // whitelist mode only removal is offered; in block mode the entries honor
+  // their General-toggle visibility (see showMenuEntry).
+  function slimChannelButtonDefs(allowMode) {
+    if (allowMode) {
+      return [{ action: 'unallow_channel', label: 'Remove from Whitelist' }];
+    }
+    return [
+      { action: 'block_channel', label: 'Block Channel', option: OPT.MENU_BLOCK_CHANNEL },
+      { action: 'allow_channel', label: 'Allow Channel', option: OPT.MENU_ALLOW_CHANNEL },
+    ].filter(({ option }) => option === undefined || showMenuEntry(option));
+  }
+
+  // One slim action-bar buttonRenderer bound to BlockTube data: shared body
+  // for the video and channel buttons (they differ only in data/action/label
+  // and the navigation endpoint kind).
+  function buildSlimButtonRenderer(data, action, label, navigationEndpoint) {
+    return {
+      _btOriginalData: data,
+      _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
+      _btMenuAction: action,
+      style: 'STYLE_DEFAULT',
+      size: 'SIZE_DEFAULT',
+      isDisabled: false,
+      text: {
+        runs: [
+          {
+            text: label,
+          },
+        ],
+      },
+      accessibility: {
+        label,
+      },
+      accessibilityData: {
+        accessibilityData: {
+          label,
+        },
+      },
+      navigationEndpoint,
+    };
+  }
+
+  // The "Block Video" button for the mobile video-page action bar.
+  function buildSlimVideoButton(videoData) {
+    return {
+      slimMetadataButtonRenderer: {
+        button: {
+          buttonRenderer: buildSlimButtonRenderer(videoData, 'block_video', 'Block Video', {}),
+        },
+      },
+    };
+  }
+
+  // Render one channel-button definition into a slimMetadataButtonRenderer
+  // entry bound to the video's channel (see addMobileSlimMenus).
+  function renderSlimChannelButton({ action, label }, channelData) {
+    return {
+      slimMetadataButtonRenderer: {
+        button: {
+          buttonRenderer: buildSlimButtonRenderer(channelData, action, label, {
+            commandMetadata: { webCommandMetadata: { ignoreNavigation: true } },
+            urlEndpoint: {},
+          }),
+        },
+      },
+    };
+  }
+
+  // The mobile action-bar wrapper holding the video + channel buttons, with
+  // a static "More" overflow label.
+  function buildMobileVideoMenu(videoButton, channelButtonsRendered, includeVideo) {
+    return {
+      slimVideoActionBarRenderer: {
+        buttons: [
+          // Videos can't be allowlisted: no video button in whitelist mode.
+          ...(includeVideo ? [videoButton] : []),
+          ...channelButtonsRendered,
+        ],
+        overflowMenuText: {
+          runs: [
+            {
+              text: 'More',
+            },
+          ],
+        },
+        overflowAccessibilityData: {
+          label: 'More',
+        },
+      },
+    };
+  }
+
+  // Mobile Video page: the action bar under the video uses a different
+  // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
+  function addMobileSlimMenus(obj, attr, channelData, videoData) {
+    const items = obj[attr].contents;
+    if (!items) return;
+    const allowMode = isWhitelistMenuMode();
+    const channelButtons = slimChannelButtonDefs(allowMode);
+    const videoButton = buildSlimVideoButton(videoData);
+    const channelButtonsRendered = channelButtons.map((def) =>
+      renderSlimChannelButton(def, channelData),
+    );
+    const includeVideo = !allowMode && showMenuEntry(OPT.MENU_BLOCK_VIDEO);
+    items.splice(2, 0, buildMobileVideoMenu(videoButton, channelButtonsRendered, includeVideo));
+  }
+
   function addContextMenusMobile(obj, keys) {
     const attr = resolveContextMenuAttr(obj, keys);
     if (attr === undefined) return;
@@ -134,243 +343,96 @@
     const parentData = obj[attr];
     const { channel: channelData, video: videoData } = channelAndVideoFrom(parentData, attr);
 
-    if (
-      [
-        'videoWithContextRenderer',
-        'compactVideoRenderer',
-        'movieRenderer',
-        'compactMovieRenderer',
-        'playlistVideoRenderer',
-        'reelItemRenderer',
-        'commentRenderer',
-      ].includes(attr)
-    ) {
-      // Mobile Up Next videos: same menuServiceItemRenderer type the desktop
-      // overflow menu uses, but these cards ship no block actions, so we build
-      // the full entries ourselves (see buildBlockActionMenuItem).
-      let items;
-      if (has.call(obj[attr], 'menu')) {
-        items = getObjectByPath(obj[attr], 'menu.menuRenderer.items');
-      }
-      if (has.call(obj[attr], 'actionMenu')) {
-        items = obj[attr].actionMenu.menuRenderer.items;
-      } else if (attr === 'commentRenderer') {
-        obj[attr].actionMenu = { menuRenderer: { items: [] } };
-        items = obj[attr].actionMenu.menuRenderer.items;
-      }
-
-      if (!items) return;
-      const allowMode = isWhitelistMenuMode();
-      if (allowMode) {
-        // Whitelist mode: the visible cards are already allowlisted, so an
-        // "Allow Channel" entry would be pointless — offer removal instead.
-        if (channelData.id)
-          items.push(
-            buildBlockActionMenuItem(
-              attr,
-              'unallow_channel',
-              channelData,
-              'Remove from Whitelist',
-              'Removed from whitelist',
-              true,
-              'REMOVE',
-            ),
-          );
-        return;
-      }
-      // Block mode additionally offers allowlisting, so the allowlist can be
-      // built while browsing normally.
-      if (channelData.id && showMenuEntry(OPT.MENU_BLOCK_CHANNEL))
-        items.push(
-          buildBlockActionMenuItem(
-            attr,
-            'block_channel',
-            channelData,
-            'Block Channel',
-            'Channel blocked',
-          ),
-        );
-      if (videoData.id && showMenuEntry(OPT.MENU_BLOCK_VIDEO))
-        items.push(
-          buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
-        );
-      if (channelData.id && showMenuEntry(OPT.MENU_ALLOW_CHANNEL))
-        items.push(
-          buildBlockActionMenuItem(
-            attr,
-            'allow_channel',
-            channelData,
-            'Allow Channel',
-            'Channel allowed',
-            false,
-            'CHECK',
-          ),
-        );
+    if (MOBILE_UP_NEXT_ATTRS.includes(attr)) {
+      addMobileUpNextMenus(obj, attr, channelData, videoData);
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
-      // Mobile Video page: the action bar under the video uses a different
-      // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
-      const items = obj[attr].contents;
-      if (!items) return;
-      const allowMode = isWhitelistMenuMode();
-      const channelButtons = allowMode
-        ? [
-            {
-              action: 'unallow_channel',
-              label: 'Remove from Whitelist',
-            },
-          ]
-        : [
-            {
-              action: 'block_channel',
-              label: 'Block Channel',
-              option: OPT.MENU_BLOCK_CHANNEL,
-            },
-            {
-              action: 'allow_channel',
-              label: 'Allow Channel',
-              option: OPT.MENU_ALLOW_CHANNEL,
-            },
-          ].filter(({ option }) => option === undefined || showMenuEntry(option));
-      const videoButton = {
-        slimMetadataButtonRenderer: {
-          button: {
-            buttonRenderer: {
-              _btOriginalData: videoData,
-              _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
-              _btMenuAction: 'block_video',
-              style: 'STYLE_DEFAULT',
-              size: 'SIZE_DEFAULT',
-              isDisabled: false,
-              text: {
-                runs: [
-                  {
-                    text: 'Block Video',
-                  },
-                ],
-              },
-              accessibility: {
-                label: 'Block Video',
-              },
-              accessibilityData: {
-                accessibilityData: {
-                  label: 'Block Video',
-                },
-              },
-              navigationEndpoint: {},
-            },
-          },
-        },
-      };
-      const channelButtonsRendered = channelButtons.map(({ action, label }) => ({
-        slimMetadataButtonRenderer: {
-          button: {
-            buttonRenderer: {
-              _btOriginalData: channelData,
-              _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
-              _btMenuAction: action,
-              style: 'STYLE_DEFAULT',
-              size: 'SIZE_DEFAULT',
-              isDisabled: false,
-              text: {
-                runs: [
-                  {
-                    text: label,
-                  },
-                ],
-              },
-              accessibility: {
-                label,
-              },
-              accessibilityData: {
-                accessibilityData: {
-                  label,
-                },
-              },
-              navigationEndpoint: {
-                commandMetadata: { webCommandMetadata: { ignoreNavigation: true } },
-                urlEndpoint: {},
-              },
-            },
-          },
-        },
-      }));
-      const mobileVideoMenu = {
-        slimVideoActionBarRenderer: {
-          buttons: [
-            // Videos can't be allowlisted: no video button in whitelist mode.
-            ...(allowMode || !showMenuEntry(OPT.MENU_BLOCK_VIDEO) ? [] : [videoButton]),
-            ...channelButtonsRendered,
-          ],
-          overflowMenuText: {
-            runs: [
-              {
-                text: 'More',
-              },
-            ],
-          },
-          overflowAccessibilityData: {
-            label: 'More',
-          },
-        },
-      };
-      items.splice(2, 0, mobileVideoMenu);
+      addMobileSlimMenus(obj, attr, channelData, videoData);
     }
   }
 
-  function extractMenuItems(obj, attr) {
-    let items = null;
-    let hasChannel = false;
-    let hasVideo = false;
-    let isLockupViewModel = false;
+  // Lockup branch of extractMenuItems: resolve the sheet items, then mark
+  // channel/video presence unless the card is a generated collection (Mixes,
+  // Courses — neither a real video nor a real channel). Null when no sheet.
+  function extractLockupMenuFlags(obj, attr) {
+    const items = extractFromLockupViewModel(obj[attr]);
+    if (!items) return null;
+    const imgName = getObjectByPath(obj[attr], LOCKUP_BADGE_ICON_PATH);
+    // YouTube-generated collections (Mixes, Courses): neither a real video nor
+    // a real channel, so there is nothing meaningful to add to the filters.
+    const isCollection = imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName);
+    return {
+      items,
+      hasChannel: !isCollection,
+      hasVideo: !isCollection,
+      isLockupViewModel: true,
+    };
+  }
 
-    if (has.call(obj[attr], 'videoActions')) {
-      items = obj[attr].videoActions.menuRenderer.items;
-      hasChannel = true;
-      hasVideo = true;
-    } else if (has.call(obj[attr], 'actionMenu')) {
-      items = obj[attr].actionMenu.menuRenderer.items;
-      hasChannel = true;
-    } else if (attr === 'commentRenderer') {
-      obj[attr].actionMenu = { menuRenderer: { items: [] } };
-      items = obj[attr].actionMenu.menuRenderer.items;
-      hasChannel = true;
-    } else if (attr === 'lockupViewModel') {
-      items = extractFromLockupViewModel(obj[attr]);
-      if (!items) return null;
-      const imgName = getObjectByPath(obj[attr], LOCKUP_BADGE_ICON_PATH);
-      // YouTube-generated collections (Mixes, Courses): neither a real video nor
-      // a real channel, so there is nothing meaningful to add to the filters.
-      if (imgName === undefined || !LOCKUP_GENERATED_BADGE_ICONS.has(imgName)) {
-        hasChannel = true;
-        hasVideo = true;
-      }
-
-      isLockupViewModel = true;
-    } else {
-      items = extractFromGenericRenderer(obj[attr]);
-      hasVideo = true;
-
-      // Determine channel presence
-      if (
-        attr === 'movieRenderer' ||
-        attr === 'compactMovieRenderer' ||
-        attr === 'reelItemRenderer'
-      ) {
-        hasChannel = false;
-      } else if (
-        has.call(obj[attr], 'shortBylineText') &&
-        getObjectByPath(obj[attr], 'shortBylineText.runs.navigationEndpoint.browseEndpoint')
-      ) {
-        hasChannel = true;
-      } else if (
-        has.call(obj[attr], 'bylineText') &&
-        getObjectByPath(obj[attr], 'bylineText.runs.navigationEndpoint.browseEndpoint')
-      ) {
-        hasChannel = true;
-      }
+  // Renderers without their own channel link (movies, reels) never attribute
+  // a channel; the rest do when a byline path resolves to a browse endpoint.
+  function genericRendererHasChannel(renderer, attr) {
+    if (attr === 'movieRenderer' || attr === 'compactMovieRenderer' || attr === 'reelItemRenderer') {
+      return false;
     }
+    if (
+      has.call(renderer, 'shortBylineText') &&
+      getObjectByPath(renderer, 'shortBylineText.runs.navigationEndpoint.browseEndpoint')
+    ) {
+      return true;
+    }
+    return !!(
+      has.call(renderer, 'bylineText') &&
+      getObjectByPath(renderer, 'bylineText.runs.navigationEndpoint.browseEndpoint')
+    );
+  }
 
-    return { items, hasChannel, hasVideo, isLockupViewModel };
+  // Generic branch of extractMenuItems: items always exist (created on
+  // demand), video actions always apply, channel depends on the byline link.
+  function extractGenericMenuFlags(obj, attr) {
+    return {
+      items: extractFromGenericRenderer(obj[attr]),
+      hasChannel: genericRendererHasChannel(obj[attr], attr),
+      hasVideo: true,
+      isLockupViewModel: false,
+    };
+  }
+
+  // Comment branch of extractMenuItems: comments ship no menu, so an empty
+  // actionMenu is created for the block entries.
+  function extractCommentMenuFlags(obj, attr) {
+    obj[attr].actionMenu = { menuRenderer: { items: [] } };
+    return {
+      items: obj[attr].actionMenu.menuRenderer.items,
+      hasChannel: true,
+      hasVideo: false,
+      isLockupViewModel: false,
+    };
+  }
+
+  function extractMenuItems(obj, attr) {
+    if (has.call(obj[attr], 'videoActions')) {
+      return {
+        items: obj[attr].videoActions.menuRenderer.items,
+        hasChannel: true,
+        hasVideo: true,
+        isLockupViewModel: false,
+      };
+    }
+    if (has.call(obj[attr], 'actionMenu')) {
+      return {
+        items: obj[attr].actionMenu.menuRenderer.items,
+        hasChannel: true,
+        hasVideo: false,
+        isLockupViewModel: false,
+      };
+    }
+    if (attr === 'commentRenderer') {
+      return extractCommentMenuFlags(obj, attr);
+    }
+    if (attr === 'lockupViewModel') {
+      return extractLockupMenuFlags(obj, attr);
+    }
+    return extractGenericMenuFlags(obj, attr);
   }
 
   // Specific extractor for lockupViewModel
@@ -480,42 +542,63 @@
     return true;
   }
 
-  function createCleanContext(items, store, isChannel, currentObj, forAllow = false, forRemove = false) {
-    // Allow/remove entries must never reuse YouTube's native command: it
-    // hides the card (the home-grid removal reported for Allow taps). They
-    // always get a clone with the matching toast and hide flag, regardless
-    // of the block_feedback option. Real block entries keep the identity
-    // fast-path so YouTube's own feedback flow keeps working.
-    if (!forAllow && !forRemove && store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
-      const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
-      let item;
-      for (const icon of targetIcons) {
-        item = items.find((i) => {
-          const imageName = getObjectByPath(
-            i,
-            'listItemViewModel.leadingImage.sources.clientResource.imageName',
-          );
-          return imageName === icon;
-        });
-        if (item) break;
-      }
-      if (item) {
-        return item?.listItemViewModel?.rendererContext;
-      }
+  // Native-command fast path for real block entries: reuse YouTube's own
+  // feedback item (by leading icon) when block_feedback is on. Allow/remove
+  // entries must never reuse it (it hides the card). Returns the item, or
+  // undefined when no feedback icon matches.
+  function findNativeFeedbackItem(items, isChannel) {
+    const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
+    for (const icon of targetIcons) {
+      const item = items.find((i) => {
+        const imageName = getObjectByPath(
+          i,
+          'listItemViewModel.leadingImage.sources.clientResource.imageName',
+        );
+        return imageName === icon;
+      });
+      if (item) return item;
     }
+    return undefined;
+  }
 
-    const baseContext = items[0]?.listItemViewModel?.rendererContext;
-    if (!baseContext) return null;
+  // Toast text for a cloned lockup context: videos always "Video Blocked",
+  // channels depend on allow/remove/whitelist mode.
+  function lockupToastMessage(isChannel, forAllow, forRemove, store) {
+    if (!isChannel) return 'Video Blocked';
+    if (forRemove) return 'Removed from whitelist';
+    if (forAllow || isWhitelistMenuMode(store)) return 'Channel Allowed';
+    return 'Channel Blocked';
+  }
 
-    const msg = !isChannel
-      ? 'Video Blocked'
-      : forRemove
-        ? 'Removed from whitelist'
-        : forAllow || isWhitelistMenuMode(store)
-          ? 'Channel Allowed'
-          : 'Channel Blocked';
-    const cleanContext = deepClone(baseContext);
+  // The toast action shown after a cloned block tap (allow/remove entries
+  // execute silently — the hide flag is their only native effect).
+  function lockupToastAction(msg) {
+    return {
+      clickTrackingParams: '',
+      replaceEnclosingAction: {
+        item: {
+          notificationMultiActionRenderer: {
+            responseText: {
+              accessibility: {
+                accessibilityData: {
+                  label: msg,
+                },
+              },
+              simpleText: msg,
+            },
+            buttons: [],
+            trackingParams: '',
+            dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
+          },
+        },
+      },
+    };
+  }
 
+  // Overwrite a cloned context's onTap with a no-op command carrying only
+  // our feedback (toast + hide flag). Allow entries keep the card in place;
+  // removals and blocks hide it.
+  function overwriteOnTapCommand(cleanContext, msg, contentId, forAllow, forRemove) {
     if (cleanContext.commandContext?.onTap) {
       const onTap = cleanContext.commandContext?.onTap;
       onTap.innertubeCommand = {
@@ -526,45 +609,42 @@
             apiUrl: '',
           },
         },
-          feedbackEndpoint: {
-            feedbackToken: '',
-            uiActions: {
-              // Allow entries keep the card in place; removals and blocks
-              // hide it.
-              hideEnclosingContainer: !forAllow || forRemove,
-            },
-            // No confirmation popups: allow/remove entries execute silently
-            // (their hide flag above is the only native effect). Real block
-            // entries keep the toast.
-            actions:
-              forAllow || forRemove
-                ? []
-                : [
-                    {
-                      clickTrackingParams: '',
-                      replaceEnclosingAction: {
-                        item: {
-                          notificationMultiActionRenderer: {
-                            responseText: {
-                              accessibility: {
-                                accessibilityData: {
-                                  label: msg,
-                                },
-                              },
-                              simpleText: msg,
-                            },
-                            buttons: [],
-                            trackingParams: '',
-                            dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
-                          },
-                        },
-                      },
-                    },
-                  ],
-            contentId: currentObj.contentId,
+        feedbackEndpoint: {
+          feedbackToken: '',
+          uiActions: {
+            // Allow entries keep the card in place; removals and blocks
+            // hide it.
+            hideEnclosingContainer: !forAllow || forRemove,
           },
+          // No confirmation popups: allow/remove entries execute silently
+          // (their hide flag above is the only native effect). Real block
+          // entries keep the toast.
+          actions: forAllow || forRemove ? [] : [lockupToastAction(msg)],
+          contentId,
+        },
       };
     }
+  }
+
+  function createCleanContext(items, store, isChannel, currentObj, forAllow = false, forRemove = false) {
+    // Allow/remove entries must never reuse YouTube's native command: it
+    // hides the card (the home-grid removal reported for Allow taps). They
+    // always get a clone with the matching toast and hide flag, regardless
+    // of the block_feedback option. Real block entries keep the identity
+    // fast-path so YouTube's own feedback flow keeps working.
+    if (!forAllow && !forRemove && store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
+      const item = findNativeFeedbackItem(items, isChannel);
+      if (item) {
+        return item?.listItemViewModel?.rendererContext;
+      }
+    }
+
+    const baseContext = items[0]?.listItemViewModel?.rendererContext;
+    if (!baseContext) return null;
+
+    const msg = lockupToastMessage(isChannel, forAllow, forRemove, store);
+    const cleanContext = deepClone(baseContext);
+    overwriteOnTapCommand(cleanContext, msg, currentObj.contentId, forAllow, forRemove);
 
     return cleanContext;
   }
@@ -661,33 +741,48 @@
   // stay out of the way; pointer-events:none so it can never swallow clicks.
   let toastTimer = 0;
 
-  function showDomToast(msg, duration) {
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
-    let el = null;
+  // Create the toast div, styled property-by-property through CSSOM only
+  // (no <style>, no innerHTML), so page CSP and Trusted Types stay out of
+  // the way; pointer-events:none so it can never swallow clicks.
+  function createToastElement() {
+    const el = document.createElement('div');
+    el.id = 'blocktube-toast';
+    el.setAttribute('role', 'status');
+    const style = el.style;
+    style.position = 'fixed';
+    style.left = '50%';
+    style.bottom = '48px';
+    style.transform = 'translateX(-50%)';
+    style.zIndex = '2147483647';
+    style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    style.color = '#fff';
+    style.fontSize = '14px';
+    style.fontFamily = 'Roboto, Arial, sans-serif';
+    style.padding = '10px 16px';
+    style.borderRadius = '8px';
+    style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.4)';
+    style.pointerEvents = 'none';
+    style.display = 'none';
+    (document.body || document.documentElement).appendChild(el);
+    return el;
+  }
+
+  // Resolve the toast div, creating it on first use. Null when the DOM
+  // offers no way to look it up or build it.
+  function resolveToastElement() {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      return null;
+    }
     if (typeof document.getElementById === 'function') {
-      el = document.getElementById('blocktube-toast');
+      const existing = document.getElementById('blocktube-toast');
+      if (existing) return existing;
     }
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'blocktube-toast';
-      el.setAttribute('role', 'status');
-      const style = el.style;
-      style.position = 'fixed';
-      style.left = '50%';
-      style.bottom = '48px';
-      style.transform = 'translateX(-50%)';
-      style.zIndex = '2147483647';
-      style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-      style.color = '#fff';
-      style.fontSize = '14px';
-      style.fontFamily = 'Roboto, Arial, sans-serif';
-      style.padding = '10px 16px';
-      style.borderRadius = '8px';
-      style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.4)';
-      style.pointerEvents = 'none';
-      style.display = 'none';
-      (document.body || document.documentElement).appendChild(el);
-    }
+    return createToastElement();
+  }
+
+  // Show the message, then hide it after `duration`. Timer handles are
+  // guarded: exotic page realms may lack them.
+  function displayToastMessage(el, msg, duration) {
     el.textContent = msg;
     el.style.display = 'block';
     if (typeof clearTimeout === 'function') clearTimeout(toastTimer);
@@ -696,6 +791,12 @@
         el.style.display = 'none';
       }, duration);
     }
+  }
+
+  function showDomToast(msg, duration) {
+    const el = resolveToastElement();
+    if (!el) return;
+    displayToastMessage(el, msg, duration);
   }
 
   function openToast(msg, duration) {
@@ -709,42 +810,92 @@
     } catch (e) {}
   }
 
-  function legacyToast(msg, duration) {
-    const ytdApp = document.getElementsByTagName('ytd-app')[0];
-    if (ytdApp === undefined) return;
-    const ytEvent = new CustomEvent('yt-action', {
+  // The openPopupAction payload for a legacy toast: duration + message text
+  // rendered as a notificationActionRenderer popup.
+  function buildToastPopupAction(msg, duration) {
+    return {
+      openPopupAction: {
+        durationHintMs: duration,
+        popup: {
+          notificationActionRenderer: {
+            responseText: {
+              runs: [
+                {
+                  text: msg,
+                },
+              ],
+            },
+          },
+        },
+        popupType: 'TOAST',
+      },
+    };
+  }
+
+  // The yt-open-popup-action TOAST event payload for a message, dispatched
+  // on the ytd-app element (a harmless no-op where YouTube no longer
+  // listens — see showDomToast for the guaranteed feedback path).
+  function buildLegacyToastEvent(msg, duration, ytdApp) {
+    return new CustomEvent('yt-action', {
       bubbles: true,
       cancelable: false,
       composed: true,
       detail: {
         actionName: 'yt-open-popup-action',
-        args: [
-          {
-            openPopupAction: {
-              durationHintMs: duration,
-              popup: {
-                notificationActionRenderer: {
-                  responseText: {
-                    runs: [
-                      {
-                        text: msg,
-                      },
-                    ],
-                  },
-                },
-              },
-              popupType: 'TOAST',
-            },
-          },
-          ytdApp,
-          undefined,
-        ],
+        args: [buildToastPopupAction(msg, duration), ytdApp, undefined],
         returnValue: [],
         disableBroadcast: false,
         optionalAction: true,
       },
     });
-    ytdApp.dispatchEvent(ytEvent);
+  }
+
+  function legacyToast(msg, duration) {
+    const ytdApp = document.getElementsByTagName('ytd-app')[0];
+    if (ytdApp === undefined) return;
+    ytdApp.dispatchEvent(buildLegacyToastEvent(msg, duration, ytdApp));
+  }
+
+  // Map a mobile menu action to its block-list type. Undefined for unknown
+  // actions (the tap is ignored).
+  function mobileActionToBlockType(menuAction) {
+    switch (menuAction) {
+      case 'block_channel': {
+        return 'channelId';
+      }
+      case 'allow_channel': {
+        return 'whitelist';
+      }
+      case 'unallow_channel': {
+        return 'unwhitelist';
+      }
+      case 'block_video': {
+        return 'videoId';
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  // Mobile video-page taps confirm with an alert and stop playback for
+  // blocks/removals. Allowlists keep playback going.
+  function confirmSlimVideoTap(type) {
+    // Allowlists keep playback going; blocks and removals stop it.
+    if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
+    const noun = type === 'videoId' ? 'Video' : 'Channel';
+    const verb = type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
+    alert(`${noun} ${verb}`);
+  }
+
+  // Runtime comment filtering mirrors the blacklist path only: allowlist
+  // taps must never push the commenter into the channelId blacklist.
+  function filterCommentRuntime(type, data) {
+    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
+      const comments = document.querySelector('ytm-section-list-renderer');
+      storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
+      noActiveFilters = computeNoActiveFilters();
+      ObjectFilter(comments.data, filterRules.comments, [], false);
+    }
   }
 
   function menuOnTapMobile(event) {
@@ -763,45 +914,14 @@
       return;
     }
 
-    let type;
-    switch (data._btMenuAction) {
-      case 'block_channel': {
-        type = 'channelId';
-        break;
-      }
-      case 'allow_channel': {
-        type = 'whitelist';
-        break;
-      }
-      case 'unallow_channel': {
-        type = 'unwhitelist';
-        break;
-      }
-      case 'block_video': {
-        type = 'videoId';
-        break;
-      }
-      default:
-        return;
-    }
+    const type = mobileActionToBlockType(data._btMenuAction);
+    if (type === undefined) return;
 
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
     if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
-      // Allowlists keep playback going; blocks and removals stop it.
-      if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
-      const noun = type === 'videoId' ? 'Video' : 'Channel';
-      const verb =
-        type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
-      alert(`${noun} ${verb}`);
+      confirmSlimVideoTap(type);
     }
-    // Runtime comment filtering mirrors the blacklist path only: allowlist
-    // taps must never push the commenter into the channelId blacklist.
-    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
-      const comments = document.querySelector('ytm-section-list-renderer');
-      storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
-      noActiveFilters = computeNoActiveFilters();
-      ObjectFilter(comments.data, filterRules.comments, [], false);
-    }
+    filterCommentRuntime(type, data);
   }
 
   function getActionMenuData(context) {
@@ -820,141 +940,175 @@
     return { isDataFromRightHandSide, menuAction };
   }
 
-  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
-    let channelData, videoData;
-    let removeParent = true;
-    let stopPlayer = false;
+  // Video-player tags whose menu blocks the now-playing video + channel.
+  const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
 
-    // Video player context menu
-    if (
-      parentDom.tagName === 'YTD-VIDEO-PRIMARY-INFO-RENDERER' ||
-      parentDom.tagName === 'YTD-WATCH-METADATA'
-    ) {
-      const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
-      const playerData = pageManager.data || pageManager.getCurrentData();
-      const player = playerData.playerResponse;
+  // Resolve channel/video from the now-playing player + owner renderers. The
+  // owner id joins the player id when they disagree (collab/featured cases).
+  function playerMenuBlockData() {
+    const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
+    const playerData = pageManager.data || pageManager.getCurrentData();
+    const player = playerData.playerResponse;
 
-      const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
-      const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
+    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
 
-      const ownerUCID = getObjectByPath(
-        owner,
-        'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
-      );
-      let playerUCID = player.videoDetails.channelId;
-      if (ownerUCID && ownerUCID !== playerUCID) {
-        playerUCID = [playerUCID, ownerUCID];
-      }
-      channelData = {
+    const ownerUCID = getObjectByPath(
+      owner,
+      'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+    );
+    let playerUCID = player.videoDetails.channelId;
+    if (ownerUCID && ownerUCID !== playerUCID) {
+      playerUCID = [playerUCID, ownerUCID];
+    }
+    return {
+      channelData: {
         text: player.videoDetails.author,
         id: playerUCID,
-      };
-      videoData = {
+      },
+      videoData: {
         text: player.videoDetails.title,
         id: player.videoDetails.videoId,
-      };
-
-      removeParent = false;
-      stopPlayer = true;
-    } else if (isDataFromRightHandSide) {
-      channelData = {
-        id: parentData.blockTube?.metadata?.channelId,
-        text: parentData.blockTube?.metadata?.channelName,
-      };
-
-      videoData = {
-        id: parentData.blockTube?.metadata?.videoId,
-        text: parentData.blockTube?.metadata?.videoName,
-      };
-
-      removeParent = false;
-      stopPlayer = false;
-    } else {
-      const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
-      channelData = extracted.channel;
-      videoData = extracted.video;
-    }
-
-    let result;
-    switch (menuAction) {
-      case 'Block Channel':
-        result = { type: 'channelId', data: channelData };
-        break;
-      case 'Allow Channel':
-        result = { type: 'whitelist', data: channelData };
-        break;
-      case 'Remove from Whitelist':
-        result = { type: 'unwhitelist', data: channelData };
-        break;
-      case 'Block Video':
-        result = { type: 'videoId', data: videoData };
-        break;
-      default:
-        return null;
-    }
-
-    return {
-      ...result,
-      removeParent,
-      stopPlayer,
+      },
+      removeParent: false,
+      stopPlayer: true,
     };
   }
 
-  function getParentDomAndData(isDataFromRightHandSide, element) {
-    let parentDom;
-    let parentData;
+  // Resolve channel/video from the blockTube metadata stamped on lockup menus
+  // (right-hand/recommended context carries no _btOriginalAttr).
+  function stampedMenuBlockData(parentData) {
+    return {
+      channelData: {
+        id: parentData.blockTube?.metadata?.channelId,
+        text: parentData.blockTube?.metadata?.channelName,
+      },
+      videoData: {
+        id: parentData.blockTube?.metadata?.videoId,
+        text: parentData.blockTube?.metadata?.videoName,
+      },
+      removeParent: false,
+      stopPlayer: false,
+    };
+  }
 
-    if (isDataFromRightHandSide) {
-      // Traverse 4 levels up to find the parent DOM
-      parentDom = element?.parentElement?.parentElement?.parentElement?.parentElement;
+  // Resolve channel/video through the rule paths for the menu's renderer.
+  function ruleMenuBlockData(parentData) {
+    const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
+    return {
+      channelData: extracted.channel,
+      videoData: extracted.video,
+      removeParent: true,
+      stopPlayer: false,
+    };
+  }
 
-      if (!parentDom) {
-        console.warn('Could not find parentDom in recommended data context');
-        return {};
-      }
+  // Map a desktop menu label to its block-list type + payload. Null for
+  // unknown labels (the tap is ignored).
+  function menuLabelToBlockTarget(menuAction, channelData, videoData) {
+    switch (menuAction) {
+      case 'Block Channel':
+        return { type: 'channelId', data: channelData };
+      case 'Allow Channel':
+        return { type: 'whitelist', data: channelData };
+      case 'Remove from Whitelist':
+        return { type: 'unwhitelist', data: channelData };
+      case 'Block Video':
+        return { type: 'videoId', data: videoData };
+      default:
+        return null;
+    }
+  }
 
-      const parentDomData = parentDom.componentProps?.data;
-      if (!parentDomData) {
-        console.warn('Could not find componentProps.data');
-        return {};
-      }
-
-      const parentDomSymbols = Object.getOwnPropertySymbols(parentDomData);
-      if (parentDomSymbols.length === 0) {
-        console.warn('No symbols found in parentDomData');
-        return {};
-      }
-
-      parentData = parentDomData[parentDomSymbols[0]]?.value;
+  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
+    // Video player context menu
+    let resolved;
+    if (PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
+      resolved = playerMenuBlockData();
+    } else if (isDataFromRightHandSide) {
+      resolved = stampedMenuBlockData(parentData);
     } else {
-      // Try to find eventSink in multiple paths without using intermediate variable
-      const eventSink =
-        getObjectByPath(
-          element.parentElement?.parentElement,
-          'polymerController.forwarder_.eventSink',
-        ) ||
-        getObjectByPath(element.parentElement, '__dataHost.eventSink_') ||
-        getObjectByPath(element.parentElement, '__dataHost.forwarder_.eventSink') ||
-        getObjectByPath(element.parentElement, '__dataHost.hostElement.inst.eventSink_');
-
-      if (!eventSink) {
-        console.warn('Could not find eventSink in any expected path');
-        return {};
-      }
-
-      parentDom =
-        eventSink.parentComponent ||
-        eventSink.parentElement.__dataHost?.hostElement ||
-        eventSink.parentElement?.parentElement;
-      parentData = parentDom?.data;
-
-      if (!parentDom || !parentData) {
-        console.warn('Failed to extract parentDom or parentData');
-        return {};
-      }
+      resolved = ruleMenuBlockData(parentData);
     }
 
+    const result = menuLabelToBlockTarget(menuAction, resolved.channelData, resolved.videoData);
+    if (!result) return null;
+
+    return {
+      ...result,
+      removeParent: resolved.removeParent,
+      stopPlayer: resolved.stopPlayer,
+    };
+  }
+
+  // Right-hand (recommended) context: traverse 4 levels up, then read the
+  // symbol-keyed component data. Empty object when any hop is missing.
+  function getRecommendedParentData(element) {
+    // Traverse 4 levels up to find the parent DOM
+    const parentDom = element?.parentElement?.parentElement?.parentElement?.parentElement;
+
+    if (!parentDom) {
+      console.warn('Could not find parentDom in recommended data context');
+      return {};
+    }
+
+    const parentDomData = parentDom.componentProps?.data;
+    if (!parentDomData) {
+      console.warn('Could not find componentProps.data');
+      return {};
+    }
+
+    const parentDomSymbols = Object.getOwnPropertySymbols(parentDomData);
+    if (parentDomSymbols.length === 0) {
+      console.warn('No symbols found in parentDomData');
+      return {};
+    }
+
+    return { parentDom, parentData: parentDomData[parentDomSymbols[0]]?.value };
+  }
+
+  // Standard context: find the eventSink across the known Polymer/dataHost
+  // paths, then resolve the parent component. Empty object when missing.
+  function findEventSink(element) {
+    // Try to find eventSink in multiple paths without using intermediate variable
+    return (
+      getObjectByPath(
+        element.parentElement?.parentElement,
+        'polymerController.forwarder_.eventSink',
+      ) ||
+      getObjectByPath(element.parentElement, '__dataHost.eventSink_') ||
+      getObjectByPath(element.parentElement, '__dataHost.forwarder_.eventSink') ||
+      getObjectByPath(element.parentElement, '__dataHost.hostElement.inst.eventSink_')
+    );
+  }
+
+  // Standard context parent from the eventSink: component, host element, or
+  // grandparent — whichever resolves first. Empty object when data is missing.
+  function getEventSinkParentData(element) {
+    const eventSink = findEventSink(element);
+    if (!eventSink) {
+      console.warn('Could not find eventSink in any expected path');
+      return {};
+    }
+
+    const parentDom =
+      eventSink.parentComponent ||
+      eventSink.parentElement.__dataHost?.hostElement ||
+      eventSink.parentElement?.parentElement;
+    const parentData = parentDom?.data;
+
+    if (!parentDom || !parentData) {
+      console.warn('Failed to extract parentDom or parentData');
+      return {};
+    }
     return { parentDom, parentData };
+  }
+
+  function getParentDomAndData(isDataFromRightHandSide, element) {
+    if (isDataFromRightHandSide) {
+      return getRecommendedParentData(element);
+    }
+    return getEventSinkParentData(element);
   }
 
   // `message` is the inline placeholder left where the card was: "Blocked"
@@ -983,16 +1137,49 @@
     }
   }
 
+  // Desktop menu labels that carry a block/allow action. Anything else is a
+  // native entry — prevent the tap-through and ignore it.
+  const MENU_TAP_ACTIONS = ['Block Channel', 'Block Video', 'Allow Channel', 'Remove from Whitelist'];
+
+  // Apply the visible effect of a desktop menu tap: removals replace the card
+  // with a placeholder, blocks do the same, allow taps keep the card in place
+  // so it can be watched right away (the storage write is the whole effect).
+  function applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom) {
+    // No confirmation popups by design: allow taps keep the card in place so
+    // it can be watched right away, and removals already replace the card
+    // itself — the storage write above is the whole visible effect.
+    if (type === 'unwhitelist') {
+      if (removeParent) {
+        // Remove correct component based on parentDom
+        removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
+      } else if (stopPlayer) {
+        document.getElementById('movie_player').stopVideo();
+      }
+    } else if (type !== 'whitelist') {
+      if (removeParent) {
+        // Remove correct component based on parentDom
+        removeParentHelper(isDataFromRightHandSide, parentDom);
+      } else if (stopPlayer) {
+        document.getElementById('movie_player').stopVideo();
+      }
+    }
+  }
+
+  // Forward the tap to YouTube's own handler when the menu entry carries a
+  // service endpoint (native feedback flow).
+  function forwardMenuTap(event) {
+    if (this.data.serviceEndpoint) {
+      if (this.onTap) this.onTap(event);
+      else if (this.onTap_) this.onTap_(event);
+    }
+  }
+
   function menuOnTap(event) {
     if (storageData === undefined) return;
 
     const { isDataFromRightHandSide, menuAction } = getActionMenuData(this);
 
-    if (
-      !['Block Channel', 'Block Video', 'Allow Channel', 'Remove from Whitelist'].includes(
-        menuAction,
-      )
-    ) {
+    if (!MENU_TAP_ACTIONS.includes(menuAction)) {
       event.preventDefault();
       return;
     }
@@ -1019,27 +1206,6 @@
     // Notify system what data should be added to the block list
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
 
-    // No confirmation popups by design: allow taps keep the card in place so
-    // it can be watched right away, and removals already replace the card
-    // itself — the storage write above is the whole visible effect.
-    if (type === 'unwhitelist') {
-      if (removeParent) {
-        // Remove correct component based on parentDom
-        removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
-      } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
-      }
-    } else if (type !== 'whitelist') {
-      if (removeParent) {
-        // Remove correct component based on parentDom
-        removeParentHelper(isDataFromRightHandSide, parentDom);
-      } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
-      }
-    }
-
-    if (this.data.serviceEndpoint) {
-      if (this.onTap) this.onTap(event);
-      else if (this.onTap_) this.onTap_(event);
-    }
+    applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
+    forwardMenuTap.call(this, event);
   }

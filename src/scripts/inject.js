@@ -545,6 +545,59 @@
     }
   }
 
+  // Plain token fan-out: every array element owning the key contributes its
+  // value; a plain object contributes its own-key value. Misses add nothing.
+  function collectPlainKey(cur, key, next) {
+    if (cur instanceof Array) {
+      for (let k = 0; k < cur.length; k += 1) {
+        const el = cur[k];
+        if (el && typeof el === 'object' && has.call(el, key)) next.push(el[key]);
+      }
+    } else if (typeof cur === 'object' && has.call(cur, key)) {
+      next.push(cur[key]);
+    }
+  }
+
+  // Walk one numeric index across every candidate array, collecting hits.
+  // Out-of-range/non-array candidates contribute nothing.
+  function collectIndexStep(arr, idx) {
+    const collected = [];
+    for (let a = 0; a < arr.length; a += 1) {
+      const av = arr[a];
+      if (Array.isArray(av) && idx >= 0 && idx < av.length) collected.push(av[idx]);
+    }
+    return collected;
+  }
+
+  // Indexed token fan-out: own-key lookup on the token (when present), then
+  // indices in order. An empty intermediate set is a miss (adds nothing).
+  function collectIndexedKey(cur, seg, next) {
+    let base = cur;
+    if (seg.key !== undefined) {
+      if (!base || typeof base !== 'object' || !has.call(base, seg.key)) return;
+      base = base[seg.key];
+    }
+    let arr = [base];
+    for (let k = 0; k < seg.indices.length; k += 1) {
+      arr = collectIndexStep(arr, seg.indices[k]);
+      if (arr.length === 0) return;
+    }
+    for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
+  }
+
+  // One compiled-segment step: fan every current value out into `next`
+  // through the plain or indexed collector above.
+  function stepPathValues(values, seg) {
+    const next = [];
+    for (let v = 0; v < values.length; v += 1) {
+      const cur = values[v];
+      if (cur === undefined || cur === null) continue;
+      if (seg.indices === undefined) collectPlainKey(cur, seg.key, next);
+      else collectIndexedKey(cur, seg, next);
+    }
+    return next;
+  }
+
   // Collect EVERY value at a dotted path, not just the first. getObjectByPath
   // resolves an ARRAY node to its first element owning the key, so a second
   // collaborator id in a byline/dialog list is invisible to it. This walker
@@ -555,47 +608,7 @@
     const compiled = compiledPath(path);
     let values = [obj];
     for (let i = 0; i < compiled.length; i += 1) {
-      const seg = compiled[i];
-      const next = [];
-      for (let v = 0; v < values.length; v += 1) {
-        const cur = values[v];
-        if (cur === undefined || cur === null) continue;
-        if (seg.indices === undefined) {
-          if (cur instanceof Array) {
-            for (let k = 0; k < cur.length; k += 1) {
-              const el = cur[k];
-              if (el && typeof el === 'object' && has.call(el, seg.key)) next.push(el[seg.key]);
-            }
-          } else if (typeof cur === 'object' && has.call(cur, seg.key)) {
-            next.push(cur[seg.key]);
-          }
-        } else {
-          let base = cur;
-          if (seg.key !== undefined) {
-            if (!base || typeof base !== 'object' || !has.call(base, seg.key)) continue;
-            base = base[seg.key];
-          }
-          let arr = [base];
-          let ok = true;
-          for (let k = 0; k < seg.indices.length; k += 1) {
-            const idx = seg.indices[k];
-            const collected = [];
-            for (let a = 0; a < arr.length; a += 1) {
-              const av = arr[a];
-              if (Array.isArray(av) && idx >= 0 && idx < av.length) collected.push(av[idx]);
-            }
-            arr = collected;
-            if (arr.length === 0) {
-              ok = false;
-              break;
-            }
-          }
-          if (ok) {
-            for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
-          }
-        }
-      }
-      values = next;
+      values = stepPathValues(values, compiled[i]);
       if (values.length === 0) return values;
     }
     return values;
@@ -669,76 +682,111 @@
 
   // THE canonical dotted-path walker for this codebase (options.js `get` is a
   // mirror for the options page — it cannot import this bundle — and MUST stay
-  // in sync). Semantics, in order per `seg`:
-  //   1. plain token     -> own-key lookup; at an ARRAY node it resolves the
-  //      FIRST element that owns the key (`[].find(has)`). Trap: on a miss it
-  //      returns `def`, so typos and shape changes fail silently; and an array
-  //      of non-objects can never match. Never evaluates past a miss.
-  //   2. token[idx..]    -> own-key lookup on the token, then numeric indices
-  //      in order; out-of-range/negative/undefined -> `def`.
-  // Passing an array of paths walks each segment list in order (used per
-  // renderer rule where one property may live at several possible paths).
+  // in sync). Plain tokens do an own-key lookup (at an ARRAY node: the FIRST
+  // element owning the key); token[idx..] does the lookup then numeric indices
+  // in order. Any miss returns `def`, so typos/shape changes fail silently.
   // String paths are compiled once and cached (see compiledPath/pathCache).
+  // Miss sentinel: payload values come from JSON and can never be this
+  // reference, so an explicit `undefined` value still reads as a hit.
+  const PATH_MISS = {};
+
+  // Plain token (no brackets): own-key lookup, or first array element owning
+  // the key. Returns PATH_MISS on a miss, the value (possibly undefined) on
+  // a hit.
+  function readPlainKey(node, key) {
+    if (node instanceof Array) {
+      const found = node.find((o) => o !== null && o !== undefined && has.call(o, key));
+      if (found === undefined) return PATH_MISS;
+      return found[key];
+    }
+    if (!node || !has.call(node, key)) return PATH_MISS;
+    return node[key];
+  }
+
+  // Token with numeric indices: own-key lookup on the token (when present),
+  // then indices in order. Out-of-range/negative/non-array reads are misses.
+  function readIndexedKey(node, key, indices) {
+    let base = node;
+    if (key !== undefined) {
+      if (!base || !has.call(base, key)) return PATH_MISS;
+      base = base[key];
+    }
+    for (let k = 0; k < indices.length; k += 1) {
+      const idx = indices[k];
+      if (!Array.isArray(base) || idx < 0 || idx >= base.length) return PATH_MISS;
+      base = base[idx];
+    }
+    return base;
+  }
+
   function getObjectByPath(obj, path, def = undefined) {
     const compiled = compiledPath(path);
     let nextObj = obj;
-
     for (let i = 0; i < compiled.length; i += 1) {
       const seg = compiled[i];
-
-      if (seg.indices === undefined) {
-        // segment is a plain token (no bracket)
-        if (nextObj instanceof Array) {
-          // when we have an array of objects, find an element that contains the key v
-          const found = nextObj.find((o) => has.call(o, seg.key));
-          if (found === undefined) return def;
-          nextObj = found[seg.key];
-        } else {
-          if (!nextObj || !has.call(nextObj, seg.key)) return def;
-          nextObj = nextObj[seg.key];
-        }
-      } else {
-        // navigate to base property first (if present)
-        if (seg.key !== undefined) {
-          if (!nextObj || !has.call(nextObj, seg.key)) return def;
-          nextObj = nextObj[seg.key];
-        }
-        // then apply numeric indices in order
-        for (let k = 0; k < seg.indices.length; k += 1) {
-          const idx = seg.indices[k];
-          if (!Array.isArray(nextObj) || idx < 0 || idx >= nextObj.length) return def;
-          nextObj = nextObj[idx];
-        }
-      }
+      nextObj =
+        seg.indices === undefined
+          ? readPlainKey(nextObj, seg.key)
+          : readIndexedKey(nextObj, seg.key, seg.indices);
+      if (nextObj === PATH_MISS) return def;
     }
-
     return nextObj;
   }
 
-  // The channel a lockupViewModel card attributes itself to, or undefined.
-  // A static dotted path cannot express this: channel cards carry the channel
-  // in metadataRows[0], but channel-less cards (a channel's own /videos tab,
-  // "From <channel>" shelves) drop that row, so
-  // `metadataRows.metadataParts.text.content` silently resolves to the VIEW
-  // COUNT ("3.4M") instead — the wrong annotation on allowlist/block entries
-  // and false channelName-filter hits on view counts. Pass 1 is the precise
-  // signal: the channel part links to the channel (its text carries a
-  // commandRuns browseEndpoint id, the same path the channelId rule reads), so
-  // it survives accessibilityLabel changes that defeat the bare-label proxy.
-  // Pass 2 keeps the legacy bare-label heuristic (a part with neither
-  // accessibilityLabel nor leadingIcon), gated on >= 2 rows so single-row
-  // cards can never misread the view count. Pass 3 covers channel-type lockups
-  // (LOCKUP_CONTENT_TYPE_CHANNEL): they have no channel row at all, the
-  // channel name IS the card title.
-  // Pass 1b covers link-less channel rows: some home-feed/continuation
-  // lockups omit the commandRuns browseEndpoint link on the channel part
-  // (no avatar link to resolve), so the precise pass above finds nothing
-  // even though the channel text is present. NewPipe reads the same shape
-  // index-first (first metadata row = uploader, last row = views/date),
-  // so when 2+ rows with metadataParts exist the first row's first part is
-  // the channel by position. Single-row cards stay undefined (channel-less
-  // cards on a channel's own tabs carry only views/date — returning that
-  // row would misread the view count as the channel).
+  const BROWSE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  const LOCKUP_ROWS_PATH =
+    'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
+  const PART_LINK_PATH = 'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId';
+  const LOCKUP_TITLE_PATH = 'metadata.lockupMetadataViewModel.title';
+
+  // A metadata text node -> channel name, or undefined. Prefers `content`,
+  // falls back to runs-joined text (flattenRuns also covers simpleText).
+  function channelTextOf(text) {
+    if (!text || typeof text !== 'object') return undefined;
+    if (typeof text.content === 'string' && text.content.length > 0) return text.content;
+    const runs = flattenRuns(text);
+    if (typeof runs === 'string' && runs.length > 0) return runs;
+    return undefined;
+  }
+
+  // Precise channel signal: the part links to the channel (same browseId path
+  // the channelId rule reads), so it survives accessibilityLabel changes.
+  function partHasChannelLink(part) {
+    const linkId = getObjectByPath(part, PART_LINK_PATH);
+    return typeof linkId === 'string' && BROWSE_ID_RE.test(linkId);
+  }
+
+  // Legacy heuristic: a part with neither accessibilityLabel nor leadingIcon.
+  function isBarePart(part) {
+    return part.accessibilityLabel === undefined && part.leadingIcon === undefined;
+  }
+
+  // Shared metadataRows walker: first part (in row order) matching `isMatch`
+  // that yields text wins.
+  function findPartName(rows, isMatch) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      for (let j = 0; j < parts.length; j += 1) {
+        const part = parts[j];
+        if (!part || typeof part !== 'object' || !isMatch(part)) continue;
+        const name = channelTextOf(part.text);
+        if (name !== undefined) return name;
+      }
+    }
+    return undefined;
+  }
+
+  // Pass 1: the linked channel part (see partHasChannelLink).
+  function lockupLinkedChannelName(rows) {
+    return findPartName(rows, partHasChannelLink);
+  }
+
+  // Pass 1b: link-less channel rows (home-feed/continuation lockups omit the
+  // browseEndpoint link). Like NewPipe, read index-first: with 2+ rows the
+  // first row's first part is the channel by position. Single-row cards stay
+  // undefined — on a channel's own tabs that row is only views/date, and
+  // returning it would misread the view count as the channel.
   function lockupFirstRowChannelName(rows) {
     const partRows = [];
     for (let i = 0; i < rows.length; i += 1) {
@@ -748,67 +796,43 @@
     if (partRows.length < 2) return undefined;
     const first = partRows[0][0];
     if (!first || typeof first !== 'object') return undefined;
-    const text = first.text;
-    if (!text || typeof text !== 'object') return undefined;
-    if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-    const runs = flattenRuns(text);
-    if (typeof runs === 'string' && runs.length > 0) return runs;
-    return undefined;
+    return channelTextOf(first.text);
   }
 
-  function lockupChannelName(renderer) {
-    const rows = getObjectByPath(
-      renderer,
-      'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows',
-    );
-    if (Array.isArray(rows)) {
-      for (let i = 0; i < rows.length; i += 1) {
-        const parts = rows[i] && rows[i].metadataParts;
-        if (!Array.isArray(parts)) continue;
-        for (let j = 0; j < parts.length; j += 1) {
-          const part = parts[j];
-          if (!part || typeof part !== 'object') continue;
-          const linkId = getObjectByPath(
-            part,
-            'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
-          );
-          if (typeof linkId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(linkId)) continue;
-          const text = part.text;
-          if (!text || typeof text !== 'object') continue;
-          if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-          const runs = flattenRuns(text);
-          if (typeof runs === 'string' && runs.length > 0) return runs;
-        }
-      }
-      const firstRow = lockupFirstRowChannelName(rows);
-      if (firstRow !== undefined) return firstRow;
-      if (rows.length >= 2) {
-        for (let i = 0; i < rows.length; i += 1) {
-          const parts = rows[i] && rows[i].metadataParts;
-          if (!Array.isArray(parts)) continue;
-          for (let j = 0; j < parts.length; j += 1) {
-            const part = parts[j];
-            if (!part || typeof part !== 'object') continue;
-            if (part.accessibilityLabel !== undefined || part.leadingIcon !== undefined) continue;
-            const text = part.text;
-            if (!text || typeof text !== 'object') continue;
-            if (typeof text.content === 'string' && text.content.length > 0) return text.content;
-            const runs = flattenRuns(text);
-            if (typeof runs === 'string' && runs.length > 0) return runs;
-          }
-        }
-      }
-    }
+  // Pass 2: legacy bare-label heuristic (see isBarePart), gated on >= 2 rows
+  // so single-row cards can never misread the view count.
+  function lockupBareChannelName(rows) {
+    if (rows.length < 2) return undefined;
+    return findPartName(rows, isBarePart);
+  }
+
+  // Pass 3: channel-type lockups (LOCKUP_CONTENT_TYPE_CHANNEL) have no channel
+  // row at all — the channel name IS the card title.
+  function lockupTitleChannelName(renderer) {
     const contentType = getObjectByPath(renderer, 'contentType');
-    if (typeof contentType === 'string' && contentType.includes('CHANNEL')) {
-      const title = getObjectByPath(renderer, 'metadata.lockupMetadataViewModel.title');
-      if (typeof title === 'string' && title.length > 0) return title;
-      if (title && typeof title.content === 'string' && title.content.length > 0)
-        return title.content;
-      const flat = flattenRuns(title);
-      if (typeof flat === 'string' && flat.length > 0) return flat;
+    if (typeof contentType !== 'string' || !contentType.includes('CHANNEL')) return undefined;
+    const title = getObjectByPath(renderer, LOCKUP_TITLE_PATH);
+    if (typeof title === 'string') return title.length > 0 ? title : undefined;
+    return channelTextOf(title);
+  }
+
+  // The channel a lockupViewModel card attributes itself to, or undefined.
+  // No static dotted path expresses this: channel-less cards (a channel's own
+  // /videos tab, "From <channel>" shelves) drop the channel row, so a naive
+  // metadataRows path silently resolves to the VIEW COUNT instead — the wrong
+  // annotation and false channelName-filter hits. Tries linked -> positional
+  // -> bare-label -> channel-type title, in that order.
+  function lockupChannelName(renderer) {
+    const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
+    if (Array.isArray(rows)) {
+      const linked = lockupLinkedChannelName(rows);
+      if (linked !== undefined) return linked;
+      const positional = lockupFirstRowChannelName(rows);
+      if (positional !== undefined) return positional;
+      const bare = lockupBareChannelName(rows);
+      if (bare !== undefined) return bare;
     }
-    return undefined;
+    return lockupTitleChannelName(renderer);
   }
 
   // The channel that owns the current page (channel pages only), remembered
@@ -1075,6 +1099,56 @@
     return badges;
   }
 
+  // Whitelist-mode branch of matchField: only channelId is evaluated (every
+  // other field is bypassed), against the allowlist first, then the collab
+  // stack, then the fail-open ID-charset gate for structural renderers.
+  function matchFieldWhitelist(fieldName, value, obj, rendererKey, allValues) {
+    if (fieldName !== 'channelId') return { match: null, value };
+    const allowlist = storageData.filterData.whitelist || [];
+    const candidates = allValues && allValues.length > 0 ? allValues : [value];
+    if (entriesMatchAnyValue(allowlist, candidates)) return { match: null, value };
+    if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
+      return { match: null, value };
+    }
+    // Fail-open on non-attribution values: structural renderers carry URLs
+    // (tabRenderer), icon types (chips) or other non-IDs in the channelId
+    // slot. Those can never match an exact-ID allowlist entry, so blocking
+    // them deletes page chrome instead of content — channel tabs vanish and
+    // the channel page looks like it never loads. Real channel ids and the
+    // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
+    // the check below via the shared ID charset.
+    if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
+      return { match: null, value };
+    }
+    return { match: { name: fieldName, value }, value };
+  }
+
+  // Regex-props branch of matchField: channelId/channelName may carry several
+  // channels (search-result collab dialogs); a blocked one listed second must
+  // still match. Returns the match descriptor or null.
+  function matchFieldRegex(fieldName, value, filterEntries, allValues) {
+    // channelId/channelName may carry several channels (search-result collab
+    // dialogs); a blocked one listed second must still match.
+    const candidates = allValues && allValues.length > 0 ? allValues : [value];
+    const matchedEntry = filterEntries.find(
+      (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
+    );
+    if (matchedEntry) {
+      return { name: fieldName, value: String(matchedEntry).slice(0, 40) };
+    }
+    return null;
+  }
+
+  // VidLength branch of matchField: parses the duration and tests the
+  // mandatory [min, max] range. Returns match descriptor + numeric value.
+  function matchFieldDuration(fieldName, value, filterEntries) {
+    const vidLen = parseTime(value);
+    const match = matchesDurationRange(vidLen, filterEntries)
+      ? { name: fieldName, value: vidLen }
+      : null;
+    return { match, value: vidLen };
+  }
+
   // The blocking rules for one field, in priority order. Returns `match` - the
   // descriptor for matchedFilterField, or null - plus `value`, the form of the
   // value the custom JS filter should receive.
@@ -1083,24 +1157,7 @@
     // positive. Every other field is bypassed here (the caller additionally
     // skips their value extraction, so only channelId costs a read).
     if (storageData.options[OPT.WHITELIST_MODE]) {
-      if (fieldName !== 'channelId') return { match: null, value };
-      const allowlist = storageData.filterData.whitelist || [];
-      const candidates = allValues && allValues.length > 0 ? allValues : [value];
-      if (entriesMatchAnyValue(allowlist, candidates)) return { match: null, value };
-      if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
-        return { match: null, value };
-      }
-      // Fail-open on non-attribution values: structural renderers carry URLs
-      // (tabRenderer), icon types (chips) or other non-IDs in the channelId
-      // slot. Those can never match an exact-ID allowlist entry, so blocking
-      // them deletes page chrome instead of content — channel tabs vanish and
-      // the channel page looks like it never loads. Real channel ids and the
-      // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
-      // the check below via the shared ID charset.
-      if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
-        return { match: null, value };
-      }
-      return { match: { name: fieldName, value }, value };
+      return matchFieldWhitelist(fieldName, value, obj, rendererKey, allValues);
     }
 
     if (isPercentWatchedBlocked(fieldName, value, rendererKey)) {
@@ -1108,18 +1165,8 @@
     }
 
     if (regexPropsSet.has(fieldName) && filterEntries !== undefined) {
-      // channelId/channelName may carry several channels (search-result collab
-      // dialogs); a blocked one listed second must still match.
-      const candidates = allValues && allValues.length > 0 ? allValues : [value];
-      const matchedEntry = filterEntries.find(
-        (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
-      );
-      if (matchedEntry) {
-        return {
-          match: { name: fieldName, value: String(matchedEntry).slice(0, 40) },
-          value,
-        };
-      }
+      const match = matchFieldRegex(fieldName, value, filterEntries, allValues);
+      if (match) return { match, value };
     }
 
     if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
@@ -1127,11 +1174,7 @@
     }
 
     if (fieldName === 'vidLength') {
-      const vidLen = parseTime(value);
-      const match = matchesDurationRange(vidLen, filterEntries)
-        ? { name: fieldName, value: vidLen }
-        : null;
-      return { match, value: vidLen };
+      return matchFieldDuration(fieldName, value, filterEntries);
     }
 
     return { match: null, value };
@@ -1155,6 +1198,119 @@
     'compactVideoRenderer',
   ]);
 
+  // Skip fields with nothing to test: undefined paths, non-channelId fields
+  // in whitelist mode, and regex props with no entries and no JS filter.
+  function shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode) {
+    if (filterPath === undefined) return true;
+    // Whitelist mode evaluates channelId against the allowlist even when
+    // the blacklist is empty (empty allowlist = block, not skip); every
+    // other field is bypassed without value extraction.
+    if (whitelistMode && fieldName !== 'channelId') return true;
+    return (
+      !whitelistMode &&
+      regexPropsSet.has(fieldName) &&
+      (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
+    );
+  }
+
+  // Resolve one field's value, falling back to the page channel for
+  // unattributed per-video cards on a channel's own page (see
+  // pageChannelFallbackRenderers). Returns undefined when there is nothing.
+  function resolveFieldValue(obj, filterPath, fieldName, rendererKey) {
+    const value = getFlattenByPath(obj, filterPath);
+    if (value !== undefined) return value;
+    // On a channel's own page its video cards carry no channel id; without
+    // the page fallback they can neither be blacklisted nor (in whitelist
+    // mode) hidden for being non-allowlisted — the page looks unblockable.
+    // Structural renderers keep the fail-open rule (see
+    // pageChannelFallbackRenderers): only per-video cards inherit the page.
+    if (
+      fieldName === 'channelId' &&
+      pageChannel !== null &&
+      pageChannelFallbackRenderers.has(rendererKey)
+    ) {
+      return pageChannel.id;
+    }
+    return undefined;
+  }
+
+  // Evaluate one field against its filter entries. Sets matchedFilterField and
+  // returns true on a block; otherwise records the JS-filter value and false.
+  function evaluateOneField(fieldName, value, filterEntries, obj, rendererKey, allValues) {
+    const { match, value: jsValue } = matchField(
+      fieldName,
+      value,
+      filterEntries,
+      obj,
+      rendererKey,
+      allValues,
+    );
+    if (match) {
+      matchedFilterField = match;
+      return { blocked: true, jsValue };
+    }
+    return { blocked: false, jsValue };
+  }
+
+  // Run the user JS filter over the friendly object. Forces the return into
+  // boolean and records the jsFilter match descriptor on a block.
+  function applyJsFilter(friendlyVideoObj, rendererKey) {
+    let doBlock = false;
+    // force return value into boolean just in case someone tries returning something else
+    try {
+      doBlock = !!jsFilter(friendlyVideoObj, rendererKey);
+    } catch (e) {
+      console.error(
+        'Custom function exception',
+        e,
+        'friendlyVideoObj: ',
+        friendlyVideoObj,
+        'rendererKey: ',
+        rendererKey,
+      );
+    }
+    if (doBlock) {
+      matchedFilterField = { name: 'jsFilter' };
+    }
+    return doBlock;
+  }
+
+  // Collect multi-channel candidates for collab dialogs so a non-first
+  // match still blocks/allows; every other field needs no extra lookup.
+  function collabCandidates(obj, filterPath, fieldName) {
+    // channelId/channelName can list several channels (collab dialogs);
+    // collect them all so a non-first match still blocks/allows.
+    return fieldName === 'channelId' || fieldName === 'channelName'
+      ? getFlattenByPathAll(obj, filterPath)
+      : undefined;
+  }
+
+  // Scan every field in filterPaths: resolve, evaluate, record JS values.
+  // Returns the block flag; matchedFilterField is set on a property match.
+  function scanFilterFields(filterPaths, obj, rendererKey, fd, whitelistMode, friendlyVideoObj) {
+    for (const fieldName of Object.keys(filterPaths)) {
+      const filterPath = filterPaths[fieldName];
+      const filterEntries = fd[fieldName];
+      if (shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode)) continue;
+
+      const value = resolveFieldValue(obj, filterPath, fieldName, rendererKey);
+      if (value === undefined) continue;
+
+      const { blocked, jsValue } = evaluateOneField(
+        fieldName,
+        value,
+        filterEntries,
+        obj,
+        rendererKey,
+        collabCandidates(obj, filterPath, fieldName),
+      );
+      if (blocked) return true;
+
+      if (jsFilterEnabled) friendlyVideoObj[fieldName] = normalizeForJsFilter(fieldName, jsValue);
+    }
+    return false;
+  }
+
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
@@ -1164,80 +1320,18 @@
     if (document.location.pathname === '/feed/history' && opts[OPT.DISABLE_ON_HISTORY])
       return false;
 
-    let doBlock = false;
     const whitelistMode = !!opts[OPT.WHITELIST_MODE];
-    for (const fieldName of Object.keys(filterPaths)) {
-      const filterPath = filterPaths[fieldName];
-      if (filterPath === undefined) continue;
-
-      // Whitelist mode evaluates channelId against the allowlist even when
-      // the blacklist is empty (empty allowlist = block, not skip); every
-      // other field is bypassed without value extraction.
-      if (whitelistMode && fieldName !== 'channelId') continue;
-      const filterEntries = fd[fieldName];
-      if (
-        !whitelistMode &&
-        regexPropsSet.has(fieldName) &&
-        (filterEntries === undefined || (filterEntries.length === 0 && !jsFilterEnabled))
-      )
-        continue;
-
-      let value = getFlattenByPath(obj, filterPath);
-      if (value === undefined) {
-        // On a channel's own page its video cards carry no channel id; without
-        // the page fallback they can neither be blacklisted nor (in whitelist
-        // mode) hidden for being non-allowlisted — the page looks unblockable.
-        // Structural renderers keep the fail-open rule (see
-        // pageChannelFallbackRenderers): only per-video cards inherit the page.
-        if (
-          fieldName === 'channelId' &&
-          pageChannel !== null &&
-          pageChannelFallbackRenderers.has(rendererKey)
-        ) {
-          value = pageChannel.id;
-        } else {
-          continue;
-        }
-      }
-
-      const { match, value: jsValue } = matchField(
-        fieldName,
-        value,
-        filterEntries,
-        obj,
-        rendererKey,
-        // channelId/channelName can list several channels (collab dialogs);
-        // collect them all so a non-first match still blocks/allows.
-        fieldName === 'channelId' || fieldName === 'channelName'
-          ? getFlattenByPathAll(obj, filterPath)
-          : undefined,
-      );
-      if (match) {
-        matchedFilterField = match;
-        doBlock = true;
-        break;
-      }
-
-      if (jsFilterEnabled) friendlyVideoObj[fieldName] = normalizeForJsFilter(fieldName, jsValue);
-    }
+    let doBlock = scanFilterFields(
+      filterPaths,
+      obj,
+      rendererKey,
+      fd,
+      whitelistMode,
+      friendlyVideoObj,
+    );
 
     if (!doBlock && jsFilterEnabled) {
-      // force return value into boolean just in case someone tries returning something else
-      try {
-        doBlock = !!jsFilter(friendlyVideoObj, rendererKey);
-      } catch (e) {
-        console.error(
-          'Custom function exception',
-          e,
-          'friendlyVideoObj: ',
-          friendlyVideoObj,
-          'rendererKey: ',
-          rendererKey,
-        );
-      }
-      if (doBlock) {
-        matchedFilterField = { name: 'jsFilter' };
-      }
+      doBlock = applyJsFilter(friendlyVideoObj, rendererKey);
     }
     if (doBlock && rendererKey === 'commentEntityPayload') {
       this.blockedComments.push(obj.properties.commentId);
@@ -1387,6 +1481,109 @@
     return false;
   }
 
+  // Run one matched rule's customFunc (if any) and delete the renderer on
+  // success. Returns the rule's related flag (or true) when deleted.
+  function applyMatchedRule(filterCtx, obj, rule) {
+    let customRet = true;
+    if (rule.customFunc !== undefined) {
+      try {
+        customRet = rule.customFunc.call(filterCtx, obj, rule.name);
+      } catch (e) {
+        console.error('customFunc Exception (renderer left in place)');
+        console.error(e);
+        customRet = false;
+      }
+    }
+    if (customRet) {
+      delete obj[rule.name];
+      return rule.related || true;
+    }
+    return false;
+  }
+
+  // Match this node's renderers against the rule table and delete hits.
+  // Returns the deletePrev flag for the pruned parent, or false for arrays
+  // (numerically keyed: they can never match a rule name — skipped here).
+  function matchAndDeleteRules(filterCtx, obj, keys) {
+    let deletePrev = false;
+    if (keys === undefined) return deletePrev;
+    // object filtering
+    let matchedRules = [];
+    try {
+      matchedRules = filterCtx.matchFilterRule(obj, keys);
+    } catch (e) {
+      console.error('matchFilterRule Exception (renderer left in place)');
+      console.error(e);
+    }
+    matchedRules.forEach((r) => {
+      const deleted = applyMatchedRule(filterCtx, obj, r);
+      if (deleted) deletePrev = deleted;
+    });
+    return deletePrev;
+  }
+
+  // Filter one child subtree, returning its delete flag (or undefined for
+  // primitives, which can never match a renderer). Child throws leave the
+  // subtree in place.
+  function filterOneChild(filterCtx, child) {
+    if (typeof child !== 'object' || child === null) return undefined;
+    try {
+      return filterCtx.filter(child);
+    } catch (e) {
+      console.error('ObjectFilter child exception (subtree left in place)');
+      console.error(e);
+      return false;
+    }
+  }
+
+  // Splice a deleted array child (plus its related sibling when the flag is
+  // a key name — the missing-data hack). No-op for object children.
+  function spliceDeletedChild(obj, idx, childDel, keys) {
+    if (!childDel || keys !== undefined) return;
+    obj.splice(idx, 1);
+    // Hack for deleting related objects with missing data
+    if (typeof childDel === 'string' && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
+      obj.splice(idx, 1);
+    }
+  }
+
+  // Walk children backwards (easier splice), filtering each subtree and
+  // pruning emptied containers. Returns true when a child was deleted.
+  function filterChildren(filterCtx, obj, keys, len) {
+    let deleted = false;
+    // loop backwards for easier splice
+    for (let i = len - 1; i >= 0; i -= 1) {
+      const idx = keys ? keys[i] : i;
+      if (obj[idx] === undefined) continue;
+
+      // filter next child (skip primitives: they can never match a renderer)
+      // also if current object is an array, splice child
+      const childDel = filterOneChild(filterCtx, obj[idx]);
+      if (childDel && keys === undefined) {
+        deleted = true;
+        spliceDeletedChild(obj, idx, childDel, keys);
+      }
+
+      // if next child is an empty array that we filtered, mark parent for removal.
+      if (collapseEmptyContainers(obj, idx, childDel)) {
+        deleted = true;
+      }
+    }
+    return deleted;
+  }
+
+  // Attach context-menu entries to this node when the filter runs with menus
+  // enabled. Menu throws never break filtering — they are logged only.
+  function maybeAddContextMenus(filterCtx, obj, keys) {
+    if (!filterCtx.contextMenus) return;
+    try {
+      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+    } catch (e) {
+      console.error('addContextMenus Exception');
+      console.error(e);
+    }
+  }
+
   ObjectFilter.prototype.filter = function (obj = this.object) {
     let deletePrev = false;
 
@@ -1405,76 +1602,13 @@
     } else {
       keys = Object.keys(obj);
       len = keys.length;
-
-      // object filtering
-      let matchedRules = [];
-      try {
-        matchedRules = this.matchFilterRule(obj, keys);
-      } catch (e) {
-        console.error('matchFilterRule Exception (renderer left in place)');
-        console.error(e);
-      }
-      matchedRules.forEach((r) => {
-        let customRet = true;
-        if (r.customFunc !== undefined) {
-          try {
-            customRet = r.customFunc.call(this, obj, r.name);
-          } catch (e) {
-            console.error('customFunc Exception (renderer left in place)');
-            console.error(e);
-            customRet = false;
-          }
-        }
-        if (customRet) {
-          delete obj[r.name];
-          deletePrev = r.related || true;
-        }
-      });
+      const matched = matchAndDeleteRules(this, obj, keys);
+      if (matched) deletePrev = matched;
     }
 
-    // loop backwards for easier splice
-    for (let i = len - 1; i >= 0; i -= 1) {
-      const idx = keys ? keys[i] : i;
-      if (obj[idx] === undefined) continue;
+    if (filterChildren(this, obj, keys, len)) deletePrev = true;
 
-      // filter next child (skip primitives: they can never match a renderer)
-      // also if current object is an array, splice child
-      const child = obj[idx];
-      let childDel;
-      if (typeof child === 'object' && child !== null) {
-        try {
-          childDel = this.filter(child);
-        } catch (e) {
-          console.error('ObjectFilter child exception (subtree left in place)');
-          console.error(e);
-          childDel = false;
-        }
-      } else {
-        childDel = undefined;
-      }
-      if (childDel && keys === undefined) {
-        deletePrev = true;
-        obj.splice(idx, 1);
-        // Hack for deleting related objects with missing data
-        if (typeof childDel === 'string' && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
-          obj.splice(idx, 1);
-        }
-      }
-
-      // if next child is an empty array that we filtered, mark parent for removal.
-      if (collapseEmptyContainers(obj, idx, childDel)) {
-        deletePrev = true;
-      }
-    }
-
-    if (this.contextMenus) {
-      try {
-        !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
-      } catch (e) {
-        console.error('addContextMenus Exception');
-        console.error(e);
-      }
-    }
+    maybeAddContextMenus(this, obj, keys);
     return deletePrev;
   };
 
@@ -1605,6 +1739,39 @@
     });
   }
 
+  // Mobile watch-next feed section: the itemSectionRenderer whose target is
+  // the watch-next feed, or undefined when the feed has no such section.
+  function findWatchNextSection(nextResults) {
+    for (const [, v] of nextResults.entries()) {
+      if (
+        has.call(v, 'itemSectionRenderer') &&
+        v.itemSectionRenderer.targetId === 'watch-next-feed'
+      ) {
+        return v.itemSectionRenderer;
+      }
+    }
+    return undefined;
+  }
+
+  // Copy the next-video renderer fields onto the mobile autoplay overlay so
+  // playback continues from the right video after the block.
+  function applyNextVideoToOverlay(playerOverlay, nextVideoRenderer) {
+    playerOverlay.videoTitle = nextVideoRenderer.headline;
+    playerOverlay.byline = nextVideoRenderer.shortBylineText;
+    playerOverlay.background = nextVideoRenderer.thumbnail;
+    playerOverlay.nextButton.buttonRenderer.navigationEndpoint =
+      nextVideoRenderer.navigationEndpoint;
+    playerOverlay.thumbnailOverlays = nextVideoRenderer.thumbnailOverlays;
+    playerOverlay.videoId = nextVideoRenderer.videoId;
+    playerOverlay.shortViewCountText = nextVideoRenderer.shortViewCountText;
+  }
+
+  // Point the mobile autoplay set at the next video's endpoints.
+  function applyNextVideoToAutoplaySet(autoplaySet, nextVideoRenderer) {
+    autoplaySet.commandMetadata = nextVideoRenderer.navigationEndpoint.commandMetadata;
+    autoplaySet.watchEndpoint = nextVideoRenderer.navigationEndpoint.watchEndpoint;
+  }
+
   function fixAutoPlayMobile() {
     const playerOverlay = getObjectByPath(
       this.object,
@@ -1618,27 +1785,11 @@
     );
     if (!nextResults) return;
 
-    let nextSection;
-    for (const [, v] of nextResults.entries()) {
-      if (
-        has.call(v, 'itemSectionRenderer') &&
-        v.itemSectionRenderer.targetId === 'watch-next-feed'
-      ) {
-        nextSection = v.itemSectionRenderer;
-      }
-    }
-
+    const nextSection = findWatchNextSection(nextResults);
     const nextVideoRenderer = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
     if (!nextVideoRenderer) return;
 
-    playerOverlay.videoTitle = nextVideoRenderer.headline;
-    playerOverlay.byline = nextVideoRenderer.shortBylineText;
-    playerOverlay.background = nextVideoRenderer.thumbnail;
-    playerOverlay.nextButton.buttonRenderer.navigationEndpoint =
-      nextVideoRenderer.navigationEndpoint;
-    playerOverlay.thumbnailOverlays = nextVideoRenderer.thumbnailOverlays;
-    playerOverlay.videoId = nextVideoRenderer.videoId;
-    playerOverlay.shortViewCountText = nextVideoRenderer.shortViewCountText;
+    applyNextVideoToOverlay(playerOverlay, nextVideoRenderer);
 
     const autoplaySet = getObjectByPath(
       this.object,
@@ -1646,8 +1797,17 @@
     );
     if (!autoplaySet) return;
 
-    autoplaySet.commandMetadata = nextVideoRenderer.navigationEndpoint.commandMetadata;
-    autoplaySet.watchEndpoint = nextVideoRenderer.navigationEndpoint.watchEndpoint;
+    applyNextVideoToAutoplaySet(autoplaySet, nextVideoRenderer);
+  }
+
+  // Mobile next-video redirect: navigate to the feed's next video and drop
+  // the blocked contents. No-op on playlists (they provide the next row).
+  function redirectMobileToNextVideo(nextSection) {
+    const nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
+    if (!nextAutoPlayObj) return;
+
+    document.location = `watch?v=${nextAutoPlayObj.videoId}`;
+    delete this.object.contents;
   }
 
   function redirectToNextMobile() {
@@ -1671,23 +1831,8 @@
       return;
     }
 
-    let nextSection;
-    for (const [, v] of nextResults.entries()) {
-      if (
-        has.call(v, 'itemSectionRenderer') &&
-        v.itemSectionRenderer.targetId === 'watch-next-feed'
-      ) {
-        nextSection = v.itemSectionRenderer;
-      }
-    }
-
-    if (!nextSection) nextSection = nextResults;
-
-    const nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
-    if (!nextAutoPlayObj) return;
-
-    document.location = `watch?v=${nextAutoPlayObj.videoId}`;
-    delete this.object.contents;
+    const nextSection = findWatchNextSection(nextResults) || nextResults;
+    redirectMobileToNextVideo.call(this, nextSection);
   }
 
   // Break out of the playlist context check / navigation decision: playlists
@@ -1807,49 +1952,78 @@
     }
   }
 
+  // One SPF part carrying an embedded player: hydrate the raw response and
+  // run the player filter. Guards the JSON parse — a malformed payload passes
+  // through unfiltered.
+  function filterSpfPlayer(obj) {
+    try {
+      const player_resp = getObjectByPath(obj.player, 'args.player_response');
+      obj.player.args.raw_player_response = JSON.parse(player_resp);
+    } catch (e) {}
+    playerHasBeenBlocked = false;
+    ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
+  }
+
+  // One SPF part carrying a top-level playerResponse: filter it directly.
+  function filterSpfPlayerResponse(obj) {
+    playerHasBeenBlocked = false;
+    ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
+  }
+
+  // Resolve the rule set + post actions for an SPF response/data part from
+  // the request pathname. Watch pages reuse the main rules with autoplay
+  // fixups; unknown paths fall through to main as well.
+  function spfRulesFor(pathname) {
+    let rules;
+    let postActions = [];
+    switch (pathname) {
+      case '/guide_ajax':
+        rules = filterRules.guide;
+        break;
+      case '/comment_service_ajax':
+      case '/live_chat/get_live_chat':
+        rules = filterRules.comments;
+        break;
+      case '/watch':
+        postActions = [fixAutoplay];
+        if (playerHasBeenBlocked) postActions.push(redirectToNext);
+      // the watch page uses the same catch-all rule set below
+      // falls through
+      default:
+        rules = filterRules.main;
+    }
+    return { rules, postActions };
+  }
+
+  // One SPF part carrying response/data: filter it with the pathname's rules.
+  function filterSpfPayload(obj, pathname) {
+    const { rules, postActions } = spfRulesFor(pathname);
+    ObjectFilter(obj.response || obj.data, rules, postActions, true);
+  }
+
+  // Filter one SPF part: player, playerResponse, and response/data shapes
+  // each get their own helper above.
+  function filterSpfPart(obj, pathname) {
+    if (has.call(obj, 'player')) {
+      filterSpfPlayer(obj);
+    }
+
+    if (has.call(obj, 'playerResponse')) {
+      filterSpfPlayerResponse(obj);
+    }
+
+    if (has.call(obj, 'response') || has.call(obj, 'data')) {
+      filterSpfPayload(obj, pathname);
+    }
+  }
+
   function spfFilter(url, resp) {
     if (storageData === undefined) return;
 
     let ytDataArr = resp.part || resp.response.parts || resp.response;
     ytDataArr = ytDataArr instanceof Array ? ytDataArr : [ytDataArr];
 
-    ytDataArr.forEach((obj) => {
-      if (has.call(obj, 'player')) {
-        try {
-          const player_resp = getObjectByPath(obj.player, 'args.player_response');
-          obj.player.args.raw_player_response = JSON.parse(player_resp);
-        } catch (e) {}
-        playerHasBeenBlocked = false;
-        ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
-      }
-
-      if (has.call(obj, 'playerResponse')) {
-        playerHasBeenBlocked = false;
-        ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
-      }
-
-      if (has.call(obj, 'response') || has.call(obj, 'data')) {
-        let rules;
-        let postActions = [];
-        switch (url.pathname) {
-          case '/guide_ajax':
-            rules = filterRules.guide;
-            break;
-          case '/comment_service_ajax':
-          case '/live_chat/get_live_chat':
-            rules = filterRules.comments;
-            break;
-          case '/watch':
-            postActions = [fixAutoplay];
-            if (playerHasBeenBlocked) postActions.push(redirectToNext);
-          // the watch page uses the same catch-all rule set below
-          // falls through
-          default:
-            rules = filterRules.main;
-        }
-        ObjectFilter(obj.response || obj.data, rules, postActions, true);
-      }
-    });
+    ytDataArr.forEach((obj) => filterSpfPart(obj, url.pathname));
   }
 
   function blockMixes(data) {
@@ -1984,6 +2158,54 @@
     return opts?.[key] !== false;
   }
 
+  // The toast notification item shown after a mobile block tap ("Channel
+  // blocked" rendered in place by YouTube).
+  function buildToastNotificationItem(toastText) {
+    return {
+      notificationMultiActionRenderer: {
+        responseText: {
+          runs: [{ text: toastText }],
+          accessibility: {
+            accessibilityData: {
+              label: toastText,
+            },
+          },
+        },
+      },
+    };
+  }
+
+  // The feedback endpoint for a mobile block entry: optionally hides the
+  // enclosing card and shows the toast notification above.
+  function buildBlockFeedbackEndpoint(toastText, hideContainer) {
+    return {
+      uiActions: {
+        hideEnclosingContainer: hideContainer,
+      },
+      actions: [
+        {
+          replaceEnclosingAction: {
+            item: buildToastNotificationItem(toastText),
+          },
+        },
+      ],
+    };
+  }
+
+  // The service endpoint stub mobile block entries carry (a no-op data URL —
+  // the real work happens in menuOnTapMobile via the _bt* fields).
+  function buildBlockServiceEndpoint(hideContainer, toastText) {
+    return {
+      commandMetadata: {
+        webCommandMetadata: {
+          sendPost: true,
+          apiUrl: 'data:text/plain;base64,Cg==',
+        },
+      },
+      feedbackEndpoint: buildBlockFeedbackEndpoint(toastText, hideContainer),
+    };
+  }
+
   // Mobile "up next" cards carry no block actions, so we inject full
   // menuServiceItemRenderer entries ourselves; YT renders the toast text
   // ("Channel blocked") in place after the tap.
@@ -2006,37 +2228,7 @@
         text: { runs: [{ text: label }] },
         icon: { iconType },
         trackingParams: 'Cg==',
-        serviceEndpoint: {
-          commandMetadata: {
-            webCommandMetadata: {
-              sendPost: true,
-              apiUrl: 'data:text/plain;base64,Cg==',
-            },
-          },
-          feedbackEndpoint: {
-            uiActions: {
-              hideEnclosingContainer: hideContainer,
-            },
-            actions: [
-              {
-                replaceEnclosingAction: {
-                  item: {
-                    notificationMultiActionRenderer: {
-                      responseText: {
-                        runs: [{ text: toastText }],
-                        accessibility: {
-                          accessibilityData: {
-                            label: toastText,
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        },
+        serviceEndpoint: buildBlockServiceEndpoint(hideContainer, toastText),
       },
     };
   }
@@ -2097,6 +2289,203 @@
     };
   }
 
+  // Mobile renderers whose cards ship no block actions (see
+  // buildBlockActionMenuItem): the menu entries are built from scratch.
+  const MOBILE_UP_NEXT_ATTRS = [
+    'videoWithContextRenderer',
+    'compactVideoRenderer',
+    'movieRenderer',
+    'compactMovieRenderer',
+    'playlistVideoRenderer',
+    'reelItemRenderer',
+    'commentRenderer',
+  ];
+
+  // Resolve the mutable menu-items array for a mobile up-next card, creating
+  // the actionMenu for comments. Undefined when the card has no menu at all.
+  function resolveMobileUpNextItems(obj, attr) {
+    let items;
+    if (has.call(obj[attr], 'menu')) {
+      items = getObjectByPath(obj[attr], 'menu.menuRenderer.items');
+    }
+    if (has.call(obj[attr], 'actionMenu')) {
+      items = obj[attr].actionMenu.menuRenderer.items;
+    } else if (attr === 'commentRenderer') {
+      obj[attr].actionMenu = { menuRenderer: { items: [] } };
+      items = obj[attr].actionMenu.menuRenderer.items;
+    }
+    return items;
+  }
+
+  // Whitelist mode: the visible cards are already allowlisted, so an
+  // "Allow Channel" entry would be pointless — offer removal instead.
+  function pushMobileRemovalEntry(items, attr, channelData) {
+    if (channelData.id)
+      items.push(
+        buildBlockActionMenuItem(
+          attr,
+          'unallow_channel',
+          channelData,
+          'Remove from Whitelist',
+          'Removed from whitelist',
+          true,
+          'REMOVE',
+        ),
+      );
+  }
+
+  // Block mode additionally offers allowlisting, so the allowlist can be
+  // built while browsing normally.
+  function pushMobileBlockEntries(items, attr, channelData, videoData) {
+    if (channelData.id && showMenuEntry(OPT.MENU_BLOCK_CHANNEL))
+      items.push(
+        buildBlockActionMenuItem(
+          attr,
+          'block_channel',
+          channelData,
+          'Block Channel',
+          'Channel blocked',
+        ),
+      );
+    if (videoData.id && showMenuEntry(OPT.MENU_BLOCK_VIDEO))
+      items.push(
+        buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
+      );
+    if (channelData.id && showMenuEntry(OPT.MENU_ALLOW_CHANNEL))
+      items.push(
+        buildBlockActionMenuItem(
+          attr,
+          'allow_channel',
+          channelData,
+          'Allow Channel',
+          'Channel allowed',
+          false,
+          'CHECK',
+        ),
+      );
+  }
+
+  // Mobile Up Next videos: same menuServiceItemRenderer type the desktop
+  // overflow menu uses, but these cards ship no block actions, so we build
+  // the full entries ourselves (see buildBlockActionMenuItem).
+  function addMobileUpNextMenus(obj, attr, channelData, videoData) {
+    const items = resolveMobileUpNextItems(obj, attr);
+    if (!items) return;
+    if (isWhitelistMenuMode()) {
+      pushMobileRemovalEntry(items, attr, channelData);
+      return;
+    }
+    pushMobileBlockEntries(items, attr, channelData, videoData);
+  }
+
+  // Channel-button definitions for the mobile video-page action bar. In
+  // whitelist mode only removal is offered; in block mode the entries honor
+  // their General-toggle visibility (see showMenuEntry).
+  function slimChannelButtonDefs(allowMode) {
+    if (allowMode) {
+      return [{ action: 'unallow_channel', label: 'Remove from Whitelist' }];
+    }
+    return [
+      { action: 'block_channel', label: 'Block Channel', option: OPT.MENU_BLOCK_CHANNEL },
+      { action: 'allow_channel', label: 'Allow Channel', option: OPT.MENU_ALLOW_CHANNEL },
+    ].filter(({ option }) => option === undefined || showMenuEntry(option));
+  }
+
+  // One slim action-bar buttonRenderer bound to BlockTube data: shared body
+  // for the video and channel buttons (they differ only in data/action/label
+  // and the navigation endpoint kind).
+  function buildSlimButtonRenderer(data, action, label, navigationEndpoint) {
+    return {
+      _btOriginalData: data,
+      _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
+      _btMenuAction: action,
+      style: 'STYLE_DEFAULT',
+      size: 'SIZE_DEFAULT',
+      isDisabled: false,
+      text: {
+        runs: [
+          {
+            text: label,
+          },
+        ],
+      },
+      accessibility: {
+        label,
+      },
+      accessibilityData: {
+        accessibilityData: {
+          label,
+        },
+      },
+      navigationEndpoint,
+    };
+  }
+
+  // The "Block Video" button for the mobile video-page action bar.
+  function buildSlimVideoButton(videoData) {
+    return {
+      slimMetadataButtonRenderer: {
+        button: {
+          buttonRenderer: buildSlimButtonRenderer(videoData, 'block_video', 'Block Video', {}),
+        },
+      },
+    };
+  }
+
+  // Render one channel-button definition into a slimMetadataButtonRenderer
+  // entry bound to the video's channel (see addMobileSlimMenus).
+  function renderSlimChannelButton({ action, label }, channelData) {
+    return {
+      slimMetadataButtonRenderer: {
+        button: {
+          buttonRenderer: buildSlimButtonRenderer(channelData, action, label, {
+            commandMetadata: { webCommandMetadata: { ignoreNavigation: true } },
+            urlEndpoint: {},
+          }),
+        },
+      },
+    };
+  }
+
+  // The mobile action-bar wrapper holding the video + channel buttons, with
+  // a static "More" overflow label.
+  function buildMobileVideoMenu(videoButton, channelButtonsRendered, includeVideo) {
+    return {
+      slimVideoActionBarRenderer: {
+        buttons: [
+          // Videos can't be allowlisted: no video button in whitelist mode.
+          ...(includeVideo ? [videoButton] : []),
+          ...channelButtonsRendered,
+        ],
+        overflowMenuText: {
+          runs: [
+            {
+              text: 'More',
+            },
+          ],
+        },
+        overflowAccessibilityData: {
+          label: 'More',
+        },
+      },
+    };
+  }
+
+  // Mobile Video page: the action bar under the video uses a different
+  // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
+  function addMobileSlimMenus(obj, attr, channelData, videoData) {
+    const items = obj[attr].contents;
+    if (!items) return;
+    const allowMode = isWhitelistMenuMode();
+    const channelButtons = slimChannelButtonDefs(allowMode);
+    const videoButton = buildSlimVideoButton(videoData);
+    const channelButtonsRendered = channelButtons.map((def) =>
+      renderSlimChannelButton(def, channelData),
+    );
+    const includeVideo = !allowMode && showMenuEntry(OPT.MENU_BLOCK_VIDEO);
+    items.splice(2, 0, buildMobileVideoMenu(videoButton, channelButtonsRendered, includeVideo));
+  }
+
   function addContextMenusMobile(obj, keys) {
     const attr = resolveContextMenuAttr(obj, keys);
     if (attr === undefined) return;
@@ -2104,243 +2493,100 @@
     const parentData = obj[attr];
     const { channel: channelData, video: videoData } = channelAndVideoFrom(parentData, attr);
 
-    if (
-      [
-        'videoWithContextRenderer',
-        'compactVideoRenderer',
-        'movieRenderer',
-        'compactMovieRenderer',
-        'playlistVideoRenderer',
-        'reelItemRenderer',
-        'commentRenderer',
-      ].includes(attr)
-    ) {
-      // Mobile Up Next videos: same menuServiceItemRenderer type the desktop
-      // overflow menu uses, but these cards ship no block actions, so we build
-      // the full entries ourselves (see buildBlockActionMenuItem).
-      let items;
-      if (has.call(obj[attr], 'menu')) {
-        items = getObjectByPath(obj[attr], 'menu.menuRenderer.items');
-      }
-      if (has.call(obj[attr], 'actionMenu')) {
-        items = obj[attr].actionMenu.menuRenderer.items;
-      } else if (attr === 'commentRenderer') {
-        obj[attr].actionMenu = { menuRenderer: { items: [] } };
-        items = obj[attr].actionMenu.menuRenderer.items;
-      }
-
-      if (!items) return;
-      const allowMode = isWhitelistMenuMode();
-      if (allowMode) {
-        // Whitelist mode: the visible cards are already allowlisted, so an
-        // "Allow Channel" entry would be pointless — offer removal instead.
-        if (channelData.id)
-          items.push(
-            buildBlockActionMenuItem(
-              attr,
-              'unallow_channel',
-              channelData,
-              'Remove from Whitelist',
-              'Removed from whitelist',
-              true,
-              'REMOVE',
-            ),
-          );
-        return;
-      }
-      // Block mode additionally offers allowlisting, so the allowlist can be
-      // built while browsing normally.
-      if (channelData.id && showMenuEntry(OPT.MENU_BLOCK_CHANNEL))
-        items.push(
-          buildBlockActionMenuItem(
-            attr,
-            'block_channel',
-            channelData,
-            'Block Channel',
-            'Channel blocked',
-          ),
-        );
-      if (videoData.id && showMenuEntry(OPT.MENU_BLOCK_VIDEO))
-        items.push(
-          buildBlockActionMenuItem(attr, 'block_video', videoData, 'Block Video', 'Video blocked'),
-        );
-      if (channelData.id && showMenuEntry(OPT.MENU_ALLOW_CHANNEL))
-        items.push(
-          buildBlockActionMenuItem(
-            attr,
-            'allow_channel',
-            channelData,
-            'Allow Channel',
-            'Channel allowed',
-            false,
-            'CHECK',
-          ),
-        );
+    if (MOBILE_UP_NEXT_ATTRS.includes(attr)) {
+      addMobileUpNextMenus(obj, attr, channelData, videoData);
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
-      // Mobile Video page: the action bar under the video uses a different
-      // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
-      const items = obj[attr].contents;
-      if (!items) return;
-      const allowMode = isWhitelistMenuMode();
-      const channelButtons = allowMode
-        ? [
-            {
-              action: 'unallow_channel',
-              label: 'Remove from Whitelist',
-            },
-          ]
-        : [
-            {
-              action: 'block_channel',
-              label: 'Block Channel',
-              option: OPT.MENU_BLOCK_CHANNEL,
-            },
-            {
-              action: 'allow_channel',
-              label: 'Allow Channel',
-              option: OPT.MENU_ALLOW_CHANNEL,
-            },
-          ].filter(({ option }) => option === undefined || showMenuEntry(option));
-      const videoButton = {
-        slimMetadataButtonRenderer: {
-          button: {
-            buttonRenderer: {
-              _btOriginalData: videoData,
-              _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
-              _btMenuAction: 'block_video',
-              style: 'STYLE_DEFAULT',
-              size: 'SIZE_DEFAULT',
-              isDisabled: false,
-              text: {
-                runs: [
-                  {
-                    text: 'Block Video',
-                  },
-                ],
-              },
-              accessibility: {
-                label: 'Block Video',
-              },
-              accessibilityData: {
-                accessibilityData: {
-                  label: 'Block Video',
-                },
-              },
-              navigationEndpoint: {},
-            },
-          },
-        },
-      };
-      const channelButtonsRendered = channelButtons.map(({ action, label }) => ({
-        slimMetadataButtonRenderer: {
-          button: {
-            buttonRenderer: {
-              _btOriginalData: channelData,
-              _btOriginalAttr: 'slimVideoMetadataSectionRenderer',
-              _btMenuAction: action,
-              style: 'STYLE_DEFAULT',
-              size: 'SIZE_DEFAULT',
-              isDisabled: false,
-              text: {
-                runs: [
-                  {
-                    text: label,
-                  },
-                ],
-              },
-              accessibility: {
-                label,
-              },
-              accessibilityData: {
-                accessibilityData: {
-                  label,
-                },
-              },
-              navigationEndpoint: {
-                commandMetadata: { webCommandMetadata: { ignoreNavigation: true } },
-                urlEndpoint: {},
-              },
-            },
-          },
-        },
-      }));
-      const mobileVideoMenu = {
-        slimVideoActionBarRenderer: {
-          buttons: [
-            // Videos can't be allowlisted: no video button in whitelist mode.
-            ...(allowMode || !showMenuEntry(OPT.MENU_BLOCK_VIDEO) ? [] : [videoButton]),
-            ...channelButtonsRendered,
-          ],
-          overflowMenuText: {
-            runs: [
-              {
-                text: 'More',
-              },
-            ],
-          },
-          overflowAccessibilityData: {
-            label: 'More',
-          },
-        },
-      };
-      items.splice(2, 0, mobileVideoMenu);
+      addMobileSlimMenus(obj, attr, channelData, videoData);
     }
   }
 
-  function extractMenuItems(obj, attr) {
-    let items = null;
-    let hasChannel = false;
-    let hasVideo = false;
-    let isLockupViewModel = false;
+  // Lockup branch of extractMenuItems: resolve the sheet items, then mark
+  // channel/video presence unless the card is a generated collection (Mixes,
+  // Courses — neither a real video nor a real channel). Null when no sheet.
+  function extractLockupMenuFlags(obj, attr) {
+    const items = extractFromLockupViewModel(obj[attr]);
+    if (!items) return null;
+    const imgName = getObjectByPath(obj[attr], LOCKUP_BADGE_ICON_PATH);
+    // YouTube-generated collections (Mixes, Courses): neither a real video nor
+    // a real channel, so there is nothing meaningful to add to the filters.
+    const isCollection = imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName);
+    return {
+      items,
+      hasChannel: !isCollection,
+      hasVideo: !isCollection,
+      isLockupViewModel: true,
+    };
+  }
 
-    if (has.call(obj[attr], 'videoActions')) {
-      items = obj[attr].videoActions.menuRenderer.items;
-      hasChannel = true;
-      hasVideo = true;
-    } else if (has.call(obj[attr], 'actionMenu')) {
-      items = obj[attr].actionMenu.menuRenderer.items;
-      hasChannel = true;
-    } else if (attr === 'commentRenderer') {
-      obj[attr].actionMenu = { menuRenderer: { items: [] } };
-      items = obj[attr].actionMenu.menuRenderer.items;
-      hasChannel = true;
-    } else if (attr === 'lockupViewModel') {
-      items = extractFromLockupViewModel(obj[attr]);
-      if (!items) return null;
-      const imgName = getObjectByPath(obj[attr], LOCKUP_BADGE_ICON_PATH);
-      // YouTube-generated collections (Mixes, Courses): neither a real video nor
-      // a real channel, so there is nothing meaningful to add to the filters.
-      if (imgName === undefined || !LOCKUP_GENERATED_BADGE_ICONS.has(imgName)) {
-        hasChannel = true;
-        hasVideo = true;
-      }
-
-      isLockupViewModel = true;
-    } else {
-      items = extractFromGenericRenderer(obj[attr]);
-      hasVideo = true;
-
-      // Determine channel presence
-      if (
-        attr === 'movieRenderer' ||
-        attr === 'compactMovieRenderer' ||
-        attr === 'reelItemRenderer'
-      ) {
-        hasChannel = false;
-      } else if (
-        has.call(obj[attr], 'shortBylineText') &&
-        getObjectByPath(obj[attr], 'shortBylineText.runs.navigationEndpoint.browseEndpoint')
-      ) {
-        hasChannel = true;
-      } else if (
-        has.call(obj[attr], 'bylineText') &&
-        getObjectByPath(obj[attr], 'bylineText.runs.navigationEndpoint.browseEndpoint')
-      ) {
-        hasChannel = true;
-      }
+  // Renderers without their own channel link (movies, reels) never attribute
+  // a channel; the rest do when a byline path resolves to a browse endpoint.
+  function genericRendererHasChannel(renderer, attr) {
+    if (
+      attr === 'movieRenderer' ||
+      attr === 'compactMovieRenderer' ||
+      attr === 'reelItemRenderer'
+    ) {
+      return false;
     }
+    if (
+      has.call(renderer, 'shortBylineText') &&
+      getObjectByPath(renderer, 'shortBylineText.runs.navigationEndpoint.browseEndpoint')
+    ) {
+      return true;
+    }
+    return !!(
+      has.call(renderer, 'bylineText') &&
+      getObjectByPath(renderer, 'bylineText.runs.navigationEndpoint.browseEndpoint')
+    );
+  }
 
-    return { items, hasChannel, hasVideo, isLockupViewModel };
+  // Generic branch of extractMenuItems: items always exist (created on
+  // demand), video actions always apply, channel depends on the byline link.
+  function extractGenericMenuFlags(obj, attr) {
+    return {
+      items: extractFromGenericRenderer(obj[attr]),
+      hasChannel: genericRendererHasChannel(obj[attr], attr),
+      hasVideo: true,
+      isLockupViewModel: false,
+    };
+  }
+
+  // Comment branch of extractMenuItems: comments ship no menu, so an empty
+  // actionMenu is created for the block entries.
+  function extractCommentMenuFlags(obj, attr) {
+    obj[attr].actionMenu = { menuRenderer: { items: [] } };
+    return {
+      items: obj[attr].actionMenu.menuRenderer.items,
+      hasChannel: true,
+      hasVideo: false,
+      isLockupViewModel: false,
+    };
+  }
+
+  function extractMenuItems(obj, attr) {
+    if (has.call(obj[attr], 'videoActions')) {
+      return {
+        items: obj[attr].videoActions.menuRenderer.items,
+        hasChannel: true,
+        hasVideo: true,
+        isLockupViewModel: false,
+      };
+    }
+    if (has.call(obj[attr], 'actionMenu')) {
+      return {
+        items: obj[attr].actionMenu.menuRenderer.items,
+        hasChannel: true,
+        hasVideo: false,
+        isLockupViewModel: false,
+      };
+    }
+    if (attr === 'commentRenderer') {
+      return extractCommentMenuFlags(obj, attr);
+    }
+    if (attr === 'lockupViewModel') {
+      return extractLockupMenuFlags(obj, attr);
+    }
+    return extractGenericMenuFlags(obj, attr);
   }
 
   // Specific extractor for lockupViewModel
@@ -2450,49 +2696,63 @@
     return true;
   }
 
-  function createCleanContext(
-    items,
-    store,
-    isChannel,
-    currentObj,
-    forAllow = false,
-    forRemove = false,
-  ) {
-    // Allow/remove entries must never reuse YouTube's native command: it
-    // hides the card (the home-grid removal reported for Allow taps). They
-    // always get a clone with the matching toast and hide flag, regardless
-    // of the block_feedback option. Real block entries keep the identity
-    // fast-path so YouTube's own feedback flow keeps working.
-    if (!forAllow && !forRemove && store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
-      const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
-      let item;
-      for (const icon of targetIcons) {
-        item = items.find((i) => {
-          const imageName = getObjectByPath(
-            i,
-            'listItemViewModel.leadingImage.sources.clientResource.imageName',
-          );
-          return imageName === icon;
-        });
-        if (item) break;
-      }
-      if (item) {
-        return item?.listItemViewModel?.rendererContext;
-      }
+  // Native-command fast path for real block entries: reuse YouTube's own
+  // feedback item (by leading icon) when block_feedback is on. Allow/remove
+  // entries must never reuse it (it hides the card). Returns the item, or
+  // undefined when no feedback icon matches.
+  function findNativeFeedbackItem(items, isChannel) {
+    const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
+    for (const icon of targetIcons) {
+      const item = items.find((i) => {
+        const imageName = getObjectByPath(
+          i,
+          'listItemViewModel.leadingImage.sources.clientResource.imageName',
+        );
+        return imageName === icon;
+      });
+      if (item) return item;
     }
+    return undefined;
+  }
 
-    const baseContext = items[0]?.listItemViewModel?.rendererContext;
-    if (!baseContext) return null;
+  // Toast text for a cloned lockup context: videos always "Video Blocked",
+  // channels depend on allow/remove/whitelist mode.
+  function lockupToastMessage(isChannel, forAllow, forRemove, store) {
+    if (!isChannel) return 'Video Blocked';
+    if (forRemove) return 'Removed from whitelist';
+    if (forAllow || isWhitelistMenuMode(store)) return 'Channel Allowed';
+    return 'Channel Blocked';
+  }
 
-    const msg = !isChannel
-      ? 'Video Blocked'
-      : forRemove
-        ? 'Removed from whitelist'
-        : forAllow || isWhitelistMenuMode(store)
-          ? 'Channel Allowed'
-          : 'Channel Blocked';
-    const cleanContext = deepClone(baseContext);
+  // The toast action shown after a cloned block tap (allow/remove entries
+  // execute silently — the hide flag is their only native effect).
+  function lockupToastAction(msg) {
+    return {
+      clickTrackingParams: '',
+      replaceEnclosingAction: {
+        item: {
+          notificationMultiActionRenderer: {
+            responseText: {
+              accessibility: {
+                accessibilityData: {
+                  label: msg,
+                },
+              },
+              simpleText: msg,
+            },
+            buttons: [],
+            trackingParams: '',
+            dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
+          },
+        },
+      },
+    };
+  }
 
+  // Overwrite a cloned context's onTap with a no-op command carrying only
+  // our feedback (toast + hide flag). Allow entries keep the card in place;
+  // removals and blocks hide it.
+  function overwriteOnTapCommand(cleanContext, msg, contentId, forAllow, forRemove) {
     if (cleanContext.commandContext?.onTap) {
       const onTap = cleanContext.commandContext?.onTap;
       onTap.innertubeCommand = {
@@ -2513,35 +2773,39 @@
           // No confirmation popups: allow/remove entries execute silently
           // (their hide flag above is the only native effect). Real block
           // entries keep the toast.
-          actions:
-            forAllow || forRemove
-              ? []
-              : [
-                  {
-                    clickTrackingParams: '',
-                    replaceEnclosingAction: {
-                      item: {
-                        notificationMultiActionRenderer: {
-                          responseText: {
-                            accessibility: {
-                              accessibilityData: {
-                                label: msg,
-                              },
-                            },
-                            simpleText: msg,
-                          },
-                          buttons: [],
-                          trackingParams: '',
-                          dismissalViewStyle: 'DISMISSAL_VIEW_STYLE_COMPACT_TALL',
-                        },
-                      },
-                    },
-                  },
-                ],
-          contentId: currentObj.contentId,
+          actions: forAllow || forRemove ? [] : [lockupToastAction(msg)],
+          contentId,
         },
       };
     }
+  }
+
+  function createCleanContext(
+    items,
+    store,
+    isChannel,
+    currentObj,
+    forAllow = false,
+    forRemove = false,
+  ) {
+    // Allow/remove entries must never reuse YouTube's native command: it
+    // hides the card (the home-grid removal reported for Allow taps). They
+    // always get a clone with the matching toast and hide flag, regardless
+    // of the block_feedback option. Real block entries keep the identity
+    // fast-path so YouTube's own feedback flow keeps working.
+    if (!forAllow && !forRemove && store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
+      const item = findNativeFeedbackItem(items, isChannel);
+      if (item) {
+        return item?.listItemViewModel?.rendererContext;
+      }
+    }
+
+    const baseContext = items[0]?.listItemViewModel?.rendererContext;
+    if (!baseContext) return null;
+
+    const msg = lockupToastMessage(isChannel, forAllow, forRemove, store);
+    const cleanContext = deepClone(baseContext);
+    overwriteOnTapCommand(cleanContext, msg, currentObj.contentId, forAllow, forRemove);
 
     return cleanContext;
   }
@@ -2638,33 +2902,48 @@
   // stay out of the way; pointer-events:none so it can never swallow clicks.
   let toastTimer = 0;
 
-  function showDomToast(msg, duration) {
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
-    let el = null;
+  // Create the toast div, styled property-by-property through CSSOM only
+  // (no <style>, no innerHTML), so page CSP and Trusted Types stay out of
+  // the way; pointer-events:none so it can never swallow clicks.
+  function createToastElement() {
+    const el = document.createElement('div');
+    el.id = 'blocktube-toast';
+    el.setAttribute('role', 'status');
+    const style = el.style;
+    style.position = 'fixed';
+    style.left = '50%';
+    style.bottom = '48px';
+    style.transform = 'translateX(-50%)';
+    style.zIndex = '2147483647';
+    style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    style.color = '#fff';
+    style.fontSize = '14px';
+    style.fontFamily = 'Roboto, Arial, sans-serif';
+    style.padding = '10px 16px';
+    style.borderRadius = '8px';
+    style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.4)';
+    style.pointerEvents = 'none';
+    style.display = 'none';
+    (document.body || document.documentElement).appendChild(el);
+    return el;
+  }
+
+  // Resolve the toast div, creating it on first use. Null when the DOM
+  // offers no way to look it up or build it.
+  function resolveToastElement() {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      return null;
+    }
     if (typeof document.getElementById === 'function') {
-      el = document.getElementById('blocktube-toast');
+      const existing = document.getElementById('blocktube-toast');
+      if (existing) return existing;
     }
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'blocktube-toast';
-      el.setAttribute('role', 'status');
-      const style = el.style;
-      style.position = 'fixed';
-      style.left = '50%';
-      style.bottom = '48px';
-      style.transform = 'translateX(-50%)';
-      style.zIndex = '2147483647';
-      style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-      style.color = '#fff';
-      style.fontSize = '14px';
-      style.fontFamily = 'Roboto, Arial, sans-serif';
-      style.padding = '10px 16px';
-      style.borderRadius = '8px';
-      style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.4)';
-      style.pointerEvents = 'none';
-      style.display = 'none';
-      (document.body || document.documentElement).appendChild(el);
-    }
+    return createToastElement();
+  }
+
+  // Show the message, then hide it after `duration`. Timer handles are
+  // guarded: exotic page realms may lack them.
+  function displayToastMessage(el, msg, duration) {
     el.textContent = msg;
     el.style.display = 'block';
     if (typeof clearTimeout === 'function') clearTimeout(toastTimer);
@@ -2673,6 +2952,12 @@
         el.style.display = 'none';
       }, duration);
     }
+  }
+
+  function showDomToast(msg, duration) {
+    const el = resolveToastElement();
+    if (!el) return;
+    displayToastMessage(el, msg, duration);
   }
 
   function openToast(msg, duration) {
@@ -2686,42 +2971,92 @@
     } catch (e) {}
   }
 
-  function legacyToast(msg, duration) {
-    const ytdApp = document.getElementsByTagName('ytd-app')[0];
-    if (ytdApp === undefined) return;
-    const ytEvent = new CustomEvent('yt-action', {
+  // The openPopupAction payload for a legacy toast: duration + message text
+  // rendered as a notificationActionRenderer popup.
+  function buildToastPopupAction(msg, duration) {
+    return {
+      openPopupAction: {
+        durationHintMs: duration,
+        popup: {
+          notificationActionRenderer: {
+            responseText: {
+              runs: [
+                {
+                  text: msg,
+                },
+              ],
+            },
+          },
+        },
+        popupType: 'TOAST',
+      },
+    };
+  }
+
+  // The yt-open-popup-action TOAST event payload for a message, dispatched
+  // on the ytd-app element (a harmless no-op where YouTube no longer
+  // listens — see showDomToast for the guaranteed feedback path).
+  function buildLegacyToastEvent(msg, duration, ytdApp) {
+    return new CustomEvent('yt-action', {
       bubbles: true,
       cancelable: false,
       composed: true,
       detail: {
         actionName: 'yt-open-popup-action',
-        args: [
-          {
-            openPopupAction: {
-              durationHintMs: duration,
-              popup: {
-                notificationActionRenderer: {
-                  responseText: {
-                    runs: [
-                      {
-                        text: msg,
-                      },
-                    ],
-                  },
-                },
-              },
-              popupType: 'TOAST',
-            },
-          },
-          ytdApp,
-          undefined,
-        ],
+        args: [buildToastPopupAction(msg, duration), ytdApp, undefined],
         returnValue: [],
         disableBroadcast: false,
         optionalAction: true,
       },
     });
-    ytdApp.dispatchEvent(ytEvent);
+  }
+
+  function legacyToast(msg, duration) {
+    const ytdApp = document.getElementsByTagName('ytd-app')[0];
+    if (ytdApp === undefined) return;
+    ytdApp.dispatchEvent(buildLegacyToastEvent(msg, duration, ytdApp));
+  }
+
+  // Map a mobile menu action to its block-list type. Undefined for unknown
+  // actions (the tap is ignored).
+  function mobileActionToBlockType(menuAction) {
+    switch (menuAction) {
+      case 'block_channel': {
+        return 'channelId';
+      }
+      case 'allow_channel': {
+        return 'whitelist';
+      }
+      case 'unallow_channel': {
+        return 'unwhitelist';
+      }
+      case 'block_video': {
+        return 'videoId';
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  // Mobile video-page taps confirm with an alert and stop playback for
+  // blocks/removals. Allowlists keep playback going.
+  function confirmSlimVideoTap(type) {
+    // Allowlists keep playback going; blocks and removals stop it.
+    if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
+    const noun = type === 'videoId' ? 'Video' : 'Channel';
+    const verb = type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
+    alert(`${noun} ${verb}`);
+  }
+
+  // Runtime comment filtering mirrors the blacklist path only: allowlist
+  // taps must never push the commenter into the channelId blacklist.
+  function filterCommentRuntime(type, data) {
+    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
+      const comments = document.querySelector('ytm-section-list-renderer');
+      storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
+      noActiveFilters = computeNoActiveFilters();
+      ObjectFilter(comments.data, filterRules.comments, [], false);
+    }
   }
 
   function menuOnTapMobile(event) {
@@ -2740,45 +3075,14 @@
       return;
     }
 
-    let type;
-    switch (data._btMenuAction) {
-      case 'block_channel': {
-        type = 'channelId';
-        break;
-      }
-      case 'allow_channel': {
-        type = 'whitelist';
-        break;
-      }
-      case 'unallow_channel': {
-        type = 'unwhitelist';
-        break;
-      }
-      case 'block_video': {
-        type = 'videoId';
-        break;
-      }
-      default:
-        return;
-    }
+    const type = mobileActionToBlockType(data._btMenuAction);
+    if (type === undefined) return;
 
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
     if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
-      // Allowlists keep playback going; blocks and removals stop it.
-      if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
-      const noun = type === 'videoId' ? 'Video' : 'Channel';
-      const verb =
-        type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
-      alert(`${noun} ${verb}`);
+      confirmSlimVideoTap(type);
     }
-    // Runtime comment filtering mirrors the blacklist path only: allowlist
-    // taps must never push the commenter into the channelId blacklist.
-    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
-      const comments = document.querySelector('ytm-section-list-renderer');
-      storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
-      noActiveFilters = computeNoActiveFilters();
-      ObjectFilter(comments.data, filterRules.comments, [], false);
-    }
+    filterCommentRuntime(type, data);
   }
 
   function getActionMenuData(context) {
@@ -2797,141 +3101,175 @@
     return { isDataFromRightHandSide, menuAction };
   }
 
-  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
-    let channelData, videoData;
-    let removeParent = true;
-    let stopPlayer = false;
+  // Video-player tags whose menu blocks the now-playing video + channel.
+  const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
 
-    // Video player context menu
-    if (
-      parentDom.tagName === 'YTD-VIDEO-PRIMARY-INFO-RENDERER' ||
-      parentDom.tagName === 'YTD-WATCH-METADATA'
-    ) {
-      const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
-      const playerData = pageManager.data || pageManager.getCurrentData();
-      const player = playerData.playerResponse;
+  // Resolve channel/video from the now-playing player + owner renderers. The
+  // owner id joins the player id when they disagree (collab/featured cases).
+  function playerMenuBlockData() {
+    const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
+    const playerData = pageManager.data || pageManager.getCurrentData();
+    const player = playerData.playerResponse;
 
-      const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
-      const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
+    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
 
-      const ownerUCID = getObjectByPath(
-        owner,
-        'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
-      );
-      let playerUCID = player.videoDetails.channelId;
-      if (ownerUCID && ownerUCID !== playerUCID) {
-        playerUCID = [playerUCID, ownerUCID];
-      }
-      channelData = {
+    const ownerUCID = getObjectByPath(
+      owner,
+      'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+    );
+    let playerUCID = player.videoDetails.channelId;
+    if (ownerUCID && ownerUCID !== playerUCID) {
+      playerUCID = [playerUCID, ownerUCID];
+    }
+    return {
+      channelData: {
         text: player.videoDetails.author,
         id: playerUCID,
-      };
-      videoData = {
+      },
+      videoData: {
         text: player.videoDetails.title,
         id: player.videoDetails.videoId,
-      };
-
-      removeParent = false;
-      stopPlayer = true;
-    } else if (isDataFromRightHandSide) {
-      channelData = {
-        id: parentData.blockTube?.metadata?.channelId,
-        text: parentData.blockTube?.metadata?.channelName,
-      };
-
-      videoData = {
-        id: parentData.blockTube?.metadata?.videoId,
-        text: parentData.blockTube?.metadata?.videoName,
-      };
-
-      removeParent = false;
-      stopPlayer = false;
-    } else {
-      const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
-      channelData = extracted.channel;
-      videoData = extracted.video;
-    }
-
-    let result;
-    switch (menuAction) {
-      case 'Block Channel':
-        result = { type: 'channelId', data: channelData };
-        break;
-      case 'Allow Channel':
-        result = { type: 'whitelist', data: channelData };
-        break;
-      case 'Remove from Whitelist':
-        result = { type: 'unwhitelist', data: channelData };
-        break;
-      case 'Block Video':
-        result = { type: 'videoId', data: videoData };
-        break;
-      default:
-        return null;
-    }
-
-    return {
-      ...result,
-      removeParent,
-      stopPlayer,
+      },
+      removeParent: false,
+      stopPlayer: true,
     };
   }
 
-  function getParentDomAndData(isDataFromRightHandSide, element) {
-    let parentDom;
-    let parentData;
+  // Resolve channel/video from the blockTube metadata stamped on lockup menus
+  // (right-hand/recommended context carries no _btOriginalAttr).
+  function stampedMenuBlockData(parentData) {
+    return {
+      channelData: {
+        id: parentData.blockTube?.metadata?.channelId,
+        text: parentData.blockTube?.metadata?.channelName,
+      },
+      videoData: {
+        id: parentData.blockTube?.metadata?.videoId,
+        text: parentData.blockTube?.metadata?.videoName,
+      },
+      removeParent: false,
+      stopPlayer: false,
+    };
+  }
 
-    if (isDataFromRightHandSide) {
-      // Traverse 4 levels up to find the parent DOM
-      parentDom = element?.parentElement?.parentElement?.parentElement?.parentElement;
+  // Resolve channel/video through the rule paths for the menu's renderer.
+  function ruleMenuBlockData(parentData) {
+    const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
+    return {
+      channelData: extracted.channel,
+      videoData: extracted.video,
+      removeParent: true,
+      stopPlayer: false,
+    };
+  }
 
-      if (!parentDom) {
-        console.warn('Could not find parentDom in recommended data context');
-        return {};
-      }
+  // Map a desktop menu label to its block-list type + payload. Null for
+  // unknown labels (the tap is ignored).
+  function menuLabelToBlockTarget(menuAction, channelData, videoData) {
+    switch (menuAction) {
+      case 'Block Channel':
+        return { type: 'channelId', data: channelData };
+      case 'Allow Channel':
+        return { type: 'whitelist', data: channelData };
+      case 'Remove from Whitelist':
+        return { type: 'unwhitelist', data: channelData };
+      case 'Block Video':
+        return { type: 'videoId', data: videoData };
+      default:
+        return null;
+    }
+  }
 
-      const parentDomData = parentDom.componentProps?.data;
-      if (!parentDomData) {
-        console.warn('Could not find componentProps.data');
-        return {};
-      }
-
-      const parentDomSymbols = Object.getOwnPropertySymbols(parentDomData);
-      if (parentDomSymbols.length === 0) {
-        console.warn('No symbols found in parentDomData');
-        return {};
-      }
-
-      parentData = parentDomData[parentDomSymbols[0]]?.value;
+  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
+    // Video player context menu
+    let resolved;
+    if (PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
+      resolved = playerMenuBlockData();
+    } else if (isDataFromRightHandSide) {
+      resolved = stampedMenuBlockData(parentData);
     } else {
-      // Try to find eventSink in multiple paths without using intermediate variable
-      const eventSink =
-        getObjectByPath(
-          element.parentElement?.parentElement,
-          'polymerController.forwarder_.eventSink',
-        ) ||
-        getObjectByPath(element.parentElement, '__dataHost.eventSink_') ||
-        getObjectByPath(element.parentElement, '__dataHost.forwarder_.eventSink') ||
-        getObjectByPath(element.parentElement, '__dataHost.hostElement.inst.eventSink_');
-
-      if (!eventSink) {
-        console.warn('Could not find eventSink in any expected path');
-        return {};
-      }
-
-      parentDom =
-        eventSink.parentComponent ||
-        eventSink.parentElement.__dataHost?.hostElement ||
-        eventSink.parentElement?.parentElement;
-      parentData = parentDom?.data;
-
-      if (!parentDom || !parentData) {
-        console.warn('Failed to extract parentDom or parentData');
-        return {};
-      }
+      resolved = ruleMenuBlockData(parentData);
     }
 
+    const result = menuLabelToBlockTarget(menuAction, resolved.channelData, resolved.videoData);
+    if (!result) return null;
+
+    return {
+      ...result,
+      removeParent: resolved.removeParent,
+      stopPlayer: resolved.stopPlayer,
+    };
+  }
+
+  // Right-hand (recommended) context: traverse 4 levels up, then read the
+  // symbol-keyed component data. Empty object when any hop is missing.
+  function getRecommendedParentData(element) {
+    // Traverse 4 levels up to find the parent DOM
+    const parentDom = element?.parentElement?.parentElement?.parentElement?.parentElement;
+
+    if (!parentDom) {
+      console.warn('Could not find parentDom in recommended data context');
+      return {};
+    }
+
+    const parentDomData = parentDom.componentProps?.data;
+    if (!parentDomData) {
+      console.warn('Could not find componentProps.data');
+      return {};
+    }
+
+    const parentDomSymbols = Object.getOwnPropertySymbols(parentDomData);
+    if (parentDomSymbols.length === 0) {
+      console.warn('No symbols found in parentDomData');
+      return {};
+    }
+
+    return { parentDom, parentData: parentDomData[parentDomSymbols[0]]?.value };
+  }
+
+  // Standard context: find the eventSink across the known Polymer/dataHost
+  // paths, then resolve the parent component. Empty object when missing.
+  function findEventSink(element) {
+    // Try to find eventSink in multiple paths without using intermediate variable
+    return (
+      getObjectByPath(
+        element.parentElement?.parentElement,
+        'polymerController.forwarder_.eventSink',
+      ) ||
+      getObjectByPath(element.parentElement, '__dataHost.eventSink_') ||
+      getObjectByPath(element.parentElement, '__dataHost.forwarder_.eventSink') ||
+      getObjectByPath(element.parentElement, '__dataHost.hostElement.inst.eventSink_')
+    );
+  }
+
+  // Standard context parent from the eventSink: component, host element, or
+  // grandparent — whichever resolves first. Empty object when data is missing.
+  function getEventSinkParentData(element) {
+    const eventSink = findEventSink(element);
+    if (!eventSink) {
+      console.warn('Could not find eventSink in any expected path');
+      return {};
+    }
+
+    const parentDom =
+      eventSink.parentComponent ||
+      eventSink.parentElement.__dataHost?.hostElement ||
+      eventSink.parentElement?.parentElement;
+    const parentData = parentDom?.data;
+
+    if (!parentDom || !parentData) {
+      console.warn('Failed to extract parentDom or parentData');
+      return {};
+    }
     return { parentDom, parentData };
+  }
+
+  function getParentDomAndData(isDataFromRightHandSide, element) {
+    if (isDataFromRightHandSide) {
+      return getRecommendedParentData(element);
+    }
+    return getEventSinkParentData(element);
   }
 
   // `message` is the inline placeholder left where the card was: "Blocked"
@@ -2960,16 +3298,54 @@
     }
   }
 
+  // Desktop menu labels that carry a block/allow action. Anything else is a
+  // native entry — prevent the tap-through and ignore it.
+  const MENU_TAP_ACTIONS = [
+    'Block Channel',
+    'Block Video',
+    'Allow Channel',
+    'Remove from Whitelist',
+  ];
+
+  // Apply the visible effect of a desktop menu tap: removals replace the card
+  // with a placeholder, blocks do the same, allow taps keep the card in place
+  // so it can be watched right away (the storage write is the whole effect).
+  function applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom) {
+    // No confirmation popups by design: allow taps keep the card in place so
+    // it can be watched right away, and removals already replace the card
+    // itself — the storage write above is the whole visible effect.
+    if (type === 'unwhitelist') {
+      if (removeParent) {
+        // Remove correct component based on parentDom
+        removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
+      } else if (stopPlayer) {
+        document.getElementById('movie_player').stopVideo();
+      }
+    } else if (type !== 'whitelist') {
+      if (removeParent) {
+        // Remove correct component based on parentDom
+        removeParentHelper(isDataFromRightHandSide, parentDom);
+      } else if (stopPlayer) {
+        document.getElementById('movie_player').stopVideo();
+      }
+    }
+  }
+
+  // Forward the tap to YouTube's own handler when the menu entry carries a
+  // service endpoint (native feedback flow).
+  function forwardMenuTap(event) {
+    if (this.data.serviceEndpoint) {
+      if (this.onTap) this.onTap(event);
+      else if (this.onTap_) this.onTap_(event);
+    }
+  }
+
   function menuOnTap(event) {
     if (storageData === undefined) return;
 
     const { isDataFromRightHandSide, menuAction } = getActionMenuData(this);
 
-    if (
-      !['Block Channel', 'Block Video', 'Allow Channel', 'Remove from Whitelist'].includes(
-        menuAction,
-      )
-    ) {
+    if (!MENU_TAP_ACTIONS.includes(menuAction)) {
       event.preventDefault();
       return;
     }
@@ -2996,143 +3372,149 @@
     // Notify system what data should be added to the block list
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
 
-    // No confirmation popups by design: allow taps keep the card in place so
-    // it can be watched right away, and removals already replace the card
-    // itself — the storage write above is the whole visible effect.
-    if (type === 'unwhitelist') {
-      if (removeParent) {
-        // Remove correct component based on parentDom
-        removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
-      } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
-      }
-    } else if (type !== 'whitelist') {
-      if (removeParent) {
-        // Remove correct component based on parentDom
-        removeParentHelper(isDataFromRightHandSide, parentDom);
-      } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
-      }
-    }
-
-    if (this.data.serviceEndpoint) {
-      if (this.onTap) this.onTap(event);
-      else if (this.onTap_) this.onTap_(event);
-    }
+    applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
+    forwardMenuTap.call(this, event);
   }
 
   // ================== src/scripts/inject/hooks.js ==================
+
+  // Read chained accessors off a property descriptor, refusing
+  // non-configurable properties (returns null then). Missing accessors read
+  // as undefined.
+  function chainedAccessors(owner, prop) {
+    const odesc = Object.getOwnPropertyDescriptor(owner, prop);
+    if (!(odesc instanceof Object)) return { prevGetter: undefined, prevSetter: undefined };
+    if (odesc.configurable === false) return null;
+    return {
+      prevGetter: odesc.get instanceof Function ? odesc.get : undefined,
+      prevSetter: odesc.set instanceof Function ? odesc.set : undefined,
+    };
+  }
+
+  // Install a value-trap on one property: the handler's init decides whether
+  // to arm, then getter/setter delegate to it (chaining any pre-existing
+  // accessors, per uBlock's multi-trapper contract). Refuses non-configurable
+  // properties.
+  function trapProp(owner, prop, configurable, handler) {
+    if (handler.init(owner[prop]) === false) {
+      return;
+    }
+    const chained = chainedAccessors(owner, prop);
+    if (chained === null) return;
+    const { prevGetter, prevSetter } = chained;
+    Object.defineProperty(owner, prop, {
+      configurable,
+      get() {
+        if (prevGetter !== undefined) {
+          prevGetter();
+        }
+        return handler.getter(); // replacementValue
+      },
+      set(a) {
+        if (prevSetter !== undefined) {
+          prevSetter(a);
+        }
+        handler.setter(a);
+      },
+    });
+  }
+
+  // Leaf of a trap chain: trap the final property so reads return the
+  // replacement and writes run onSet (or the type-mismatch contract).
+  function trapChainLeaf(owner, prop, state) {
+    trapProp(owner, prop, true, {
+      v: undefined,
+      init(v) {
+        if (state.typeMismatch(v)) {
+          return false;
+        }
+        this.v = v;
+        return true;
+      },
+      getter() {
+        return state.replacementValue;
+      },
+      setter(a) {
+        if (state.onSet instanceof Function) {
+          state.replacementValue = a;
+          state.onSet(a);
+        } else {
+          if (state.typeMismatch(a) === false) {
+            return;
+          }
+          state.replacementValue = a;
+        }
+      },
+    });
+  }
+
+  // Mid-chain link: remember the untraversed remainder and continue from the
+  // freshly assigned object once it arrives.
+  function trapChainLink(owner, prop, remPath, state) {
+    trapProp(owner, prop, true, {
+      v: undefined,
+      init(newVal) {
+        this.v = newVal;
+        return true;
+      },
+      getter() {
+        return this.v;
+      },
+      setter(a) {
+        this.v = a;
+        if (a instanceof Object) {
+          // continue the remaining path from the freshly assigned object
+          trapChain(a, remPath, state);
+        }
+      },
+    });
+  }
+
+  // Walk a dotted path, trapping each link so the leaf trap installs once
+  // its owner object exists. State carries the mismatch gate + onSet.
+  function trapChain(owner, remPath, state) {
+    const pos = remPath.indexOf('.');
+    if (pos === -1) {
+      trapChainLeaf(owner, remPath, state);
+      return;
+    }
+    const prop = remPath.slice(0, pos);
+    const v = owner[prop];
+    // remember the path that is still not reached, it must be traversed later
+    remPath = remPath.slice(pos + 1);
+    if (v instanceof Object || (typeof v === 'object' && v !== null)) {
+      trapChain(v, remPath, state);
+      return;
+    }
+    trapChainLink(owner, prop, remPath, state);
+  }
 
   // Install a value-trap on a dotted path only YouTube owns, so we can run
   // post-processing the moment the data becomes available (window.yt.config_,
   // ytplayer.config, ytInitialData, ...). Adapted from uBlock Origin.
   const trapObjectPath = function (path, replacementValue, onSet = undefined) {
-    let blocked = false;
+    const state = {
+      replacementValue,
+      onSet,
+      blocked: false,
+    };
     // Once a value with a different type than our replacement arrives, refuse
     // every later assignment for this property (uBlock's trapper contract).
-    const typeMismatch = function (value) {
-      if (blocked) {
+    state.typeMismatch = function (value) {
+      if (state.blocked) {
         return true;
       }
-      blocked =
+      state.blocked =
         value !== undefined &&
         value !== null &&
-        replacementValue !== undefined &&
-        replacementValue !== null &&
-        typeof value !== typeof replacementValue;
-      return blocked;
+        state.replacementValue !== undefined &&
+        state.replacementValue !== null &&
+        typeof value !== typeof state.replacementValue;
+      return state.blocked;
     };
     // https://github.com/uBlockOrigin/uBlock-issues/issues/156
     //   Support multiple trappers for the same property.
-    const trapProp = function (owner, prop, configurable, handler) {
-      if (handler.init(owner[prop]) === false) {
-        return;
-      }
-      const odesc = Object.getOwnPropertyDescriptor(owner, prop);
-      let prevGetter, prevSetter;
-      if (odesc instanceof Object) {
-        if (odesc.configurable === false) {
-          return;
-        }
-        if (odesc.get instanceof Function) {
-          prevGetter = odesc.get;
-        }
-        if (odesc.set instanceof Function) {
-          prevSetter = odesc.set;
-        }
-      }
-      Object.defineProperty(owner, prop, {
-        configurable,
-        get() {
-          if (prevGetter !== undefined) {
-            prevGetter();
-          }
-          return handler.getter(); // replacementValue
-        },
-        set(a) {
-          if (prevSetter !== undefined) {
-            prevSetter(a);
-          }
-          handler.setter(a);
-        },
-      });
-    };
-    const trapChain = function (owner, remPath) {
-      const pos = remPath.indexOf('.');
-      if (pos === -1) {
-        trapProp(owner, remPath, true, {
-          v: undefined,
-          init(v) {
-            if (typeMismatch(v)) {
-              return false;
-            }
-            this.v = v;
-            return true;
-          },
-          getter() {
-            return replacementValue;
-          },
-          setter(a) {
-            if (onSet instanceof Function) {
-              replacementValue = a;
-              onSet(a);
-            } else {
-              if (typeMismatch(a) === false) {
-                return;
-              }
-              replacementValue = a;
-            }
-          },
-        });
-        return;
-      }
-      const prop = remPath.slice(0, pos);
-      const v = owner[prop];
-      // remember the path that is still not reached, it must be traversed later
-      remPath = remPath.slice(pos + 1);
-      if (v instanceof Object || (typeof v === 'object' && v !== null)) {
-        trapChain(v, remPath);
-        return;
-      }
-      trapProp(owner, prop, true, {
-        v: undefined,
-        init(newVal) {
-          this.v = newVal;
-          return true;
-        },
-        getter() {
-          return this.v;
-        },
-        setter(a) {
-          this.v = a;
-          if (a instanceof Object) {
-            // continue the remaining path from the freshly assigned object
-            trapChain(a, remPath);
-          }
-        },
-      });
-    };
-    trapChain(window, path);
+    trapChain(window, path, state);
   };
 
   // !! Globals
@@ -3187,36 +3569,125 @@
     if (ttPolicy) return window.eval(ttPolicy.createScript(code));
     return window.eval(code);
   }
+  // Compile one [pattern, flags] pair into a RegExp, stripping the stateful
+  // `g` flag. Returns undefined for malformed entries (logged, skipped).
+  function compileOneRegExp(v) {
+    if (!Array.isArray(v)) return undefined;
+    try {
+      return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
+    } catch (e) {
+      console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
+      return undefined;
+    }
+  }
+
+  // Compile every entry of one filterData array prop in place.
+  function compileRegExpProp(filterData, prop) {
+    if (has.call(filterData, prop) && Array.isArray(filterData[prop])) {
+      filterData[prop] = filterData[prop].map(compileOneRegExp);
+    }
+  }
+
   // Pre-compiled filter paths. The same path strings (from filterRules and the
   // literals below) are resolved against thousands of objects, so split + regex
   // parsing happens once per unique path instead of per call.
   function transformToRegExp(data) {
     if (typeof data !== 'object' || data === null) return;
     if (typeof data.filterData !== 'object' || data.filterData === null) return;
-    regexProps.forEach((p) => {
-      if (has.call(data.filterData, p) && Array.isArray(data.filterData[p])) {
-        data.filterData[p] = data.filterData[p].map((v) => {
-          if (!Array.isArray(v)) return undefined;
-          try {
-            return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
-          } catch (e) {
-            console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
-            return undefined;
-          }
-        });
-      }
-    });
+    regexProps.forEach((p) => compileRegExpProp(data.filterData, p));
     // The allowlist is compiled with the exact-ID rule upstream; hydrate it
     // the same way so channelId matching can test against RegExps.
-    if (has.call(data.filterData, 'whitelist') && Array.isArray(data.filterData.whitelist)) {
-      data.filterData.whitelist = data.filterData.whitelist.map((v) => {
-        if (!Array.isArray(v)) return undefined;
+    compileRegExpProp(data.filterData, 'whitelist');
+  }
+
+  // Embed pages: filter the PLAYER_VARS payload at once, or trap yt.config_
+  // until it arrives.
+  function hookEmbedConfig() {
+    const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
+    if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
+      try {
+        ytConfigPlayerConfig.raw_player_response = JSON.parse(
+          ytConfigPlayerConfig.embedded_player_response,
+        );
+      } catch (e) {}
+      ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
+    } else {
+      trapObjectPath('yt.config_', undefined, (v) => {
         try {
-          return RegExp(v[0], typeof v[1] === 'string' ? v[1].replace('g', '') : '');
-        } catch (e) {
-          console.error(`RegExp parsing error: /${v[0]}/${v[1]}`);
-          return undefined;
+          if (has.call(v, 'PLAYER_VARS')) {
+            v.PLAYER_VARS.raw_player_response = JSON.parse(v.PLAYER_VARS.embedded_player_response);
+          }
+        } catch (e) {}
+        ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
+      });
+    }
+  }
+
+  // Legacy watch-page player config: filter at once, or trap until present.
+  function hookYtPlayerConfig() {
+    const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
+    if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
+      ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
+    } else {
+      trapObjectPath('ytplayer.config', undefined, (v) => {
+        const playerResp = getObjectByPath(v, 'args.player_response');
+        if (playerResp) {
+          try {
+            v.args.raw_player_response = JSON.parse(playerResp);
+          } catch (e) {}
         }
+        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
+      });
+    }
+  }
+
+  // Guide data: filter at once, or trap until present.
+  function hookGuideData() {
+    if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
+      ObjectFilter(window.ytInitialGuideData, filterRules.guide);
+    } else {
+      trapObjectPath('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
+    }
+  }
+
+  // Initial player response: filter at once (clearing the blocked flag first),
+  // or trap until present.
+  function hookInitialPlayerResponse() {
+    if (
+      typeof window.ytInitialPlayerResponse === 'object' &&
+      window.ytInitialPlayerResponse !== null
+    ) {
+      playerHasBeenBlocked = false;
+      ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
+    } else {
+      trapObjectPath('ytInitialPlayerResponse', undefined, (v) => {
+        playerHasBeenBlocked = false;
+        ObjectFilter(v, filterRules.ytPlayer);
+      });
+    }
+  }
+
+  // Initial page data: filter at once (redirecting when a block already
+  // landed), or trap until present.
+  function hookInitialData() {
+    const postActions = [fixAutoplay];
+    if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
+      ObjectFilter(
+        window.ytInitialData,
+        mergedFilterRules,
+        window.ytInitialData.contents && playerHasBeenBlocked
+          ? postActions.concat(redirectToNext)
+          : postActions,
+        true,
+      );
+    } else {
+      trapObjectPath('ytInitialData', undefined, (v) => {
+        ObjectFilter(
+          v,
+          mergedFilterRules,
+          v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
+          true,
+        );
       });
     }
   }
@@ -3231,82 +3702,12 @@
 
     try {
       if (window.location.pathname.startsWith('/embed/')) {
-        const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
-        if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
-          try {
-            ytConfigPlayerConfig.raw_player_response = JSON.parse(
-              ytConfigPlayerConfig.embedded_player_response,
-            );
-          } catch (e) {}
-          ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
-        } else {
-          trapObjectPath('yt.config_', undefined, (v) => {
-            try {
-              if (has.call(v, 'PLAYER_VARS')) {
-                v.PLAYER_VARS.raw_player_response = JSON.parse(
-                  v.PLAYER_VARS.embedded_player_response,
-                );
-              }
-            } catch (e) {}
-            ObjectFilter(window.yt.config_, filterRules.ytPlayer, [playerMiscFilters]);
-          });
-        }
+        hookEmbedConfig();
       }
-
-      const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
-      if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
-        ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
-      } else {
-        trapObjectPath('ytplayer.config', undefined, (v) => {
-          const playerResp = getObjectByPath(v, 'args.player_response');
-          if (playerResp) {
-            try {
-              v.args.raw_player_response = JSON.parse(playerResp);
-            } catch (e) {}
-          }
-          ObjectFilter(window.ytplayer.config, filterRules.ytPlayer, [playerMiscFilters]);
-        });
-      }
-
-      if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
-        ObjectFilter(window.ytInitialGuideData, filterRules.guide);
-      } else {
-        trapObjectPath('ytInitialGuideData', undefined, (v) => ObjectFilter(v, filterRules.guide));
-      }
-
-      if (
-        typeof window.ytInitialPlayerResponse === 'object' &&
-        window.ytInitialPlayerResponse !== null
-      ) {
-        playerHasBeenBlocked = false;
-        ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
-      } else {
-        trapObjectPath('ytInitialPlayerResponse', undefined, (v) => {
-          playerHasBeenBlocked = false;
-          ObjectFilter(v, filterRules.ytPlayer);
-        });
-      }
-
-      const postActions = [fixAutoplay];
-      if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
-        ObjectFilter(
-          window.ytInitialData,
-          mergedFilterRules,
-          window.ytInitialData.contents && playerHasBeenBlocked
-            ? postActions.concat(redirectToNext)
-            : postActions,
-          true,
-        );
-      } else {
-        trapObjectPath('ytInitialData', undefined, (v) => {
-          ObjectFilter(
-            v,
-            mergedFilterRules,
-            v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
-            true,
-          );
-        });
-      }
+      hookYtPlayerConfig();
+      hookGuideData();
+      hookInitialPlayerResponse();
+      hookInitialData();
     } catch (e) {
       console.error('BlockTube startHook exception (data left in place)', e);
     }
@@ -3315,17 +3716,11 @@
     fireBlockTubeReady();
   }
 
-  // Storage payload pushed by the background (via the content_script contract);
-  // `options` keys are BLOCKTUBE_CONSTS.OPTIONS (alias OPT in rules.js).
-  function storageReceived(data) {
-    if (data === undefined) {
-      window.blockTubeDispatched = true;
-      fireBlockTubeReady();
-      return;
-    }
-    // Page-forgeable message (FROM_CONTENT is public): drop anything that
-    // isn't a real storage payload so a garbage shape can't throw or poison
-    // storageData. Genuine payloads always pass (arrays/strings below).
+  // Page-forgeable message (FROM_CONTENT is public): drop anything that
+  // isn't a real storage payload so a garbage shape can't throw or poison
+  // storageData. Genuine payloads always pass (arrays/strings below).
+  // Returns true when the payload shape is safe to consume.
+  function isValidStoragePayload(data) {
     if (
       typeof data !== 'object' ||
       data === null ||
@@ -3334,37 +3729,30 @@
       typeof data.options !== 'object' ||
       data.options === null
     ) {
-      return;
+      return false;
     }
     // Non-array props would throw later at block*`.push`/match`.some`.
     for (let idx = 0; idx < regexProps.length; idx += 1) {
       const prop = data.filterData[regexProps[idx]];
-      if (prop !== undefined && !Array.isArray(prop)) return;
+      if (prop !== undefined && !Array.isArray(prop)) return false;
     }
     // The allowlist stays out of regexProps (so blacklist loops ignore it)
     // but must still be an array when present.
     if (data.filterData.whitelist !== undefined && !Array.isArray(data.filterData.whitelist))
-      return;
+      return false;
     if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
-      return;
-    if (
-      data.filterData.javascript !== undefined &&
-      typeof data.filterData.javascript !== 'string'
-    ) {
-      return;
-    }
-    transformToRegExp(data);
-    if (data.options[OPT.TRENDING]) blockTrending(data);
-    if (data.options[OPT.MIXES]) blockMixes(data);
-    if (data.options[OPT.SHORTS]) blockShorts(data);
+      return false;
+    return (
+      data.filterData.javascript === undefined || typeof data.filterData.javascript === 'string'
+    );
+  }
 
-    storageData = data;
-
-    // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
-    // is MAIN-realm, so it grants no extra capability there (page scripts can
-    // already eval); the gate exists to keep it a deliberate user opt-in.
-    // Whitelist mode forces it off for the session: user JS that allows
-    // content back in would defeat the mode and complicate the audit.
+  // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
+  // is MAIN-realm, so it grants no extra capability there (page scripts can
+  // already eval); the gate exists to keep it a deliberate user opt-in.
+  // Whitelist mode forces it off for the session: user JS that allows
+  // content back in would defeat the mode and complicate the audit.
+  function setupJsFilter() {
     const jsOptIn =
       storageData.options[OPT.ENABLE_JAVASCRIPT] && !storageData.options[OPT.WHITELIST_MODE];
     if (jsOptIn && storageData.filterData.javascript) {
@@ -3381,6 +3769,26 @@
     } else {
       jsFilterEnabled = false;
     }
+  }
+
+  // Storage payload pushed by the background (via the content_script contract);
+  // `options` keys are BLOCKTUBE_CONSTS.OPTIONS (alias OPT in rules.js).
+  function storageReceived(data) {
+    if (data === undefined) {
+      window.blockTubeDispatched = true;
+      fireBlockTubeReady();
+      return;
+    }
+    if (!isValidStoragePayload(data)) {
+      return;
+    }
+    transformToRegExp(data);
+    if (data.options[OPT.TRENDING]) blockTrending(data);
+    if (data.options[OPT.MIXES]) blockMixes(data);
+    if (data.options[OPT.SHORTS]) blockShorts(data);
+
+    storageData = data;
+    setupJsFilter();
 
     noActiveFilters = computeNoActiveFilters();
 

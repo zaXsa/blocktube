@@ -287,107 +287,141 @@ chrome.storage.local.get(
   utils.initFromStorage,
 );
 
+// Sanitize forwarded context-block entries: keep the first `//` annotation
+// (whitespace-collapsed, capped) and up to 100 charset-safe ids. Comments are
+// inert to filtering (compileRegex skips `//` lines); they are the annotations
+// users read in the block list. Null when there is nothing to store.
+function sanitizeContextBlockEntries(entries) {
+  let comment;
+  const safeEntries = [];
+  entries.forEach((entry) => {
+    if (typeof entry !== 'string' || entry.length === 0) return;
+    if (entry.startsWith('//')) {
+      const clean = entry.replace(/\s+/g, ' ').trim();
+      if (clean && comment === undefined) comment = clean.slice(0, 200);
+      return;
+    }
+    if (entry.length <= 64 && safeEntries.length < 100 && /^[A-Za-z0-9_-]+$/.test(entry)) {
+      safeEntries.push(entry);
+    }
+  });
+  if (safeEntries.length === 0 && comment === undefined) return null;
+  return { comment, safeEntries };
+}
+
+// Resolve the target filter array for a block type. `unwhitelist` removes
+// from the allowlist instead of adding to its own list. Initializes a missing
+// allowlist on pre-whitelist blobs; anything else non-array is corrupt — null.
+function resolveBlockFilterArr(blockType, isRemoval) {
+  const filterArr = isRemoval ? storage.filterData.whitelist : storage.filterData[blockType];
+  if (Array.isArray(filterArr)) return filterArr;
+  // Pre-whitelist stored blobs lack the allowlist: initialize it so
+  // menu allowlisting works without an options-page save first.
+  // Anything else non-array is corrupt storage: never throw here.
+  if ((blockType === 'whitelist' || isRemoval) && storage.filterData.whitelist === undefined) {
+    storage.filterData.whitelist = [];
+    return storage.filterData.whitelist;
+  }
+  return null;
+}
+
+// Apply an allowlist removal: drop every listed id, then drop the provenance
+// comments orphaned by the removal (see pruneOrphanAnnotations). True when a
+// storage write happened.
+function applyWhitelistRemoval(filterArr, safeEntries) {
+  // Removal never writes annotations: drop every listed id that is
+  // present, then drop the provenance comments left orphaned by the
+  // removal (same grouping the options page uses — see
+  // pruneOrphanAnnotations). Everything else stays byte-identical.
+  const doomed = new Set(safeEntries);
+  if (doomed.size === 0) return false;
+  const kept = filterArr.filter((line) => !doomed.has(line));
+  if (kept.length === filterArr.length) return false;
+  storage.filterData.whitelist = pruneOrphanAnnotations(kept);
+  chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: storage });
+  return true;
+}
+
+// Append new ids (plus the provenance comment, unless already stored) to the
+// filter array, separated as one options-editor group. True on a write; a
+// repeat block of an already-listed id is a no-op (never store a lone comment
+// without its id — the duplication the menu produced on second tap).
+function appendBlockEntries(filterArr, safeEntries, comment) {
+  const existing = new Set(filterArr);
+  const newEntries = safeEntries.filter((id) => !existing.has(id));
+  // A repeat allowlist/block of an already-listed id must be a no-op:
+  // never store a lone provenance comment without its id (that is the
+  // comment-only duplication the menu produced on second tap).
+  if (newEntries.length === 0) return false;
+  if (comment !== undefined && !existing.has(comment)) newEntries.unshift(comment);
+  filterArr.push(...newEntries);
+  // Blank line separates each context-menu group in the options editor,
+  // matching the pre-hardening stored format (compileRegex ignores '').
+  filterArr.push('');
+  chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: storage });
+  return true;
+}
+
+// Handle one CONTEXT_BLOCK port message: re-validate the forwarded payload
+// (the page can forge CONTEXT_BLOCK_DATA, so type must be whitelisted and ids
+// must look like real YouTube ids — a forged `.*` would match everything),
+// throttle per tab, then write or remove.
+function handleContextBlockMessage(msg, key) {
+  const blockType = msg.data && msg.data.type;
+  if (!CONTEXT_BLOCK_TYPES.includes(blockType)) return;
+  const entries = msg.data && msg.data.entries;
+  if (!(entries instanceof Array) || entries.length === 0) return;
+
+  const sanitized = sanitizeContextBlockEntries(entries);
+  if (!sanitized) return;
+
+  // `unwhitelist` removes from the allowlist instead of adding to its
+  // own list.
+  const isRemoval = blockType === 'unwhitelist';
+  const filterArr = resolveBlockFilterArr(blockType, isRemoval);
+  if (!filterArr) return;
+
+  // Throttle per tab + dedup + bound total, so a flood can't churn
+  // storage.set / recompile / broadcast or grow storage without limit.
+  const now = Date.now();
+  if (now - (blockTimestamps.get(key) || 0) < 1000) return;
+  blockTimestamps.set(key, now);
+
+  if (isRemoval) {
+    applyWhitelistRemoval(filterArr, sanitized.safeEntries);
+    return;
+  }
+  appendBlockEntries(filterArr, sanitized.safeEntries, sanitized.comment);
+}
+
+// Route one port message by type (currently only context blocks).
+function handlePortMessage(msg, key) {
+  switch (msg.type) {
+    case BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK: {
+      handleContextBlockMessage(msg, key);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// Drop a dead port from the registry (postMessage to closed tabs throws;
+// broadcasts treat that as a non-event).
+function handlePortDisconnect(key, port) {
+  if (chrome.runtime && chrome.runtime.lastError) {
+    void chrome.runtime.lastError.message;
+  }
+  if (ports.get(key) === port) {
+    ports.delete(key);
+  }
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   const key = port.sender.contextId || port.sender.frameId;
-  port.onDisconnect.addListener(() => {
-    if (chrome.runtime && chrome.runtime.lastError) {
-      void chrome.runtime.lastError.message;
-    }
-    if (ports.get(key) === port) {
-      ports.delete(key);
-    }
-  });
+  port.onDisconnect.addListener(() => handlePortDisconnect(key, port));
   ports.set(key, port);
-  port.onMessage.addListener((msg) => {
-    switch (msg.type) {
-      case BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK: {
-        // Re-validate what the content script forwarded: the page can forge
-        // CONTEXT_BLOCK_DATA, so type must be whitelisted and ids must look
-        // like real YouTube ids (a forged `.*` would match everything).
-        const blockType = msg.data && msg.data.type;
-        if (!CONTEXT_BLOCK_TYPES.includes(blockType)) break;
-        const entries = msg.data && msg.data.entries;
-        if (!(entries instanceof Array) || entries.length === 0) break;
-
-        // Comments (inert to filtering: compileRegex skips `//` lines) are the
-        // context-menu annotations users read in the block list. Keep the
-        // first one, but re-sanitize: a forged page can send arbitrary text,
-        // so strip newlines/control chars and cap length. Ids stay regex-safe
-        // via whitelist charset + 64-char cap.
-        let comment;
-        const safeEntries = [];
-        entries.forEach((entry) => {
-          if (typeof entry !== 'string' || entry.length === 0) return;
-          if (entry.startsWith('//')) {
-            const clean = entry.replace(/\s+/g, ' ').trim();
-            if (clean && comment === undefined) comment = clean.slice(0, 200);
-            return;
-          }
-          if (entry.length <= 64 && safeEntries.length < 100 && /^[A-Za-z0-9_-]+$/.test(entry)) {
-            safeEntries.push(entry);
-          }
-        });
-        if (safeEntries.length === 0 && comment === undefined) break;
-
-        let filterArr = storage.filterData[blockType];
-        // `unwhitelist` removes from the allowlist instead of adding to its
-        // own list.
-        const isRemoval = blockType === 'unwhitelist';
-        if (isRemoval) {
-          filterArr = storage.filterData.whitelist;
-        }
-        if (!Array.isArray(filterArr)) {
-          // Pre-whitelist stored blobs lack the allowlist: initialize it so
-          // menu allowlisting works without an options-page save first.
-          // Anything else non-array is corrupt storage: never throw here.
-          if (
-            (blockType === 'whitelist' || isRemoval) &&
-            storage.filterData.whitelist === undefined
-          ) {
-            storage.filterData.whitelist = [];
-            filterArr = storage.filterData.whitelist;
-          } else {
-            break;
-          }
-        }
-
-        // Throttle per tab + dedup + bound total, so a flood can't churn
-        // storage.set / recompile / broadcast or grow storage without limit.
-        const now = Date.now();
-        if (now - (blockTimestamps.get(key) || 0) < 1000) break;
-        blockTimestamps.set(key, now);
-
-        if (isRemoval) {
-          // Removal never writes annotations: drop every listed id that is
-          // present, then drop the provenance comments left orphaned by the
-          // removal (same grouping the options page uses — see
-          // pruneOrphanAnnotations). Everything else stays byte-identical.
-          const doomed = new Set(safeEntries);
-          if (doomed.size === 0) break;
-          const kept = filterArr.filter((line) => !doomed.has(line));
-          if (kept.length === filterArr.length) break;
-          storage.filterData.whitelist = pruneOrphanAnnotations(kept);
-          chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: storage });
-          break;
-        }
-
-        const existing = new Set(filterArr);
-        const newEntries = safeEntries.filter((id) => !existing.has(id));
-        // A repeat allowlist/block of an already-listed id must be a no-op:
-        // never store a lone provenance comment without its id (that is the
-        // comment-only duplication the menu produced on second tap).
-        if (newEntries.length === 0) break;
-        if (comment !== undefined && !existing.has(comment)) newEntries.unshift(comment);
-        if (newEntries.length === 0) break;
-        filterArr.push(...newEntries);
-        // Blank line separates each context-menu group in the options editor,
-        // matching the pre-hardening stored format (compileRegex ignores '').
-        filterArr.push('');
-        chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: storage });
-        break;
-      }
-    }
-  });
+  port.onMessage.addListener((msg) => handlePortMessage(msg, key));
   utils.sendFilters(port);
 });
 
