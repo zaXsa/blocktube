@@ -336,6 +336,38 @@
     return (event) => handleCommentMenuTap(event, anchorEl, type);
   }
 
+  // Unicode word-boundary class, mirrored from background.js compileRegex:
+  // plain keywords only match beside these separators (or string ends).
+  const COMMENT_KEYWORD_BOUNDARY =
+    '[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:\'",\\.\\/<>\\?`~:]+';
+
+  // Escape one plain keyword exactly like background.js compileRegex.
+  function escapeCommentKeyword(keyword) {
+    return keyword.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&');
+  }
+
+  // Compile one collapsed editor entry to a live RegExp, mirroring
+  // background.js compileRegex for the comment list: /pattern/flags is raw
+  // regex, anything else a boundary-wrapped case-insensitive keyword.
+  // Undefined when the entry cannot compile — never throws.
+  function compileCommentRuleLive(clean) {
+    const text = typeof clean === 'string' ? clean : '';
+    if (text.length === 0 || text.startsWith('//')) return undefined;
+    const parts = /^\/(.*)\/(.*)$/.exec(text);
+    const pair =
+      parts !== null
+        ? [parts[1], parts[2]]
+        : [
+            `(^|${COMMENT_KEYWORD_BOUNDARY})(${escapeCommentKeyword(text)})(${COMMENT_KEYWORD_BOUNDARY}|$)`,
+            'i',
+          ];
+    try {
+      return compileOneRegExp(pair);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
   // Style one dialog node through CSSOM only (no <style>, no innerHTML),
   // so page CSP and Trusted Types stay out of the way.
   function styleDialogNode(node, styles) {
@@ -368,15 +400,55 @@
   }
 
   // Save one validated editor entry: post it as a comment rule, replace
-  // the thread with a placeholder, and close. No toast — the placeholder
-  // is the confirmation.
+  // the thread with a placeholder, live-block every other visible match
+  // (no reload), and close. No toast — the placeholders are the
+  // confirmation.
   function saveCommentTextDialog(back, anchorEl, clean) {
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
       type: 'comment',
       info: { id: clean, text: clean, via: 'comment' },
     });
     placeholderCommentThread(anchorEl, commentPlaceholderMessage('comment'));
+    applyCommentRuleLive(clean);
     closeCommentTextDialog(back);
+  }
+
+  // Comment-level nodes for the live sweep: top-level and reply renderers
+  // in both the legacy and the new view-model UI.
+  const LIVE_COMMENT_SELECTORS = 'ytd-comment-renderer, ytd-comment-view-model';
+
+  // Placeholder one rendered comment when the live rule matches its text.
+  // Detached nodes (an already-placeholdered thread) are skipped.
+  function liveBlockCommentNode(node, rule) {
+    try {
+      if (!node || node.nodeType !== 1 || node.isConnected === false) return false;
+      const text = commentFullText(node);
+      if (text.length === 0 || !testFilterEntry(rule, text)) return false;
+    } catch (e) {
+      return false;
+    }
+    placeholderCommentThread(node, commentPlaceholderMessage('comment'));
+    return true;
+  }
+
+  // Apply one freshly saved comment rule to the comments already on the
+  // page — no reload. The tapped thread is gone by now (placeholdered
+  // above); every other visible match goes the same way. Returns the
+  // blocked count.
+  function applyCommentRuleLive(clean) {
+    const rule = compileCommentRuleLive(clean);
+    if (!rule || typeof document === 'undefined' || !document.querySelectorAll) return 0;
+    let nodes = null;
+    try {
+      nodes = document.querySelectorAll(LIVE_COMMENT_SELECTORS);
+    } catch (e) {
+      return 0;
+    }
+    let blocked = 0;
+    for (let i = 0; i < nodes.length; i += 1) {
+      if (liveBlockCommentNode(nodes[i], rule)) blocked += 1;
+    }
+    return blocked;
   }
 
   // Revalidate the editor against the current field state. Returns the
@@ -637,8 +709,16 @@
       }
     };
     field.addEventListener('input', revalidate);
+    // A text-selection drag that starts in the field and releases outside
+    // fires `click` on the common ancestor (the backdrop) — that must not
+    // count as click-outside. Only a press that started on the backdrop
+    // itself dismisses the dialog.
+    let downOnBack = false;
+    back.addEventListener('mousedown', (event) => {
+      downOnBack = !!event && event.target === back;
+    });
     back.addEventListener('click', (event) => {
-      if (event && event.target === back && Date.now() - openedAt > 300) close();
+      if (event && event.target === back && downOnBack && Date.now() - openedAt > 300) close();
     });
     back.addEventListener('keydown', (event) => onCommentDialogKey(event, { close, trySave }));
     footer.cancel.addEventListener('click', close);

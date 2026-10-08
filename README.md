@@ -79,7 +79,7 @@ Discard, and an `Unsaved changes` flag):
   Report entry BlockTube adds `Block Channel` / `Block comment text…` /
   `Allow Channel` (in whitelist mode, `Remove from Whitelist`). The text entry
   opens an editor prefilled with the comment so you can trim it to a keyword
-  or save it as `/regex/`.
+  or save it as `/regex/`; visible matches are blocked immediately, no reload.
 
 * What is the behaviour when browsing blocked channel?  
   User will be redirected to YouTube homepage.

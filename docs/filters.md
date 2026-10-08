@@ -78,8 +78,8 @@ the words you want blocked — a plain line is stored as a case-insensitive
 keyword — or write it as `/pattern/flags` for raw regex (e.g. `/^exact$/`
 for whole-comment matches only). Validation mirrors the background rules
 (single line, 200 chars, never a `//` line, constructible regex), and saving
-replaces the thread with a `Blocked comment (text blocked)` placeholder (no
-toast). Blocking a channel works the same way with a `Blocked comment
+replaces the tapped thread — plus every other visible match, no reload —
+with a `Blocked comment (text blocked)` placeholder (no toast). Blocking a channel works the same way with a `Blocked comment
 (channel blocked)` placeholder; its Channel ID entry is annotated
 `// Blocked by comment menu (name) (date)` — the comment text itself is
 never stored there, and a leading `@` is stripped from the name. If a
