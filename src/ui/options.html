@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <!-- Synchronous pre-paint theme bootstrap (sets data-theme before the
+         stylesheets apply, so a dark-theme F5 never flashes white). Must stay
+         the first script in <head>; MV3 forbids inlining it. -->
+    <script type="text/javascript" src="theme-init.js"></script>
     <link href="cm/codemirror.css" rel="stylesheet" type="text/css">
     <link href="cm/dialog.css" rel="stylesheet" type="text/css">
     <link href="cm/fullscreen.css" rel="stylesheet" type="text/css">

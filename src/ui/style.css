@@ -72,7 +72,31 @@ select {
   }
 }
 
+/* Pre-paint viewport background: covers the frames before options.js resolves
+   the stored theme from chrome.storage (async). The OS value wins until the
+   data-theme rules below take over; theme-init.js sets data-theme
+   synchronously in <head>, so a stored preference differing from the OS still
+   paints correctly on the first frame. */
+html {
+  background-color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  html {
+    background-color: rgb(15, 15, 15);
+  }
+}
+
+html[data-theme="light"] {
+  background-color: #ffffff;
+}
+
+html[data-theme="dark"] {
+  background-color: rgb(15, 15, 15);
+}
+
 [data-theme="light"] {
+  color-scheme: light;
   --red: #EF4F43;
   --dark: #ffffff;
   --light: #e9e9e9;
@@ -85,6 +109,7 @@ select {
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --red: #EF4F43;
   --dark: rgb(15, 15, 15);
   --light: #161b22;

@@ -100,6 +100,16 @@
     }
 
     document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.removeProperty('background-color');
+    document.documentElement.style.colorScheme = theme;
+    // Sync cache for theme-init.js, which runs before this async storage
+    // read on the next load and must pick the theme without flashing.
+    try {
+      window.localStorage.setItem('blocktube-theme', theme);
+    } catch (e) {
+      // Storage unavailable (e.g. blocked): next load falls back to the OS
+      // scheme, same as before the cache existed.
+    }
     document.querySelectorAll('.CodeMirror').forEach((area) => {
       if (theme === 'dark') {
         area.classList.add('cm-darktheme');
