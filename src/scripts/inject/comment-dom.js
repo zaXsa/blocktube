@@ -956,8 +956,22 @@
     return null;
   }
 
+  // True when a press path runs through a menu/`...` button (same
+  // match as commentFromEventPath above).
+  function pathHasMenuButton(path) {
+    for (let i = 0; i < path.length; i += 1) {
+      const node = path[i];
+      if (!node || typeof node.getAttribute !== 'function') continue;
+      if (/more|action|menu/i.test(node.getAttribute('aria-label') || '')) return true;
+    }
+    return false;
+  }
+
   // Capture-phase click tracker: remembers which comment's `...` opened
-  // the popup that is about to appear.
+  // the popup that is about to appear. A `...` press outside any comment
+  // (video menus, etc.) drops the anchor instead, so a stale comment can
+  // never inherit that popup — video menus sit close enough to the
+  // comments that proximity alone cannot tell them apart.
   function trackCommentMenuAnchor(event) {
     try {
       const path =
@@ -966,7 +980,11 @@
           : [event && event.target];
       if (!path || path.length === 0) return;
       const comment = commentFromEventPath(path);
-      if (comment) lastCommentMenuAnchor = { el: comment, time: Date.now() };
+      if (comment) {
+        lastCommentMenuAnchor = { el: comment, time: Date.now() };
+      } else if (pathHasMenuButton(path)) {
+        lastCommentMenuAnchor = null;
+      }
     } catch (e) {}
   }
 
