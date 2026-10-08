@@ -396,6 +396,10 @@
           `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          // Fan-out across every stack entry so a third-or-later collaborator
+          // still matches via getFlattenByPathAll (the indexed paths above
+          // only cover the first two for the single-value reader).
+          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
         ],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
@@ -656,14 +660,17 @@
     }
     return out;
   }
+  // Avatar-stack dialog holding every collaborator on a lockupViewModel
+  // collab card (same listItemViewModel shape as the search-result byline
+  // dialogs in rules.js).
+  const LOCKUP_COLLAB_LIST_ITEMS_PATH =
+    'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
+
   // Collect every collaborator channel id from a lockupViewModel avatar stack.
   // Collab videos render one card per creator, and getFlattenByPath only
   // returns the first channelId it resolves.
   function getCollaboratorChannelIds(obj) {
-    const listItems = getObjectByPath(
-      obj,
-      'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems',
-    );
+    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
     const ids = [];
     if (Array.isArray(listItems)) {
       for (let i = 0; i < listItems.length; i += 1) {
@@ -675,6 +682,36 @@
       }
     }
     return ids;
+  }
+
+  // Collect every collaborator channel NAME from a lockupViewModel avatar
+  // stack. The channelName rule is a single-name function
+  // (lockupChannelName), so without this a blocked name listed second never
+  // matches — the channelName half of the collab gap (channelId is covered
+  // by getCollaboratorChannelIds above).
+  function getCollaboratorChannelNames(obj) {
+    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
+    const names = [];
+    if (Array.isArray(listItems)) {
+      for (let i = 0; i < listItems.length; i += 1) {
+        const item = listItems[i] && listItems[i].listItemViewModel;
+        if (!item || typeof item !== 'object') continue;
+        const title = item.title;
+        let name;
+        if (title && typeof title === 'object') {
+          if (typeof title.content === 'string' && title.content.length > 0) {
+            name = title.content;
+          } else {
+            const flat = flattenRuns(title);
+            if (typeof flat === 'string' && flat.length > 0) name = flat;
+          }
+        } else if (typeof title === 'string' && title.length > 0) {
+          name = title;
+        }
+        if (name !== undefined) names.push(name);
+      }
+    }
+    return names;
   }
 
   const pathCache = new Map();
@@ -844,7 +881,11 @@
   // /videos tab, "From <channel>" shelves) drop the channel row, so a naive
   // metadataRows path silently resolves to the VIEW COUNT instead — the wrong
   // annotation and false channelName-filter hits. Tries linked -> positional
-  // -> bare-label -> channel-type title, in that order.
+  // -> bare-label -> avatar-stack -> channel-type title, in that order. The
+  // stack pass is explicit attribution (not a positional guess), so it cannot
+  // misread a view count; without it link-less collab rows resolve to
+  // undefined and the channelName field is skipped entirely, letting every
+  // collaborator through.
   function lockupChannelName(renderer) {
     const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
     if (Array.isArray(rows)) {
@@ -855,6 +896,8 @@
       const bare = lockupBareChannelName(rows);
       if (bare !== undefined) return bare;
     }
+    const stackNames = getCollaboratorChannelNames(renderer);
+    if (stackNames.length > 0) return stackNames[0];
     return lockupTitleChannelName(renderer);
   }
 
@@ -1063,13 +1106,33 @@
   }
 
   // Collab videos (avatar stack): a blocked collaborator other than the first
-  // creator isn't caught by the single channelId above, so test every
-  // collaborator in the stack as well.
-  function isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj) {
-    if (fieldName !== 'channelId' || rendererKey !== 'lockupViewModel') return false;
-    if (filterEntries.length === 0) return false;
-    const collabIds = getCollaboratorChannelIds(obj);
-    return collabIds.some((id) => filterEntries.some((entry) => entry && entry.test(id)));
+  // creator isn't caught by the single channelId/channelName above, so test
+  // every collaborator in the stack as well. ANY match blocks, and the
+  // returned descriptor names the collaborator that actually fired.
+  function matchCollabChannel(fieldName, rendererKey, filterEntries, obj) {
+    if (rendererKey !== 'lockupViewModel') return null;
+    if (!Array.isArray(filterEntries) || filterEntries.length === 0) return null;
+    if (fieldName === 'channelId') {
+      const collabIds = getCollaboratorChannelIds(obj);
+      for (let i = 0; i < collabIds.length; i += 1) {
+        const id = collabIds[i];
+        if (filterEntries.some((entry) => entry && testFilterEntry(entry, id))) {
+          return { name: fieldName, value: String(id).slice(0, 40) };
+        }
+      }
+      return null;
+    }
+    if (fieldName === 'channelName') {
+      const collabNames = getCollaboratorChannelNames(obj);
+      for (let i = 0; i < collabNames.length; i += 1) {
+        const collabName = collabNames[i];
+        if (filterEntries.some((entry) => entry && testFilterEntry(entry, collabName))) {
+          return { name: fieldName, value: String(collabName).slice(0, 40) };
+        }
+      }
+      return null;
+    }
+    return null;
   }
 
   // Whitelist mode (generous, fail-open): a card is allowed when ANY
@@ -1079,7 +1142,7 @@
     const allowlist = storageData.filterData.whitelist || [];
     if (allowlist.length === 0) return false;
     const collabIds = getCollaboratorChannelIds(obj);
-    return collabIds.some((id) => allowlist.some((entry) => entry && entry.test(id)));
+    return collabIds.some((id) => allowlist.some((entry) => entry && testFilterEntry(entry, id)));
   }
 
   // vidLength is a mandatory [min, max] duration range in seconds; a duration
@@ -1148,16 +1211,19 @@
 
   // Regex-props branch of matchField: channelId/channelName may carry several
   // channels (search-result collab dialogs); a blocked one listed second must
-  // still match. Returns the match descriptor or null.
+  // still match. Records the MATCHED VALUE (e.g. "Linus Tech Tips"), not the
+  // compiled pattern, so the player block message names what actually fired.
   function matchFieldRegex(fieldName, value, filterEntries, allValues) {
     // channelId/channelName may carry several channels (search-result collab
     // dialogs); a blocked one listed second must still match.
     const candidates = allValues && allValues.length > 0 ? allValues : [value];
-    const matchedEntry = filterEntries.find(
-      (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
-    );
-    if (matchedEntry) {
-      return { name: fieldName, value: String(matchedEntry).slice(0, 40) };
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      if (candidate === undefined) continue;
+      const hit = filterEntries.some((entry) => entry && testFilterEntry(entry, candidate));
+      if (hit) {
+        return { name: fieldName, value: String(candidate).slice(0, 40) };
+      }
     }
     return null;
   }
@@ -1192,8 +1258,9 @@
       if (match) return { match, value };
     }
 
-    if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
-      return { match: { name: fieldName, value }, value };
+    const collabMatch = matchCollabChannel(fieldName, rendererKey, filterEntries, obj);
+    if (collabMatch) {
+      return { match: collabMatch, value };
     }
 
     if (fieldName === 'vidLength') {
@@ -2276,9 +2343,29 @@
     return undefined;
   }
 
+  // Dedupe a candidate list, dropping undefined/empty values. Returns a
+  // single value when exactly one remains (existing callers store a plain
+  // string), an array when several collaborators are present, or undefined
+  // when nothing resolved.
+  function singleOrAll(values) {
+    const seen = [];
+    const known = new Set();
+    for (let i = 0; i < values.length; i += 1) {
+      const v = values[i];
+      if (typeof v !== 'string' || v.length === 0 || known.has(v)) continue;
+      known.add(v);
+      seen.push(v);
+    }
+    if (seen.length === 0) return undefined;
+    if (seen.length === 1) return seen[0];
+    return seen;
+  }
+
   // The channel and video a renderer describes, resolved through its filter
   // rule paths. Both block entries ("Block Channel" / "Block Video") carry
-  // this pair as _btOriginalData for menuOnTap to consume later.
+  // this pair as _btOriginalData for menuOnTap to consume later. Collab
+  // cards list several channels: collect ALL of them so one "Block Channel"
+  // tap blocks every collaborator instead of only the first.
   function channelAndVideoFrom(parentData, attrKey) {
     if (attrKey === 'lockupViewModel') {
       return { channel: lockupChannelFrom(parentData), video: lockupVideoFrom(parentData) };
@@ -2286,8 +2373,8 @@
     const searchIn = mergedFilterRules[attrKey]?.properties;
     return {
       channel: {
-        id: getFlattenByPath(parentData, searchIn?.channelId),
-        text: getFlattenByPath(parentData, searchIn?.channelName),
+        id: singleOrAll(getFlattenByPathAll(parentData, searchIn?.channelId)),
+        text: singleOrAll(getFlattenByPathAll(parentData, searchIn?.channelName)),
       },
       video: {
         id: getFlattenByPath(parentData, searchIn?.videoId),
@@ -2302,13 +2389,20 @@
   // undefined id that the content script drops — the tap silently does
   // nothing — and the annotation falls back to the view count. lockupChannelName
   // (a function rule path) already refuses the view count; the page channel
-  // fills the rest.
+  // fills the rest. Collab stacks contribute every entry, so the tap blocks
+  // all collaborators at once.
   function lockupChannelFrom(renderer) {
     const searchIn = mergedFilterRules.lockupViewModel?.properties;
-    return {
-      id: getFlattenByPath(renderer, searchIn?.channelId) || pageChannel?.id,
-      text: getFlattenByPath(renderer, searchIn?.channelName) || pageChannel?.name,
-    };
+    const ids = getFlattenByPathAll(renderer, searchIn?.channelId).concat(
+      getCollaboratorChannelIds(renderer),
+    );
+    const primaryName = getFlattenByPath(renderer, searchIn?.channelName);
+    const names = (primaryName === undefined ? [] : [primaryName]).concat(
+      getCollaboratorChannelNames(renderer),
+    );
+    const id = singleOrAll(ids) || pageChannel?.id;
+    const text = singleOrAll(names) || pageChannel?.name;
+    return { id, text };
   }
 
   function lockupVideoFrom(renderer) {

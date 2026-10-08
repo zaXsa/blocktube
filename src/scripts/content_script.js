@@ -70,14 +70,13 @@
     return 'Blocked';
   }
 
-  // Resolve the annotation text for a block: the sanitized info text, or the
+  // Resolve the annotation text for a block: the sanitized info text (joined
+  // with " + " when several collaborators were blocked at once), or the
   // first id when extraction missed the label (never store an empty `()` —
   // fall back to the blocked id so the annotation stays parseable).
   function blockAnnotationText(info) {
-    let text = String(info.text || '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 200);
+    const raw = Array.isArray(info.text) ? info.text.join(' + ') : info.text || '';
+    let text = String(raw).replace(/\s+/g, ' ').trim().slice(0, 200);
     // Extraction can still miss the label on layouts the rules don't know
     // yet (the channelId resolves via the avatar while the name path
     // doesn't). Never store an empty `()` — fall back to the blocked id so

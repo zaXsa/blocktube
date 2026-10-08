@@ -120,14 +120,17 @@
     }
     return out;
   }
+  // Avatar-stack dialog holding every collaborator on a lockupViewModel
+  // collab card (same listItemViewModel shape as the search-result byline
+  // dialogs in rules.js).
+  const LOCKUP_COLLAB_LIST_ITEMS_PATH =
+    'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
+
   // Collect every collaborator channel id from a lockupViewModel avatar stack.
   // Collab videos render one card per creator, and getFlattenByPath only
   // returns the first channelId it resolves.
   function getCollaboratorChannelIds(obj) {
-    const listItems = getObjectByPath(
-      obj,
-      'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems',
-    );
+    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
     const ids = [];
     if (Array.isArray(listItems)) {
       for (let i = 0; i < listItems.length; i += 1) {
@@ -139,6 +142,36 @@
       }
     }
     return ids;
+  }
+
+  // Collect every collaborator channel NAME from a lockupViewModel avatar
+  // stack. The channelName rule is a single-name function
+  // (lockupChannelName), so without this a blocked name listed second never
+  // matches — the channelName half of the collab gap (channelId is covered
+  // by getCollaboratorChannelIds above).
+  function getCollaboratorChannelNames(obj) {
+    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
+    const names = [];
+    if (Array.isArray(listItems)) {
+      for (let i = 0; i < listItems.length; i += 1) {
+        const item = listItems[i] && listItems[i].listItemViewModel;
+        if (!item || typeof item !== 'object') continue;
+        const title = item.title;
+        let name;
+        if (title && typeof title === 'object') {
+          if (typeof title.content === 'string' && title.content.length > 0) {
+            name = title.content;
+          } else {
+            const flat = flattenRuns(title);
+            if (typeof flat === 'string' && flat.length > 0) name = flat;
+          }
+        } else if (typeof title === 'string' && title.length > 0) {
+          name = title;
+        }
+        if (name !== undefined) names.push(name);
+      }
+    }
+    return names;
   }
 
   const pathCache = new Map();
@@ -308,7 +341,11 @@
   // /videos tab, "From <channel>" shelves) drop the channel row, so a naive
   // metadataRows path silently resolves to the VIEW COUNT instead — the wrong
   // annotation and false channelName-filter hits. Tries linked -> positional
-  // -> bare-label -> channel-type title, in that order.
+  // -> bare-label -> avatar-stack -> channel-type title, in that order. The
+  // stack pass is explicit attribution (not a positional guess), so it cannot
+  // misread a view count; without it link-less collab rows resolve to
+  // undefined and the channelName field is skipped entirely, letting every
+  // collaborator through.
   function lockupChannelName(renderer) {
     const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
     if (Array.isArray(rows)) {
@@ -319,6 +356,8 @@
       const bare = lockupBareChannelName(rows);
       if (bare !== undefined) return bare;
     }
+    const stackNames = getCollaboratorChannelNames(renderer);
+    if (stackNames.length > 0) return stackNames[0];
     return lockupTitleChannelName(renderer);
   }
 

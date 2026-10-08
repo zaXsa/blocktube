@@ -44,8 +44,8 @@ mean "not applicable here", not "empty".
 | Key | Type | Notes |
 | --- | ---- | ----- |
 | `videoId` | `string` | e.g. `"dQw4w9WgXcQ"` |
-| `channelId` | `string` | e.g. `"UC..."`. For `lockupViewModel` collab videos only the first creator is in `channelId`; other collaborators are still blocked via the Channel ID filter. |
-| `channelName` | `string` | Flattened display text. |
+| `channelId` | `string` | e.g. `"UC..."`. For `lockupViewModel` collab videos every collaborator is checked — a match on ANY of them blocks. |
+| `channelName` | `string` | Flattened display text. For `lockupViewModel` collab videos every collaborator name is checked — blocking one name blocks the collab. |
 | `title` | `string` | Flattened display text. |
 | `vidLength` | `number` | Duration in seconds, parsed from YouTube's `"12:34"` text. |
 | `viewCount` | `number` | Parsed from text like `"1.5M views"` / `"No views"`. `undefined` when unparsable. |

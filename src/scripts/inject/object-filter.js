@@ -100,13 +100,33 @@
   }
 
   // Collab videos (avatar stack): a blocked collaborator other than the first
-  // creator isn't caught by the single channelId above, so test every
-  // collaborator in the stack as well.
-  function isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj) {
-    if (fieldName !== 'channelId' || rendererKey !== 'lockupViewModel') return false;
-    if (filterEntries.length === 0) return false;
-    const collabIds = getCollaboratorChannelIds(obj);
-    return collabIds.some((id) => filterEntries.some((entry) => entry && entry.test(id)));
+  // creator isn't caught by the single channelId/channelName above, so test
+  // every collaborator in the stack as well. ANY match blocks, and the
+  // returned descriptor names the collaborator that actually fired.
+  function matchCollabChannel(fieldName, rendererKey, filterEntries, obj) {
+    if (rendererKey !== 'lockupViewModel') return null;
+    if (!Array.isArray(filterEntries) || filterEntries.length === 0) return null;
+    if (fieldName === 'channelId') {
+      const collabIds = getCollaboratorChannelIds(obj);
+      for (let i = 0; i < collabIds.length; i += 1) {
+        const id = collabIds[i];
+        if (filterEntries.some((entry) => entry && testFilterEntry(entry, id))) {
+          return { name: fieldName, value: String(id).slice(0, 40) };
+        }
+      }
+      return null;
+    }
+    if (fieldName === 'channelName') {
+      const collabNames = getCollaboratorChannelNames(obj);
+      for (let i = 0; i < collabNames.length; i += 1) {
+        const collabName = collabNames[i];
+        if (filterEntries.some((entry) => entry && testFilterEntry(entry, collabName))) {
+          return { name: fieldName, value: String(collabName).slice(0, 40) };
+        }
+      }
+      return null;
+    }
+    return null;
   }
 
   // Whitelist mode (generous, fail-open): a card is allowed when ANY
@@ -116,7 +136,9 @@
     const allowlist = storageData.filterData.whitelist || [];
     if (allowlist.length === 0) return false;
     const collabIds = getCollaboratorChannelIds(obj);
-    return collabIds.some((id) => allowlist.some((entry) => entry && entry.test(id)));
+    return collabIds.some((id) =>
+      allowlist.some((entry) => entry && testFilterEntry(entry, id)),
+    );
   }
 
   // vidLength is a mandatory [min, max] duration range in seconds; a duration
@@ -185,16 +207,21 @@
 
   // Regex-props branch of matchField: channelId/channelName may carry several
   // channels (search-result collab dialogs); a blocked one listed second must
-  // still match. Returns the match descriptor or null.
+  // still match. Records the MATCHED VALUE (e.g. "Linus Tech Tips"), not the
+  // compiled pattern, so the player block message names what actually fired.
   function matchFieldRegex(fieldName, value, filterEntries, allValues) {
     // channelId/channelName may carry several channels (search-result collab
     // dialogs); a blocked one listed second must still match.
     const candidates = allValues && allValues.length > 0 ? allValues : [value];
-    const matchedEntry = filterEntries.find(
-      (entry) => entry && candidates.some((v) => testFilterEntry(entry, v)),
-    );
-    if (matchedEntry) {
-      return { name: fieldName, value: String(matchedEntry).slice(0, 40) };
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      if (candidate === undefined) continue;
+      const hit = filterEntries.some(
+        (entry) => entry && testFilterEntry(entry, candidate),
+      );
+      if (hit) {
+        return { name: fieldName, value: String(candidate).slice(0, 40) };
+      }
     }
     return null;
   }
@@ -229,8 +256,9 @@
       if (match) return { match, value };
     }
 
-    if (isCollabChannelBlocked(fieldName, rendererKey, filterEntries, obj)) {
-      return { match: { name: fieldName, value }, value };
+    const collabMatch = matchCollabChannel(fieldName, rendererKey, filterEntries, obj);
+    if (collabMatch) {
+      return { match: collabMatch, value };
     }
 
     if (fieldName === 'vidLength') {

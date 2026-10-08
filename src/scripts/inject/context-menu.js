@@ -102,9 +102,29 @@
     return undefined;
   }
 
+  // Dedupe a candidate list, dropping undefined/empty values. Returns a
+  // single value when exactly one remains (existing callers store a plain
+  // string), an array when several collaborators are present, or undefined
+  // when nothing resolved.
+  function singleOrAll(values) {
+    const seen = [];
+    const known = new Set();
+    for (let i = 0; i < values.length; i += 1) {
+      const v = values[i];
+      if (typeof v !== 'string' || v.length === 0 || known.has(v)) continue;
+      known.add(v);
+      seen.push(v);
+    }
+    if (seen.length === 0) return undefined;
+    if (seen.length === 1) return seen[0];
+    return seen;
+  }
+
   // The channel and video a renderer describes, resolved through its filter
   // rule paths. Both block entries ("Block Channel" / "Block Video") carry
-  // this pair as _btOriginalData for menuOnTap to consume later.
+  // this pair as _btOriginalData for menuOnTap to consume later. Collab
+  // cards list several channels: collect ALL of them so one "Block Channel"
+  // tap blocks every collaborator instead of only the first.
   function channelAndVideoFrom(parentData, attrKey) {
     if (attrKey === 'lockupViewModel') {
       return { channel: lockupChannelFrom(parentData), video: lockupVideoFrom(parentData) };
@@ -112,8 +132,8 @@
     const searchIn = mergedFilterRules[attrKey]?.properties;
     return {
       channel: {
-        id: getFlattenByPath(parentData, searchIn?.channelId),
-        text: getFlattenByPath(parentData, searchIn?.channelName),
+        id: singleOrAll(getFlattenByPathAll(parentData, searchIn?.channelId)),
+        text: singleOrAll(getFlattenByPathAll(parentData, searchIn?.channelName)),
       },
       video: {
         id: getFlattenByPath(parentData, searchIn?.videoId),
@@ -128,13 +148,20 @@
   // undefined id that the content script drops — the tap silently does
   // nothing — and the annotation falls back to the view count. lockupChannelName
   // (a function rule path) already refuses the view count; the page channel
-  // fills the rest.
+  // fills the rest. Collab stacks contribute every entry, so the tap blocks
+  // all collaborators at once.
   function lockupChannelFrom(renderer) {
     const searchIn = mergedFilterRules.lockupViewModel?.properties;
-    return {
-      id: getFlattenByPath(renderer, searchIn?.channelId) || pageChannel?.id,
-      text: getFlattenByPath(renderer, searchIn?.channelName) || pageChannel?.name,
-    };
+    const ids = getFlattenByPathAll(renderer, searchIn?.channelId).concat(
+      getCollaboratorChannelIds(renderer),
+    );
+    const primaryName = getFlattenByPath(renderer, searchIn?.channelName);
+    const names = (primaryName === undefined ? [] : [primaryName]).concat(
+      getCollaboratorChannelNames(renderer),
+    );
+    const id = singleOrAll(ids) || pageChannel?.id;
+    const text = singleOrAll(names) || pageChannel?.name;
+    return { id, text };
   }
 
   function lockupVideoFrom(renderer) {
