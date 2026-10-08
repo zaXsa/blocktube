@@ -30,6 +30,8 @@ Filter and block unwanted content from YouTube™.
   shortcuts, and what each filter list matches
 * [Advanced blocking](docs/advanced-blocking.md) — custom JavaScript filter
   reference (`video` fields, `objectType` renderers, examples)
+* [Reporting a missed block](docs/debugging.md) — capture the response,
+  file a reproducible issue, turn captures into tests
 
 ## Options page
 
