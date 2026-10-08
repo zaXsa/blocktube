@@ -21,7 +21,8 @@ Work while focused in one of the filter textareas:
   automatically — it is harmless but has no effect, so omit it.
 * **Lines starting with `//` are comments and are ignored** by the filter
   engine. BlockTube itself writes these when you block via the context menu
-  (`// Blocked by context menu (…) (…)` with the date) or the Add box
+  (`// Blocked by context menu (…) (…)` with the date), via a comment `...`
+  menu (`// Blocked by comment menu (…) (…)`), or the Add box
   (`// Blocked by direct add () (…)`). Allowlist entries use the same shape
   (`// Allowlisted by context menu (…) (…)` when you allow a channel).
   Removing one via `Remove from Whitelist` writes no comment: the entry is
@@ -61,6 +62,19 @@ write it as regex instead of a bare keyword:
 Blocking a channel (by name or ID) blocks its videos, comments, playlists, and
 community posts — anywhere they appear, including direct visits (you are sent
 back to the YouTube homepage).
+
+Each comment's `...` menu also carries BlockTube entries next to YouTube's
+Report: `Block Channel` (same as adding the commenter's ID to the Channel ID
+list) plus `Allow Channel` for building the allowlist, with the same block
+icon as the video menus. In whitelist mode the menu offers `Remove from
+Whitelist` instead. The entries honor the `General` menu toggles. Blocking
+replaces the thread with a `Blocked comment (channel blocked)` placeholder
+(no toast); the Channel ID entry is annotated `// Blocked by comment menu
+(name) (date)` — the comment text itself is never stored, and a leading `@`
+is stripped from the name. If a commenter's ID cannot be resolved (e.g. only
+a `@handle` link rendered and the author payload never passed through the
+filter), the tap toasts instead of blocking: add the name to the Channel name
+list from the options page in that case.
 
 ## Examples
 

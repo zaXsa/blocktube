@@ -420,6 +420,12 @@
     if (!hooksStarted) {
       startHook();
     }
+    // The comment `...` menu entries (comment-dom.js) need the real
+    // options for their labels, so the observer starts with storage in
+    // place. Guarded by typeof: the fragment may be absent in stripped builds.
+    try {
+      if (typeof startCommentObserver === 'function') startCommentObserver();
+    } catch (e) {}
   }
   // !! Start
   console.info(`BlockTube Init OK (${BLOCKTUBE_CONSTS.MESSAGES.FROM_CONTENT})`);
@@ -463,4 +469,11 @@
     openToast,
     menuOnTap,
     menuOnTapMobile,
+    startCommentObserver: typeof startCommentObserver === 'function' ? startCommentObserver : undefined,
+    resolveCommentChannel:
+      typeof resolveCommentChannel === 'function' ? resolveCommentChannel : undefined,
+    rememberCommentAuthor:
+      typeof rememberCommentAuthor === 'function' ? rememberCommentAuthor : undefined,
+    commentMenuEntries:
+      typeof commentMenuEntries === 'function' ? commentMenuEntries : undefined,
   };

@@ -119,9 +119,17 @@
         second: 'numeric',
       };
       const now = new Intl.DateTimeFormat(undefined, options).format(new Date());
-      const text = blockAnnotationText(data.info);
+      // Comment-popup taps annotate their origin (`comment menu`) and drop
+      // the handle-style leading @, so the entry records a clean name plus
+      // where it came from: `// Blocked by comment menu (name) (date)`.
+      // Anything else keeps the long-standing `context menu` wording.
+      const viaComment = data.info && data.info.via === 'comment';
+      const rawText = blockAnnotationText(data.info);
+      const stripped = viaComment ? rawText.replace(/^@+/, '').trim() : rawText;
+      const text = stripped || rawText;
       const verb = blockProvenanceVerb(blockType);
-      const entries = [`// ${verb} by context menu (${text}) (${now})`];
+      const origin = viaComment ? 'comment menu' : 'context menu';
+      const entries = [`// ${verb} by ${origin} (${text}) (${now})`];
       entries.push(...blockEntryIds(data.info));
       entries.push('');
       utils.safePortPost({

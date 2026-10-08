@@ -75,7 +75,9 @@ Discard, and an `Unsaved changes` flag):
 
 * How to block comments from specific user?  
   Blocked channels comments are removed as well, so just add the user's name/channel ID
-  to your filters
+  to your filters. You can also use the comment `...` menu: alongside YouTube's
+  Report entry BlockTube adds `Block Channel` / `Allow Channel` (in whitelist
+  mode, `Remove from Whitelist`).
 
 * What is the behaviour when browsing blocked channel?  
   User will be redirected to YouTube homepage.

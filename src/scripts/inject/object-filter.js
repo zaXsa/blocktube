@@ -374,6 +374,11 @@
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
+    // Comment menu taps join the pressed comment against the authors seen
+    // here (comment-dom.js). The try covers realms lacking that fragment.
+    try {
+      if (rendererKey === 'commentEntityPayload') rememberCommentAuthor(obj);
+    } catch (e) {}
     const opts = storageData.options;
     const fd = storageData.filterData;
 
