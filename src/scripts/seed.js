@@ -79,6 +79,7 @@
     '/youtubei/v1/next',
     '/youtubei/v1/player',
     '/youtubei/v1/get_watch',
+    '/youtubei/v1/live_chat/get_live_chat',
   ];
 
   const hooks = {

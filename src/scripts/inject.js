@@ -504,6 +504,20 @@
         channelName: ['authorName'],
         comment: 'message',
       }),
+      // New-member/gift announcements carry no `message`; their text lives
+      // in `headerSubtext` ("Welcome to ...!"). Same author fields as above.
+      liveChatMembershipItemRenderer: paths({
+        channelId: 'authorExternalChannelId',
+        channelName: ['authorName'],
+        comment: 'headerSubtext',
+      }),
+      // Super Chats (paid messages) share the text-message author/message
+      // shape plus purchase/color decoration, which needs no mapping.
+      liveChatPaidMessageRenderer: paths({
+        channelId: 'authorExternalChannelId',
+        channelName: ['authorName'],
+        comment: 'message',
+      }),
     },
   };
 
@@ -1949,6 +1963,8 @@
     } else if (url.pathname === '/youtubei/v1/player') {
       playerHasBeenBlocked = false;
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
+    } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
+      ObjectFilter(resp, filterRules.comments, [], true);
     }
   }
 

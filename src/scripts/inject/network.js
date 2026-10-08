@@ -24,6 +24,8 @@
     } else if (url.pathname === '/youtubei/v1/player') {
       playerHasBeenBlocked = false;
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
+    } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
+      ObjectFilter(resp, filterRules.comments, [], true);
     }
   }
 
