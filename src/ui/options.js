@@ -62,6 +62,7 @@
     { id: 'menu_allow_channel',    path: `options.${OPT.MENU_ALLOW_CHANNEL}`,   type: 'checkbox', default: true  },
     { id: 'menu_block_channel',    path: `options.${OPT.MENU_BLOCK_CHANNEL}`,   type: 'checkbox', default: true  },
     { id: 'menu_block_video',      path: `options.${OPT.MENU_BLOCK_VIDEO}`,     type: 'checkbox', default: true  },
+    { id: 'menu_block_comment',    path: `options.${OPT.MENU_BLOCK_COMMENT}`,   type: 'checkbox', default: true  },
     { id: 'save_shortcut',         path: `options.${OPT.SAVE_SHORTCUT}`,        type: 'checkbox', default: false },
     { id: 'enable_javascript',     path: `options.${OPT.ENABLE_JAVASCRIPT}`,    type: 'checkbox', default: false },
     { id: 'whitelist_mode',        path: `options.${OPT.WHITELIST_MODE}`,       type: 'checkbox', default: false },

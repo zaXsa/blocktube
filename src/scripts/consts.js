@@ -39,6 +39,7 @@
       MENU_ALLOW_CHANNEL: 'menu_allow_channel',
       MENU_BLOCK_CHANNEL: 'menu_block_channel',
       MENU_BLOCK_VIDEO: 'menu_block_video',
+      MENU_BLOCK_COMMENT: 'menu_block_comment',
       SAVE_SHORTCUT: 'save_shortcut',
     }),
   });
@@ -46,7 +47,15 @@
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
   // content script and the background (page scripts can forge the type field).
   // `unwhitelist` removes ids from the allowlist instead of adding them.
-  const CONTEXT_BLOCK_TYPES = Object.freeze(['channelId', 'videoId', 'whitelist', 'unwhitelist']);
+  // `comment` carries free-text comment rules (sanitized per-type in the
+  // background: single line, capped, never a `//` annotation line).
+  const CONTEXT_BLOCK_TYPES = Object.freeze([
+    'channelId',
+    'videoId',
+    'whitelist',
+    'unwhitelist',
+    'comment',
+  ]);
 
   globalThis.BLOCKTUBE_CONSTS = BLOCKTUBE_CONSTS;
   globalThis.CONTEXT_BLOCK_TYPES = CONTEXT_BLOCK_TYPES;

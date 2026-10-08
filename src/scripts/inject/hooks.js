@@ -476,4 +476,8 @@
       typeof rememberCommentAuthor === 'function' ? rememberCommentAuthor : undefined,
     commentMenuEntries:
       typeof commentMenuEntries === 'function' ? commentMenuEntries : undefined,
+    collapseCommentText:
+      typeof collapseCommentText === 'function' ? collapseCommentText : undefined,
+    validateCommentEntry:
+      typeof validateCommentEntry === 'function' ? validateCommentEntry : undefined,
   };

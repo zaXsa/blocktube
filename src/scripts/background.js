@@ -37,6 +37,7 @@ const DEFAULT_OPTIONS = {
   [OPTS.MENU_ALLOW_CHANNEL]: true,
   [OPTS.MENU_BLOCK_CHANNEL]: true,
   [OPTS.MENU_BLOCK_VIDEO]: true,
+  [OPTS.MENU_BLOCK_COMMENT]: true,
   [OPTS.SAVE_SHORTCUT]: false,
 };
 
@@ -287,13 +288,27 @@ chrome.storage.local.get(
   utils.initFromStorage,
 );
 
+// Sanitize one free-text comment filter entry: single line
+// (whitespace-collapsed, capped). Null when unusable — empty, or a `//`
+// line that would parse as an annotation instead of a rule.
+function sanitizeCommentEntry(entry) {
+  if (typeof entry !== 'string') return null;
+  const clean = entry.replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (clean.length === 0 || clean.startsWith('//')) return null;
+  return clean;
+}
+
 // Sanitize forwarded context-block entries: keep the first `//` annotation
-// (whitespace-collapsed, capped) and up to 100 charset-safe ids. Comments are
+// (whitespace-collapsed, capped) plus the payload entries — up to 100
+// charset-safe ids, or up to 10 free-text comment entries (each carries a
+// longer budget, so the count is tighter). Comments are
 // inert to filtering (compileRegex skips `//` lines); they are the annotations
 // users read in the block list. Null when there is nothing to store.
-function sanitizeContextBlockEntries(entries) {
+function sanitizeContextBlockEntries(entries, blockType) {
   let comment;
   const safeEntries = [];
+  const isText = blockType === 'comment';
+  const cap = isText ? 10 : 100;
   entries.forEach((entry) => {
     if (typeof entry !== 'string' || entry.length === 0) return;
     if (entry.startsWith('//')) {
@@ -301,7 +316,13 @@ function sanitizeContextBlockEntries(entries) {
       if (clean && comment === undefined) comment = clean.slice(0, 200);
       return;
     }
-    if (entry.length <= 64 && safeEntries.length < 100 && /^[A-Za-z0-9_-]+$/.test(entry)) {
+    if (safeEntries.length >= cap) return;
+    if (isText) {
+      const clean = sanitizeCommentEntry(entry);
+      if (clean !== null) safeEntries.push(clean);
+      return;
+    }
+    if (entry.length <= 64 && /^[A-Za-z0-9_-]+$/.test(entry)) {
       safeEntries.push(entry);
     }
   });
@@ -311,16 +332,19 @@ function sanitizeContextBlockEntries(entries) {
 
 // Resolve the target filter array for a block type. `unwhitelist` removes
 // from the allowlist instead of adding to its own list. Initializes a missing
-// allowlist on pre-whitelist blobs; anything else non-array is corrupt — null.
+// allowlist or comment list on older stored blobs; anything else non-array
+// is corrupt — null.
 function resolveBlockFilterArr(blockType, isRemoval) {
-  const filterArr = isRemoval ? storage.filterData.whitelist : storage.filterData[blockType];
+  const key = isRemoval ? 'whitelist' : blockType;
+  const filterArr = storage.filterData[key];
   if (Array.isArray(filterArr)) return filterArr;
-  // Pre-whitelist stored blobs lack the allowlist: initialize it so
-  // menu allowlisting works without an options-page save first.
+  // Pre-whitelist stored blobs lack the allowlist (and very old blobs the
+  // comment list): initialize it so menu blocking works without an
+  // options-page save first.
   // Anything else non-array is corrupt storage: never throw here.
-  if ((blockType === 'whitelist' || isRemoval) && storage.filterData.whitelist === undefined) {
-    storage.filterData.whitelist = [];
-    return storage.filterData.whitelist;
+  if ((key === 'whitelist' || key === 'comment') && storage.filterData[key] === undefined) {
+    storage.filterData[key] = [];
+    return storage.filterData[key];
   }
   return null;
 }
@@ -363,8 +387,9 @@ function appendBlockEntries(filterArr, safeEntries, comment) {
 }
 
 // Handle one CONTEXT_BLOCK port message: re-validate the forwarded payload
-// (the page can forge CONTEXT_BLOCK_DATA, so type must be whitelisted and ids
-// must look like real YouTube ids — a forged `.*` would match everything),
+// (the page can forge CONTEXT_BLOCK_DATA, so type must be whitelisted; ids
+// must look like real YouTube ids and comment text must survive the
+// per-type sanitizer — a forged `.*` would match everything),
 // throttle per tab, then write or remove.
 function handleContextBlockMessage(msg, key) {
   const blockType = msg.data && msg.data.type;
@@ -372,7 +397,7 @@ function handleContextBlockMessage(msg, key) {
   const entries = msg.data && msg.data.entries;
   if (!(entries instanceof Array) || entries.length === 0) return;
 
-  const sanitized = sanitizeContextBlockEntries(entries);
+  const sanitized = sanitizeContextBlockEntries(entries, blockType);
   if (!sanitized) return;
 
   // `unwhitelist` removes from the allowlist instead of adding to its

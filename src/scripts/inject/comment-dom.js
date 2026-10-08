@@ -258,7 +258,18 @@
       return;
     }
     const liveAnchor = freshCommentMenuAnchor() || anchorEl;
-    const target = commentMenuTapTarget(liveAnchor, type);
+    // Text blocks need no channel identity — only the comment itself, so
+    // they branch off before channel resolution.
+    if (type === 'comment') {
+      openCommentTextDialog(liveAnchor);
+      return;
+    }
+    finishCommentMenuTap(liveAnchor, type);
+  }
+
+  // Resolve, post and placeholder one channel/allow tap.
+  function finishCommentMenuTap(anchorEl, type) {
+    const target = commentMenuTapTarget(anchorEl, type);
     if (!target.channel) {
       window.blockTubeExports.openToast(
         'BlockTube could not resolve this commenter (try blocking by name from Options)',
@@ -274,12 +285,395 @@
   // Placeholder note per tap type.
   function commentPlaceholderMessage(type) {
     if (type === 'unwhitelist') return 'Removed from whitelist';
+    if (type === 'comment') return 'Blocked comment (text blocked)';
     return 'Blocked comment (channel blocked)';
+  }
+
+  // Full comment text for the editor popup: entity-payload content first,
+  // rendered text second. Whitespace-collapsed and capped well above the
+  // 200-char rule budget, so trimming happens in the editor, not here.
+  function commentFullText(el) {
+    let text;
+    try {
+      const data = commentElementData(el);
+      text = getFlattenByPath(data, ['properties.content.content', 'contentText']);
+      if (typeof text !== 'string' && el && typeof el.querySelector === 'function') {
+        const node = el.querySelector('#content-text');
+        if (node && typeof node.textContent === 'string') text = node.textContent;
+      }
+    } catch (e) {}
+    if (typeof text !== 'string') return '';
+    return text.replace(/\s+/g, ' ').trim().slice(0, 500);
+  }
+
+  // Collapse editor input exactly like the background sanitizer does
+  // (background.js sanitizeCommentEntry), so what the popup posts is what
+  // gets stored.
+  function collapseCommentText(text) {
+    const raw = text === null || text === undefined ? '' : text;
+    return String(raw).replace(/\s+/g, ' ').trim().slice(0, 200);
+  }
+
+  // Validate one collapsed editor entry. Null when valid, otherwise the
+  // error to show. Mirrors the options page: a plain line is a keyword,
+  // only a /pattern/flags shape is compiled as regex (and an invalid one
+  // blocks saving here instead of lingering in the list).
+  function validateCommentEntry(clean) {
+    if (clean.length === 0) return 'Enter some text to block.';
+    if (clean.startsWith('//')) return 'Entries starting with // are annotations, not rules.';
+    const parts = /^\/(.*)\/(.*)$/.exec(clean);
+    if (parts === null) return null;
+    try {
+      RegExp(parts[1], parts[2].replace('g', ''));
+    } catch (e) {
+      return 'Invalid regular expression.';
+    }
+    return null;
   }
 
   // Tap handler factory for one injected menu entry.
   function onCommentMenuTap(anchorEl, type) {
     return (event) => handleCommentMenuTap(event, anchorEl, type);
+  }
+
+  // Style one dialog node through CSSOM only (no <style>, no innerHTML),
+  // so page CSP and Trusted Types stay out of the way.
+  function styleDialogNode(node, styles) {
+    try {
+      const keys = Object.keys(styles);
+      for (let i = 0; i < keys.length; i += 1) node.style[keys[i]] = styles[keys[i]];
+    } catch (e) {}
+    return node;
+  }
+
+  // One labeled row for the editor dialog: a div carrying text, or a
+  // button/textarea/checkbox built by the caller. Keeps the builder below
+  // readable without a generic element factory.
+  function dialogText(text, styles) {
+    const node = document.createElement('div');
+    node.textContent = text;
+    return styleDialogNode(node, styles || {});
+  }
+
+  // The currently open editor dialog, if any. Opening a new one closes
+  // the old first, so dialogs can never stack or strand an older Save.
+  let openCommentTextBack = null;
+
+  // Close and drop the editor dialog.
+  function closeCommentTextDialog(back) {
+    try {
+      if (back && typeof back.remove === 'function') back.remove();
+    } catch (e) {}
+    if (openCommentTextBack === back) openCommentTextBack = null;
+  }
+
+  // Save one validated editor entry: post it as a comment rule, replace
+  // the thread with a placeholder, and close. No toast — the placeholder
+  // is the confirmation.
+  function saveCommentTextDialog(back, anchorEl, clean) {
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
+      type: 'comment',
+      info: { id: clean, text: clean, via: 'comment' },
+    });
+    placeholderCommentThread(anchorEl, commentPlaceholderMessage('comment'));
+    closeCommentTextDialog(back);
+  }
+
+  // Revalidate the editor against the current field state. Returns the
+  // collapsed entry (valid or not) for the save handler.
+  function revalidateCommentTextDialog(field, error, save) {
+    const clean = collapseCommentText(field.value);
+    const problem = validateCommentEntry(clean);
+    try {
+      error.textContent = problem === null ? '' : problem;
+      save.disabled = problem !== null;
+      save.style.opacity = problem === null ? '1' : '0.5';
+      save.style.cursor = problem === null ? 'pointer' : 'not-allowed';
+    } catch (e) {}
+    return clean;
+  }
+
+  // BlockTube options-page look, through CSSOM only (no <style>, no
+  // innerHTML): dark panel, bordered field and buttons (style.css theme).
+  const COMMENT_DIALOG_FONT = '"Overpass", "Open Sans", Helvetica, Arial, sans-serif';
+
+  // Panel for the editor dialog: BlockTube options-page look, through
+  // CSSOM only. Flex column so the field grows into extra space; the
+  // resize handle lives on the panel itself (width and height together).
+  function commentDialogPanel() {
+    return styleDialogNode(document.createElement('div'), {
+      backgroundColor: '#161b22',
+      color: '#ffffff',
+      fontFamily: COMMENT_DIALOG_FONT,
+      fontSize: '14px',
+      padding: '16px',
+      borderRadius: '8px',
+      border: '1px solid #30363d',
+      width: 'min(680px, 94vw)',
+      maxWidth: '94vw',
+      maxHeight: '90vh',
+      minWidth: '320px',
+      minHeight: '280px',
+      boxSizing: 'border-box',
+      display: 'flex',
+      flexDirection: 'column',
+      resize: 'both',
+      overflow: 'auto',
+    });
+  }
+
+  // Backdrop + panel shell for the editor dialog.
+  function commentDialogShell() {
+    const back = styleDialogNode(document.createElement('div'), {
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      width: '100%',
+      height: '100%',
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      zIndex: '2147483647',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    });
+    back.setAttribute('role', 'dialog');
+    back.setAttribute('aria-label', 'BlockTube: block comment text');
+    const panel = commentDialogPanel();
+    back.appendChild(panel);
+    return { back, panel };
+  }
+
+  // Title + hint header of the editor dialog. Returns the title node:
+  // it doubles as the drag handle for moving the popup.
+  function commentDialogHeader(panel) {
+    const title = dialogText('Block comment text', {
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      marginBottom: '8px',
+      cursor: 'move',
+      userSelect: 'none',
+    });
+    panel.appendChild(title);
+    panel.appendChild(
+      dialogText('Trim to the words you want blocked, exactly like the Comment content list on the options page: plain text is a case-insensitive keyword, /pattern/flags is raw regex.', {
+        opacity: '0.7',
+        marginBottom: '8px',
+        fontSize: '12px',
+      }),
+    );
+    return title;
+  }
+
+  // Editable field of the editor dialog, prefilled with the comment.
+  // Focus highlights the border (GitHub-dark accent); blur restores it.
+  // Sizing follows the panel (which carries the resize handle): the field
+  // grows into extra panel space instead of having its own handle.
+  function commentDialogField(panel, initial) {
+    const field = document.createElement('textarea');
+    field.value = initial;
+    field.rows = 8;
+    styleDialogNode(field, {
+      width: '100%',
+      boxSizing: 'border-box',
+      flex: '1 1 auto',
+      minHeight: '80px',
+      fontSize: '14px',
+      fontFamily: COMMENT_DIALOG_FONT,
+      color: '#ffffff',
+      backgroundColor: '#0f0f0f',
+      border: '1px solid #30363d',
+      padding: '8px',
+      borderRadius: '8px',
+      resize: 'none',
+      outline: 'none',
+    });
+    try {
+      field.addEventListener('focus', () => {
+        field.style.borderColor = '#1f6feb';
+      });
+      field.addEventListener('blur', () => {
+        field.style.borderColor = '#30363d';
+      });
+    } catch (e) {}
+    panel.appendChild(field);
+    return field;
+  }
+
+  // Shared BlockTube-styled dialog button shape (style.css theme).
+  const COMMENT_DIALOG_BUTTON = {
+    fontFamily: COMMENT_DIALOG_FONT,
+    fontWeight: '600',
+    fontSize: 'small',
+    color: '#ffffff',
+    backgroundColor: '#21262d',
+    paddingBlock: '.5em',
+    paddingInline: '1em',
+    borderRadius: '.3em',
+    border: '1.5px solid transparent',
+    cursor: 'pointer',
+  };
+
+  // One BlockTube-styled dialog button, with a hover lift while enabled.
+  function commentDialogButton(label, extraStyles) {
+    const button = document.createElement('button');
+    button.textContent = label;
+    styleDialogNode(button, { ...COMMENT_DIALOG_BUTTON, ...(extraStyles || {}) });
+    try {
+      button.addEventListener('mouseenter', () => {
+        if (!button.disabled) button.style.backgroundColor = '#30363d';
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.backgroundColor = COMMENT_DIALOG_BUTTON.backgroundColor;
+      });
+    } catch (e) {}
+    return button;
+  }
+
+  // Clamp one dragged panel position so the popup always stays
+  // grabbable: at least 80px of width visible, top edge never above the
+  // viewport top.
+  function clampDialogPos(left, top, boxW) {
+    const vw = window.innerWidth || 800;
+    return {
+      left: Math.min(Math.max(left, 80 - boxW), vw - 80),
+      top: Math.max(0, top),
+    };
+  }
+
+  // Track one active drag until mouse release, clamped to the viewport.
+  function trackCommentDialogDrag(panel, origin) {
+    const onMove = (move) => {
+      try {
+        const pos = clampDialogPos(
+          origin.l + move.clientX - origin.x,
+          origin.t + move.clientY - origin.y,
+          origin.w,
+        );
+        panel.style.left = `${pos.left}px`;
+        panel.style.top = `${pos.top}px`;
+      } catch (e) {}
+    };
+    const onUp = () => {
+      try {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      } catch (e) {}
+    };
+    try {
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    } catch (e) {}
+  }
+
+  // Begin one title-bar drag: lift the panel out of the centering flow at
+  // its current spot and track the pointer until release. Primary button
+  // only, so right/middle clicks still pass through to the page.
+  function startCommentDialogDrag(panel, event) {
+    if (!event || (event.button !== undefined && event.button !== 0)) return;
+    let origin = null;
+    try {
+      const box = panel.getBoundingClientRect();
+      origin = { x: event.clientX, y: event.clientY, l: box.left, t: box.top, w: box.width };
+      panel.style.position = 'absolute';
+      panel.style.margin = '0';
+      panel.style.left = `${box.left}px`;
+      panel.style.top = `${box.top}px`;
+      event.preventDefault();
+    } catch (e) {
+      return;
+    }
+    trackCommentDialogDrag(panel, origin);
+  }
+
+  // Movable popup: press-drag the title bar to move the panel, release to
+  // drop it. Mouse-only: the DOM comment menus this dialog hangs off are
+  // desktop-only by construction.
+  function makeCommentDialogMovable(panel, handle) {
+    try {
+      handle.addEventListener('mousedown', (event) => startCommentDialogDrag(panel, event));
+    } catch (e) {}
+  }
+
+  // Error line + Cancel/Save row of the editor dialog.
+  function commentDialogFooter(panel) {
+    const error = dialogText('', { color: '#EF4F43', fontSize: '12px', minHeight: '18px' });
+    panel.appendChild(error);
+    const buttons = styleDialogNode(document.createElement('div'), {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      marginTop: '8px',
+    });
+    const cancel = commentDialogButton('Cancel');
+    const save = commentDialogButton('Save block', { marginLeft: '8px' });
+    buttons.appendChild(cancel);
+    buttons.appendChild(save);
+    panel.appendChild(buttons);
+    return { error, cancel, save };
+  }
+
+  // Keyboard flow for the editor: Escape closes, Ctrl/Cmd+Enter saves.
+  function onCommentDialogKey(event, ctx) {
+    try {
+      if (event) event.stopPropagation();
+    } catch (e) {}
+    if (!event) return;
+    if (event.key === 'Escape') ctx.close();
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) ctx.trySave();
+  }
+
+  // Wire editor events: live validation, backdrop-click/Escape close,
+  // Ctrl/Cmd+Enter save, Cancel/Save buttons. Returns revalidate for the
+  // initial pass. Backdrop clicks in the first blink after opening are
+  // ignored, so the tap (or a fast double-tap) that opened the popup can
+  // never instantly dismiss it again.
+  function wireCommentTextDialog(back, field, footer, anchorEl) {
+    const close = () => closeCommentTextDialog(back);
+    const openedAt = Date.now();
+    const revalidate = () => revalidateCommentTextDialog(field, footer.error, footer.save);
+    const trySave = () => {
+      const clean = revalidate();
+      if (validateCommentEntry(clean) === null) {
+        saveCommentTextDialog(back, anchorEl, clean);
+      }
+    };
+    field.addEventListener('input', revalidate);
+    back.addEventListener('click', (event) => {
+      if (event && event.target === back && Date.now() - openedAt > 300) close();
+    });
+    back.addEventListener('keydown', (event) => onCommentDialogKey(event, { close, trySave }));
+    footer.cancel.addEventListener('click', close);
+    footer.save.addEventListener('click', trySave);
+    return revalidate;
+  }
+
+  // The editable "Block comment text" popup: prefilled with the comment and
+  // saved exactly like the Comment content list on the options page, with
+  // live validation mirroring the background sanitizer. Resizable (drag the
+  // corner), movable (drag the title), dismissed by Save/Cancel/Escape or a
+  // click outside the panel.
+  function openCommentTextDialog(anchorEl) {
+    const initial = commentFullText(anchorEl);
+    if (initial.length === 0) {
+      window.blockTubeExports.openToast('BlockTube could not read this comment’s text', 4000);
+      return;
+    }
+    if (openCommentTextBack) closeCommentTextDialog(openCommentTextBack);
+    const shell = commentDialogShell();
+    const title = commentDialogHeader(shell.panel);
+    const field = commentDialogField(shell.panel, initial);
+    const footer = commentDialogFooter(shell.panel);
+    makeCommentDialogMovable(shell.panel, title);
+    const revalidate = wireCommentTextDialog(shell.back, field, footer, anchorEl);
+    try {
+      (document.body || document.documentElement).appendChild(shell.back);
+    } catch (e) {
+      return;
+    }
+    openCommentTextBack = shell.back;
+    revalidate();
+    try {
+      field.focus();
+    } catch (e) {}
   }
 
   // Entries to offer in one comment popup, honoring the General toggles
@@ -293,6 +687,9 @@
     if (showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
       entries.push({ label: 'Block Channel', type: 'channelId' });
     }
+    if (showMenuEntry(OPT.MENU_BLOCK_COMMENT, store)) {
+      entries.push({ label: 'Block comment text…', type: 'comment' });
+    }
     if (showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) {
       entries.push({ label: 'Allow Channel', type: 'whitelist' });
     }
@@ -300,7 +697,7 @@
   }
 
   // Icon per entry type, matching the JSON menus (block NOT_INTERESTED,
-  // allow CHECK, remove REMOVE).
+  // allow CHECK, remove REMOVE; comment text blocks with the block icon).
   function commentMenuIcon(type) {
     if (type === 'whitelist') return 'CHECK';
     if (type === 'unwhitelist') return 'REMOVE';

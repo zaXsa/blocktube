@@ -65,16 +65,26 @@ back to the YouTube homepage).
 
 Each comment's `...` menu also carries BlockTube entries next to YouTube's
 Report: `Block Channel` (same as adding the commenter's ID to the Channel ID
-list) plus `Allow Channel` for building the allowlist, with the same block
-icon as the video menus. In whitelist mode the menu offers `Remove from
-Whitelist` instead. The entries honor the `General` menu toggles. Blocking
-replaces the thread with a `Blocked comment (channel blocked)` placeholder
-(no toast); the Channel ID entry is annotated `// Blocked by comment menu
-(name) (date)` — the comment text itself is never stored, and a leading `@`
-is stripped from the name. If a commenter's ID cannot be resolved (e.g. only
-a `@handle` link rendered and the author payload never passed through the
-filter), the tap toasts instead of blocking: add the name to the Channel name
-list from the options page in that case.
+list), `Block comment text…` (appends to the Comment content list), plus
+`Allow Channel` for building the allowlist, with the same block icon as the
+video menus. In whitelist mode the menu offers `Remove from Whitelist`
+instead. The entries honor the `General` menu toggles (`Show "Block comment
+text" in comment menus` gates the text entry).
+
+`Block comment text…` opens an editor prefilled with the comment: trim it to
+the words you want blocked — a plain line is stored as a case-insensitive
+keyword — or write it as `/pattern/flags` for raw regex (e.g. `/^exact$/`
+for whole-comment matches only). Validation mirrors the background rules
+(single line, 200 chars, never a `//` line, constructible regex), and saving
+replaces the thread with a `Blocked comment (text blocked)` placeholder (no
+toast). Blocking a channel works the same way with a `Blocked comment
+(channel blocked)` placeholder; its Channel ID entry is annotated
+`// Blocked by comment menu (name) (date)` — the comment text itself is
+never stored there, and a leading `@` is stripped from the name. If a
+commenter's ID cannot be resolved (e.g. only a `@handle` link rendered and
+the author payload never passed through the filter), the tap toasts instead
+of blocking: add the name to the Channel name list from the options page in
+that case.
 
 ## Examples
 
