@@ -714,33 +714,31 @@
     return `${String(row.id)}\n${row.label}\n${row.provenanceLine}`.toLowerCase();
   }
 
-  function refreshTable(key, keepPosition) {
+  function rebuildFilteredRows(key) {
     const state = tableState[key];
-    if (!state) return;
-    // Anchor on the first visible row so edits keep the exact view instead
-    // of throwing the user back to the top: re-locate it by ID after the
-    // rebuild (indices shift).
-    let anchorId = null;
-    const anchorPos = state.firstVisible || state.renderStart || 0;
-    if (keepPosition === true && state.filtered.length > 0 && anchorPos < state.filtered.length) {
-      anchorId = String(state.filtered[anchorPos].id);
-    }
-    // applyTableQuery re-parses rows fresh from the editor.
-    applyTableQuery(key);
-    if (keepPosition === true && state.filtered.length > 0) {
-      let pos = state.filtered.findIndex((row) => String(row.id) === anchorId);
-      if (pos < 0) pos = Math.min(anchorPos, state.filtered.length - 1);
-      if (pos > 0) goToTablePage(key, Math.floor(pos / TABLE_CHUNK) + 1);
-    }
-  }
-
-  function applyTableQuery(key) {
-    const state = tableState[key];
-    // Always re-parse: raw typing changes lines without touching table state.
     state.rows = BLOCKTUBE_ANNOTATIONS.parseRuleRows(tableLines(key));
     const query = state.query.trim().toLowerCase();
     state.filtered =
       query === '' ? state.rows : state.rows.filter((row) => tableRowText(row).includes(query));
+  }
+
+  function refreshTable(key, keepPosition) {
+    const state = tableState[key];
+    if (!state) return;
+    if (keepPosition !== true) return applyTableQuery(key);
+    // Page + pixel scroll are always fresh (unlike rAF-synced firstVisible):
+    // re-render the same page and put the pixels back, so a remove keeps the
+    // exact view instead of jumping to the top.
+    const scroller = $(TABLE_EDITORS[key].scroll);
+    const savedTop = scroller.scrollTop;
+    const page = Math.floor((state.renderStart || 0) / TABLE_CHUNK) + 1;
+    rebuildFilteredRows(key);
+    goToTablePage(key, page, savedTop);
+    syncTablePage(key);
+  }
+
+  function applyTableQuery(key) {
+    rebuildFilteredRows(key);
     goToTablePage(key, 1);
   }
 
@@ -785,8 +783,9 @@
   }
 
   // Jump to a 1-based page of TABLE_CHUNK rows: renders just that window
-  // (scrolling further appends from there as usual).
-  function goToTablePage(key, page) {
+  // (scrolling further appends from there as usual). Page clamps into range;
+  // scrollTop defaults to the page top, or pass the saved pixels to stay put.
+  function goToTablePage(key, page, scrollTop = 0) {
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
     const pages = Math.max(1, Math.ceil(state.filtered.length / TABLE_CHUNK));
@@ -796,7 +795,7 @@
     state.firstVisible = state.renderStart;
     $(t.rows).textContent = '';
     $(t.page).value = String(safe);
-    $(t.scroll).scrollTop = 0;
+    $(t.scroll).scrollTop = scrollTop;
     renderTablePage(key);
   }
 
@@ -1111,7 +1110,7 @@
           BLOCKTUBE_ANNOTATIONS.setRuleLabel(tableLines(key), ruleIndex, input.value),
         );
       } else {
-        refreshTable(key);
+        refreshTable(key, true);
       }
     };
     input.addEventListener('keydown', (evt) => {
@@ -1124,7 +1123,7 @@
   function startLabelEdit(key, ruleIndex, id, tr) {
     const row = findLiveRow(key, ruleIndex, id);
     if (!row) {
-      refreshTable(key);
+      refreshTable(key, true);
       return;
     }
     const input = buildLabelInput(tr.children[2], row.label);
@@ -1175,7 +1174,7 @@
     const id = tr.dataset.entryId;
     if (btn.dataset.action === 'remove') {
       if (findLiveRow(key, ruleIndex, id) === null) {
-        refreshTable(key);
+        refreshTable(key, true);
         return;
       }
       writeTableLines(key, BLOCKTUBE_ANNOTATIONS.removeRuleLines(tableLines(key), ruleIndex));
