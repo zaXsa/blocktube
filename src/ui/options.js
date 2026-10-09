@@ -50,6 +50,7 @@
     // checkboxes (options.*)
     { id: 'disable_trending',      path: `options.${OPT.TRENDING}`,             type: 'checkbox', default: false },
     { id: 'disable_shorts',        path: `options.${OPT.SHORTS}`,               type: 'checkbox', default: false },
+    { id: 'shorts_skip_blocked',  path: `options.${OPT.SHORTS_SKIP_BLOCKED}`, type: 'checkbox', default: true  },
     { id: 'disable_movies',        path: `options.${OPT.MOVIES}`,               type: 'checkbox', default: false },
     { id: 'disable_mixes',         path: `options.${OPT.MIXES}`,                type: 'checkbox', default: false },
     { id: 'disable_chips_shelves', path: `options.${OPT.CHIPS_SHELVES}`,        type: 'checkbox', default: false },

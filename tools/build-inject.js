@@ -28,6 +28,7 @@ const MODULES = [
   { path: 'src/scripts/inject/custom-filters.js' },
   { path: 'src/scripts/inject/network.js' },
   { path: 'src/scripts/inject/context-menu.js' },
+  { path: 'src/scripts/inject/shorts-overlay.js' },
   { path: 'src/scripts/inject/comment-dom.js' },
   { path: 'src/scripts/inject/hooks.js' },
 ];

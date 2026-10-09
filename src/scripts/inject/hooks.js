@@ -438,6 +438,37 @@
     // page repopulate it from fresh metadata, but until then a stale channel
     // must not attribute the new page's cards.
     pageChannel = null;
+    // Shorts skip accounting: a navigation we triggered keeps the consecutive
+    // counter; a manual one (new swipe, new page) resets it and disarms any
+    // pending sweep for the previous short. Logged when skip state exists so
+    // a skipped-innocent-video report can distinguish our navigation from a
+    // manual one. The blocked-Shorts overlay belongs to the old video either
+    // way, so it always tears down here (the next player response repaints).
+    try {
+      if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+    } catch (e) {}
+    try {
+      if (shortsSkipJustFired) {
+        shortsSkipJustFired = false;
+        btLogShorts('skip-navigated');
+      } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
+        btLogShorts('manual-navigate', { resetConsecutive: shortsConsecutiveSkips });
+        shortsConsecutiveSkips = 0;
+        shortsSkipArmedFor = null;
+        shortsSkipTriggeredAt = 0;
+      }
+    } catch (e) {}
+  });
+
+  window.addEventListener('yt-navigate-finish', () => {
+    // A blocked short prefetched before the swipe landed stored its
+    // attribution without painting (wrong video on screen then); the landed
+    // short paints now when it is the blocked one. Also repaints after a
+    // back-navigation, whose player response may come from cache with no ids
+    // left to trigger the player-response path.
+    try {
+      if (typeof shortsOverlayPaintCurrent === 'function') shortsOverlayPaintCurrent();
+    } catch (e) {}
   });
 
   // listen for messages from content script

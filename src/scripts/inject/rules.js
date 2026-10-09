@@ -15,6 +15,10 @@
     'playlistVideoRenderer',
     'lockupViewModel',
     'shortsLockupViewModel',
+    // Shorts watch-page overlay: menu entries only (blocking the playing
+    // video is handled through the player response). No filter rule on purpose
+    // — matching it would delete the reel overlay out from under the player.
+    'reelPlayerOverlayRenderer',
     'videoCardRenderer',
     'endScreenVideoRenderer',
     'endScreenPlaylistRenderer',

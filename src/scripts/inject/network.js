@@ -19,6 +19,17 @@
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
+    } else if (
+      ['/youtubei/v1/reel/reel_item_watch', '/youtubei/v1/reel/reel_watch_sequence'].includes(
+        url.pathname,
+      )
+    ) {
+      // Swiping between Shorts loads each reel (overlay, channel bar and the
+      // `...` menu the Block entries live in) through these endpoints, shaped
+      // like a watch-next response. Same treatment as /next above, minus the
+      // autoplay fixups (no two-column results here): filter what matches and
+      // stamp the Block menu entries.
+      ObjectFilter(resp, mergedFilterRules, [], true);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {

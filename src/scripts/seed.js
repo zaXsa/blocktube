@@ -71,7 +71,8 @@
     '/live_chat/get_live_chat',
   ];
 
-  // "fetch" based youtubei endpoints (search/guide moved off SPF)
+  // "fetch" based youtubei endpoints (search/guide moved off SPF, and each
+  // swiped-to Short loads its reel overlay through reel_item_watch)
   const fetchUris = [
     '/youtubei/v1/search',
     '/youtubei/v1/guide',
@@ -79,6 +80,8 @@
     '/youtubei/v1/next',
     '/youtubei/v1/player',
     '/youtubei/v1/get_watch',
+    '/youtubei/v1/reel/reel_item_watch',
+    '/youtubei/v1/reel/reel_watch_sequence',
     '/youtubei/v1/live_chat/get_live_chat',
   ];
 

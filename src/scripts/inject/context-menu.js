@@ -14,6 +14,64 @@
     return opts?.[key] !== false;
   }
 
+  // Menu diagnostics (Shorts menus, tap resolution). Enable in the page
+  // console with `localStorage.setItem('blocktube_debug_menus', '1')`, reload,
+  // reproduce, and watch the page console for `[BlockTube menus]` lines:
+  // injection reports per menu (renderer, native count, offered flags) and
+  // every Block/Allow tap reports how it resolved (which branch, stamp
+  // presence, resulting block target). A denied localStorage (or any exotic
+  // realm) degrades to off instead of throwing.
+  function btMenusDebugEnabled() {
+    try {
+      return typeof localStorage !== 'undefined' && localStorage.getItem('blocktube_debug_menus') === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function btLogMenu(...args) {
+    if (!btMenusDebugEnabled()) return;
+    try {
+      console.info('[BlockTube menus]', ...args);
+    } catch (e) {}
+  }
+
+  // Tap-target inspector for the menu diagnostics above: reports what a tap
+  // (e.g. on the native "Description" row) actually resolves from — element
+  // tag, data shape, command type and whether our blockTube stamp is
+  // reachable. That pinpoints "where the row was created": a row bound to
+  // listItemViewModel rendererContext data shows the command keys, a classic
+  // service-item row shows its serviceEndpoint, and hasStamp tells whether
+  // the tap can ever reach our channel/video identity.
+  function describeTapTarget(el) {
+    try {
+      const out = { tag: (el && el.tagName) || null };
+      const data =
+        (el && el.data) || (el && getObjectByPath(el, '__instance.props.data'));
+      if (!data || typeof data !== 'object') {
+        out.data = typeof data;
+        return out;
+      }
+      out.dataKeys = Object.keys(data);
+      const rc =
+        data.rendererContext ||
+        (data.listItemViewModel && data.listItemViewModel.rendererContext);
+      if (rc && typeof rc === 'object') {
+        out.hasRendererContext = true;
+        out.hasStamp = !!(rc.blockTube || data.blockTube);
+        const cmd = getObjectByPath(rc, 'commandContext.onTap.innertubeCommand');
+        out.cmdKeys = cmd && typeof cmd === 'object' ? Object.keys(cmd) : typeof cmd;
+      }
+      const se =
+        data.serviceEndpoint ||
+        (data.menuServiceItemRenderer && data.menuServiceItemRenderer.serviceEndpoint);
+      if (se) out.hasServiceEndpoint = true;
+      return out;
+    } catch (e) {
+      return { error: true };
+    }
+  }
+
   // The toast notification item shown after a mobile block tap ("Channel
   // blocked" rendered in place by YouTube).
   function buildToastNotificationItem(toastText) {
@@ -469,6 +527,9 @@
     if (attr === 'shortsLockupViewModel') {
       return extractShortsLockupMenuFlags(obj, attr);
     }
+    if (attr === 'reelPlayerOverlayRenderer') {
+      return extractReelOverlayMenuFlags(obj, attr);
+    }
     return extractGenericMenuFlags(obj, attr);
   }
 
@@ -563,6 +624,93 @@
     });
 
     return items;
+  }
+
+  // Watch-page branch of extractMenuItems: the reel `...` menu holds
+  // listItemViewModel entries ("Description", "Save to playlist", ...), so the
+  // lockup-style entries below render alongside natively. The channel resolves
+  // from the reel channel bar (avatar/browse link + handle text); the video id
+  // is the /shorts/<id> URL and the name is the document title. The stamp
+  // carries isWatch so taps pause the reel instead of hunting a shelf card.
+  // Null when the overlay has no menu (e.g. embeds).
+  function extractReelOverlayMenuFlags(obj, attr) {
+    const items = extractFromReelOverlay(obj[attr]);
+    if (!items) return null;
+    const channel = reelOverlayChannelFrom(obj[attr]);
+    const video = currentShortsVideo();
+    return {
+      items,
+      hasChannel: !!channel.id,
+      hasVideo: !!video.id,
+      isLockupViewModel: true,
+    };
+  }
+
+  // Menu items array of the reel overlay `...` menu. The blockTube stamp goes
+  // on the overlay itself: right-hand taps read the symbol-keyed component
+  // data wrapping it (see getRecommendedParentData), mirroring the sheet
+  // stamp of the lockup branches.
+  function extractFromReelOverlay(renderer) {
+    const items = getObjectByPath(renderer, 'menu.menuRenderer.items');
+    if (!Array.isArray(items)) return null;
+
+    const channel = reelOverlayChannelFrom(renderer);
+    const video = currentShortsVideo();
+
+    Object.defineProperty(renderer, 'blockTube', {
+      value: {
+        metadata: {
+          channelId: channel.id,
+          channelName: channel.text,
+          videoId: video.id,
+          videoName: video.text,
+          removeObject: true,
+          isShorts: true,
+          isWatch: true,
+        },
+      },
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+
+    return items;
+  }
+
+  // Channel bar paths, avatar link first, handle command-runs second. The
+  // metadataItems hop is an array; the dotted-path walker reads the first
+  // element owning the key, which is the single channel bar.
+  const REEL_CHANNEL_ID_PATHS = [
+    'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.decoratedAvatarViewModel.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+    'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
+  ];
+
+  function reelOverlayChannelFrom(renderer) {
+    return {
+      id: getFlattenByPath(renderer, REEL_CHANNEL_ID_PATHS),
+      text: getFlattenByPath(renderer, [
+        'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName.content',
+        'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName',
+      ]),
+    };
+  }
+
+  // The playing Short: id from the /shorts/<id> URL, name from the document
+  // title ("<title> - YouTube"). Both missing off-shorts (the menu branch
+  // only runs on the overlay, which only exists there, but stay fail-open).
+  function currentShortsVideo() {
+    let id;
+    let text;
+    try {
+      const match = document.location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
+      id = match ? match[1] : undefined;
+    } catch (e) {}
+    try {
+      const title = typeof document.title === 'string' ? document.title : '';
+      const name = title.replace(/\s*-\s*YouTube\s*$/, '').trim();
+      text = name.length > 0 ? name : undefined;
+    } catch (e) {}
+    return { id, text };
   }
 
   // Generic fallback for renderers with menu.menuRenderer.items
@@ -829,7 +977,28 @@
 
     const { items, hasChannel, hasVideo, isLockupViewModel, attr } = extracted;
 
+    const nativeCount = Array.isArray(items) ? items.length : 0;
     injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, obj[attr], storageData);
+
+    // Reactive renderers re-render on property assignment, not on in-place
+    // array mutation: if the reel popup bound the items array before our push
+    // (eager pre-render), a plain push stays invisible while the data looks
+    // right. Replacing the array reference notifies Polymer (property change)
+    // and Lit-style renderers (property set) alike; lazy readers see the same
+    // contents either way. Shelf sheets render lazily on open, so only the
+    // reel overlay needs this.
+    if (attr === 'reelPlayerOverlayRenderer') {
+      const menu = getObjectByPath(obj[attr], 'menu.menuRenderer');
+      if (menu && Array.isArray(menu.items)) menu.items = menu.items.slice();
+    }
+
+    btLogMenu('inject', {
+      attr,
+      nativeItems: nativeCount,
+      totalItems: Array.isArray(items) ? items.length : 0,
+      hasChannel,
+      hasVideo,
+    });
 
     // Attach metadata only if needed
     if (hasChannel || hasVideo) {
@@ -1077,6 +1246,8 @@
       },
       removeParent: false,
       stopPlayer: true,
+      isShorts: false,
+      isWatch: false,
     };
   }
 
@@ -1095,6 +1266,7 @@
       removeParent: false,
       stopPlayer: false,
       isShorts: parentData.blockTube?.metadata?.isShorts === true,
+      isWatch: parentData.blockTube?.metadata?.isWatch === true,
     };
   }
 
@@ -1106,6 +1278,8 @@
       videoData: extracted.video,
       removeParent: true,
       stopPlayer: false,
+      isShorts: false,
+      isWatch: false,
     };
   }
 
@@ -1145,6 +1319,7 @@
       removeParent: resolved.removeParent,
       stopPlayer: resolved.stopPlayer,
       isShorts: resolved.isShorts === true,
+      isWatch: resolved.isWatch === true,
     };
   }
 
@@ -1270,13 +1445,28 @@
     } catch (e) {}
   }
 
+  // Best-effort pause of the reel player after blocking the playing Short
+  // (the watch-page equivalent of stopVideo on regular watch pages). The
+  // first <video> on /shorts/ is the reel itself.
+  function pauseReelPlayer() {
+    try {
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+        return;
+      }
+      const video = document.querySelector('video');
+      if (video && typeof video.pause === 'function') video.pause();
+    } catch (e) {}
+  }
+
   // Shorts shelf cards have no native hide affordance — their sheet holds
   // only items like "Add to queue" / "Send feedback", so the cloned feedback
   // command that dismisses lockup cards leaves a Shorts card in place.
   // Dismiss it from the DOM instead: the card links to /shorts/<videoId>, so
   // the grid item wrapping that link gets the same "Blocked" placeholder the
-  // other surfaces show. Fail-open throughout: any miss leaves the card for
-  // the next data load, which the just-added filter entry already covers.
+  // other surfaces show, plus display:none so the card is gone even where the
+  // placeholder mechanism does not render. Fail-open throughout: any miss
+  // leaves the card for the next data load, which the just-added filter entry
+  // already covers.
   const SHORTS_CARD_SELECTORS = [
     'ytd-rich-item-renderer',
     'yt-lockup-view-model',
@@ -1391,13 +1581,32 @@
     // Get the parent dom and data from this
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
+    btLogMenu('resolve', {
+      menuAction,
+      isDataFromRightHandSide,
+      parentTag: parentDom && parentDom.tagName,
+      hasStamp: !!(parentData && parentData.blockTube),
+      originalAttr: parentData && parentData._btOriginalAttr,
+      target: describeTapTarget(this),
+    });
+
     // Get the data and type which is used for blocking the video
-    const { type, data, removeParent, stopPlayer, isShorts } = getBlockData(
+    const { type, data, removeParent, stopPlayer, isShorts, isWatch } = getBlockData(
       parentDom,
       parentData,
       isDataFromRightHandSide,
       menuAction,
     );
+
+    btLogMenu('block', {
+      type,
+      id: data && data.id,
+      text: data && data.text,
+      removeParent,
+      stopPlayer,
+      isShorts,
+      isWatch,
+    });
 
     // Notify system what data should be added to the block list
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
@@ -1410,13 +1619,17 @@
     // the card up with no feedback when only the stamp is checked.
     const isShortsTap = isShorts || parentData?._btOriginalAttr === 'shortsLockupViewModel';
     if (isShortsTap && isCardRemovingTap(type)) {
-      // Guaranteed feedback: shelf sheets have no native hide affordance, so
-      // without this the tap confirms with no visible effect.
+      // Guaranteed feedback first: the reel UI surfaces neither the sheet
+      // feedback nor the player error screen.
       toastShortsTap(type);
-      dismissShortsShelfCard(
-        shortsTapVideoId(parentData, type, data),
-        type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
-      );
+      if (isWatch) {
+        pauseReelPlayer();
+      } else {
+        dismissShortsShelfCard(
+          shortsTapVideoId(parentData, type, data),
+          type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
+        );
+      }
     }
     forwardMenuTap.call(this, event);
   }

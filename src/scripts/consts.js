@@ -24,6 +24,7 @@
       MIXES: 'mixes',
       CHIPS_SHELVES: 'chips_shelves',
       SHORTS: 'shorts',
+      SHORTS_SKIP_BLOCKED: 'shorts_skip_blocked',
       MOVIES: 'movies',
       SUGGESTIONS_ONLY: 'suggestions_only',
       AUTOPLAY: 'autoplay',

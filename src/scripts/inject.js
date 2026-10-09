@@ -89,6 +89,10 @@
     'playlistVideoRenderer',
     'lockupViewModel',
     'shortsLockupViewModel',
+    // Shorts watch-page overlay: menu entries only (blocking the playing
+    // video is handled through the player response). No filter rule on purpose
+    // — matching it would delete the reel overlay out from under the player.
+    'reelPlayerOverlayRenderer',
     'videoCardRenderer',
     'endScreenVideoRenderer',
     'endScreenPlaylistRenderer',
@@ -1819,13 +1823,225 @@
       return false;
     }
 
+    // disablePlayer deletes every prop below; resolve the attribution first
+    // (the skip sweep and the overlay key on it — one sweep per video).
+    const blockedAttribution = blockedPlayerAttribution(ytData);
     for (const prop of Object.getOwnPropertyNames(ytData)) {
       try {
         delete ytData[prop];
       } catch (e) {}
     }
     setPlayerBlocked(ytData);
+    skipBlockedShort(blockedAttribution.videoId);
+    try {
+      showBlockedShortOverlay(blockedAttribution, getBlockMessage());
+    } catch (e) {}
     playerHasBeenBlocked = true;
+  }
+
+  // Video id of a blocked player response, across the ytPlayer rule shapes
+  // (player response root, embed/player-config args).
+  function blockedPlayerVideoId(ytData) {
+    const candidates = [
+      'videoDetails.videoId',
+      'video_id',
+      'args.video_id',
+      'args.raw_player_response.videoDetails.videoId',
+    ];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const id = getObjectByPath(ytData, candidates[i]);
+      if (typeof id === 'string' && id.length > 0) return id;
+    }
+    return undefined;
+  }
+
+  // Skip state for blocked Shorts (see skipBlockedShort): consecutive
+  // auto-advance counter (reset on manual navigation), the video id a sweep
+  // is armed for (one sweep per video — a player response flows through
+  // several ytPlayer rules), whether the last navigation was ours, and when
+  // this video's advance was first triggered (a trigger is async — the
+  // navigation lands later — so the sweep watches for it instead of
+  // assuming).
+  let shortsConsecutiveSkips = 0;
+  let shortsSkipArmedFor = null;
+  let shortsSkipJustFired = false;
+  let shortsSkipTriggeredAt = 0;
+  // Videos already auto-advanced past once: going back to one (browser back,
+  // swipe-back, reel loop) must show the reason panel and stay — force-skip
+  // again would make the block reason unreadable. Bounded (insertion-ordered
+  // eviction) so a long session cannot grow it without limit.
+  let shortsSkipFiredIds = new Set();
+  const SHORTS_SKIP_FIRED_CAP = 100;
+  // Give up auto-advancing after this many consecutive blocked shorts so a
+  // wall of blocked content (e.g. a fully-blocked channel's reel) can never
+  // machine-gun the player; the ERROR status above still stops playback.
+  const SHORTS_SKIP_CAP = 15;
+
+  // Shorts diagnostics. Enable in the page console with
+  // `localStorage.setItem('blocktube_debug', '1')` (the menus flag from
+  // context-menu.js enables these too), reload, and watch the page console
+  // for `[BlockTube shorts]` lines: sweep scheduling, triggers and cap hits.
+  function btDebugEnabled() {
+    try {
+      if (typeof localStorage === 'undefined') return false;
+      return (
+        localStorage.getItem('blocktube_debug') === '1' ||
+        localStorage.getItem('blocktube_debug_menus') === '1'
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function btLogShorts(...args) {
+    if (!btDebugEnabled()) return;
+    try {
+      console.info('[BlockTube shorts]', ...args);
+    } catch (e) {}
+  }
+
+  // Blocked Shorts are removed, never messaged: advance the reel to the next
+  // short instead of painting anything over the player (an overlay can never
+  // be aligned reliably across layouts). Runs as a short fail-open sweep;
+  // when it cannot advance, the ERROR status above is the whole effect (the
+  // short stays frozen instead of playing). Prefetched (not yet watched)
+  // shorts stay silent until swiped to; non-Shorts pages keep the native
+  // error screen. Exotic realms without timers never schedule the sweep.
+  function skipBlockedShort(videoId) {
+    if (typeof videoId !== 'string' || videoId.length === 0) return;
+    try {
+      if (!document.location.pathname.startsWith('/shorts/')) return;
+    } catch (e) {
+      return;
+    }
+    try {
+      if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return;
+    } catch (e) {
+      return;
+    }
+    if (shortsSkipArmedFor === videoId) return;
+    if (shortsSkipFiredIds.has(videoId)) {
+      btLogShorts('skip-already-fired', { videoId });
+      return;
+    }
+    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) {
+      btLogShorts('skip-cap', { videoId, consecutive: shortsConsecutiveSkips });
+      return;
+    }
+    shortsSkipArmedFor = videoId;
+    shortsSkipTriggeredAt = 0;
+    btLogShorts('skip-sweep-start', { videoId });
+    if (typeof setInterval !== 'function') return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      let done = false;
+      try {
+        done = skipBlockedShortTick(videoId, tries);
+      } catch (e) {
+        done = false;
+      }
+      if (done || tries >= 24) {
+        try {
+          clearInterval(timer);
+        } catch (e) {}
+        if (shortsSkipArmedFor === videoId) shortsSkipArmedFor = null;
+      }
+    }, 250);
+  }
+
+  // One sweep tick: still on the blocked short? Actuate at most ONCE per
+  // video and then only watch for the navigation. Two races make anything
+  // more dangerous than that: a manual swipe can land while the URL still
+  // shows the armed video (a tick in that window would swipe the user off an
+  // innocent short), and a retry after a keys trigger can double-advance past
+  // an unblocked short. So: wait out the first ticks for the URL to settle,
+  // fire a single trigger, then watch (or time out). True when navigated
+  // away or when no navigation followed the trigger within a few seconds.
+  function skipBlockedShortTick(videoId, tries) {
+    try {
+      if (document.location.pathname !== `/shorts/${videoId}`) return true;
+    } catch (e) {
+      return true;
+    }
+    if (shortsSkipTriggeredAt > 0) {
+      try {
+        if (Date.now() - shortsSkipTriggeredAt > 4000) {
+          btLogShorts('skip-timeout', { videoId });
+          return true;
+        }
+      } catch (e) {
+        return true;
+      }
+      return false;
+    }
+    if (tries < 3) return false;
+    if (advanceReelToNext()) {
+      shortsConsecutiveSkips += 1;
+      shortsSkipJustFired = true;
+      shortsSkipTriggeredAt = Date.now();
+      shortsSkipFiredIds.add(videoId);
+      if (shortsSkipFiredIds.size > SHORTS_SKIP_FIRED_CAP) {
+        shortsSkipFiredIds.delete(shortsSkipFiredIds.values().next().value);
+      }
+      btLogShorts('skip-fired', { videoId, consecutive: shortsConsecutiveSkips });
+    }
+    return false;
+  }
+
+  // Click YouTube's own Next button. True when clicked (navigation lands
+  // async — the tick watches for it).
+  function clickReelNextButton() {
+    const buttons = document.querySelectorAll('button');
+    if (!buttons) return false;
+    for (let i = 0; i < buttons.length; i += 1) {
+      const label = buttons[i].getAttribute && buttons[i].getAttribute('aria-label');
+      if (typeof label === 'string' && /next video/i.test(label)) {
+        buttons[i].click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Send the ArrowDown swipe shortcut, never into text entry (that would
+  // type, not swipe). True when dispatched (delivery is not confirmable —
+  // the tick watches for the navigation instead).
+  function sendReelSwipeKeys() {
+    const active = document.activeElement;
+    const tag = active && active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (active && active.isContentEditable)) {
+      return false;
+    }
+    const target = document.querySelector('video') || document.body;
+    if (!target || typeof target.dispatchEvent !== 'function') return false;
+    ['keydown', 'keyup'].forEach((eventType) => {
+      target.dispatchEvent(
+        new KeyboardEvent(eventType, {
+          key: 'ArrowDown',
+          code: 'ArrowDown',
+          keyCode: 40,
+          which: 40,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    return true;
+  }
+
+  // Advance the reel via YouTube's own affordances. Next button first (a
+  // semantic advance regardless of focus); the ArrowDown swipe shortcut as
+  // fallback. True when an advance was triggered (its navigation lands
+  // async).
+  function advanceReelToNext() {
+    try {
+      if (clickReelNextButton()) return true;
+    } catch (e) {}
+    try {
+      return sendReelSwipeKeys();
+    } catch (e) {}
+    return false;
   }
 
   function blockPlaylistVid(pl) {
@@ -2092,6 +2308,17 @@
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
+    } else if (
+      ['/youtubei/v1/reel/reel_item_watch', '/youtubei/v1/reel/reel_watch_sequence'].includes(
+        url.pathname,
+      )
+    ) {
+      // Swiping between Shorts loads each reel (overlay, channel bar and the
+      // `...` menu the Block entries live in) through these endpoints, shaped
+      // like a watch-next response. Same treatment as /next above, minus the
+      // autoplay fixups (no two-column results here): filter what matches and
+      // stamp the Block menu entries.
+      ObjectFilter(resp, mergedFilterRules, [], true);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {
@@ -2306,6 +2533,64 @@
   function showMenuEntry(key, store) {
     const opts = (store || storageData)?.options;
     return opts?.[key] !== false;
+  }
+
+  // Menu diagnostics (Shorts menus, tap resolution). Enable in the page
+  // console with `localStorage.setItem('blocktube_debug_menus', '1')`, reload,
+  // reproduce, and watch the page console for `[BlockTube menus]` lines:
+  // injection reports per menu (renderer, native count, offered flags) and
+  // every Block/Allow tap reports how it resolved (which branch, stamp
+  // presence, resulting block target). A denied localStorage (or any exotic
+  // realm) degrades to off instead of throwing.
+  function btMenusDebugEnabled() {
+    try {
+      return (
+        typeof localStorage !== 'undefined' && localStorage.getItem('blocktube_debug_menus') === '1'
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function btLogMenu(...args) {
+    if (!btMenusDebugEnabled()) return;
+    try {
+      console.info('[BlockTube menus]', ...args);
+    } catch (e) {}
+  }
+
+  // Tap-target inspector for the menu diagnostics above: reports what a tap
+  // (e.g. on the native "Description" row) actually resolves from — element
+  // tag, data shape, command type and whether our blockTube stamp is
+  // reachable. That pinpoints "where the row was created": a row bound to
+  // listItemViewModel rendererContext data shows the command keys, a classic
+  // service-item row shows its serviceEndpoint, and hasStamp tells whether
+  // the tap can ever reach our channel/video identity.
+  function describeTapTarget(el) {
+    try {
+      const out = { tag: (el && el.tagName) || null };
+      const data = (el && el.data) || (el && getObjectByPath(el, '__instance.props.data'));
+      if (!data || typeof data !== 'object') {
+        out.data = typeof data;
+        return out;
+      }
+      out.dataKeys = Object.keys(data);
+      const rc =
+        data.rendererContext || (data.listItemViewModel && data.listItemViewModel.rendererContext);
+      if (rc && typeof rc === 'object') {
+        out.hasRendererContext = true;
+        out.hasStamp = !!(rc.blockTube || data.blockTube);
+        const cmd = getObjectByPath(rc, 'commandContext.onTap.innertubeCommand');
+        out.cmdKeys = cmd && typeof cmd === 'object' ? Object.keys(cmd) : typeof cmd;
+      }
+      const se =
+        data.serviceEndpoint ||
+        (data.menuServiceItemRenderer && data.menuServiceItemRenderer.serviceEndpoint);
+      if (se) out.hasServiceEndpoint = true;
+      return out;
+    } catch (e) {
+      return { error: true };
+    }
   }
 
   // The toast notification item shown after a mobile block tap ("Channel
@@ -2769,6 +3054,9 @@
     if (attr === 'shortsLockupViewModel') {
       return extractShortsLockupMenuFlags(obj, attr);
     }
+    if (attr === 'reelPlayerOverlayRenderer') {
+      return extractReelOverlayMenuFlags(obj, attr);
+    }
     return extractGenericMenuFlags(obj, attr);
   }
 
@@ -2863,6 +3151,93 @@
     });
 
     return items;
+  }
+
+  // Watch-page branch of extractMenuItems: the reel `...` menu holds
+  // listItemViewModel entries ("Description", "Save to playlist", ...), so the
+  // lockup-style entries below render alongside natively. The channel resolves
+  // from the reel channel bar (avatar/browse link + handle text); the video id
+  // is the /shorts/<id> URL and the name is the document title. The stamp
+  // carries isWatch so taps pause the reel instead of hunting a shelf card.
+  // Null when the overlay has no menu (e.g. embeds).
+  function extractReelOverlayMenuFlags(obj, attr) {
+    const items = extractFromReelOverlay(obj[attr]);
+    if (!items) return null;
+    const channel = reelOverlayChannelFrom(obj[attr]);
+    const video = currentShortsVideo();
+    return {
+      items,
+      hasChannel: !!channel.id,
+      hasVideo: !!video.id,
+      isLockupViewModel: true,
+    };
+  }
+
+  // Menu items array of the reel overlay `...` menu. The blockTube stamp goes
+  // on the overlay itself: right-hand taps read the symbol-keyed component
+  // data wrapping it (see getRecommendedParentData), mirroring the sheet
+  // stamp of the lockup branches.
+  function extractFromReelOverlay(renderer) {
+    const items = getObjectByPath(renderer, 'menu.menuRenderer.items');
+    if (!Array.isArray(items)) return null;
+
+    const channel = reelOverlayChannelFrom(renderer);
+    const video = currentShortsVideo();
+
+    Object.defineProperty(renderer, 'blockTube', {
+      value: {
+        metadata: {
+          channelId: channel.id,
+          channelName: channel.text,
+          videoId: video.id,
+          videoName: video.text,
+          removeObject: true,
+          isShorts: true,
+          isWatch: true,
+        },
+      },
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+
+    return items;
+  }
+
+  // Channel bar paths, avatar link first, handle command-runs second. The
+  // metadataItems hop is an array; the dotted-path walker reads the first
+  // element owning the key, which is the single channel bar.
+  const REEL_CHANNEL_ID_PATHS = [
+    'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.decoratedAvatarViewModel.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+    'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
+  ];
+
+  function reelOverlayChannelFrom(renderer) {
+    return {
+      id: getFlattenByPath(renderer, REEL_CHANNEL_ID_PATHS),
+      text: getFlattenByPath(renderer, [
+        'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName.content',
+        'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName',
+      ]),
+    };
+  }
+
+  // The playing Short: id from the /shorts/<id> URL, name from the document
+  // title ("<title> - YouTube"). Both missing off-shorts (the menu branch
+  // only runs on the overlay, which only exists there, but stay fail-open).
+  function currentShortsVideo() {
+    let id;
+    let text;
+    try {
+      const match = document.location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
+      id = match ? match[1] : undefined;
+    } catch (e) {}
+    try {
+      const title = typeof document.title === 'string' ? document.title : '';
+      const name = title.replace(/\s*-\s*YouTube\s*$/, '').trim();
+      text = name.length > 0 ? name : undefined;
+    } catch (e) {}
+    return { id, text };
   }
 
   // Generic fallback for renderers with menu.menuRenderer.items
@@ -3143,7 +3518,28 @@
 
     const { items, hasChannel, hasVideo, isLockupViewModel, attr } = extracted;
 
+    const nativeCount = Array.isArray(items) ? items.length : 0;
     injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, obj[attr], storageData);
+
+    // Reactive renderers re-render on property assignment, not on in-place
+    // array mutation: if the reel popup bound the items array before our push
+    // (eager pre-render), a plain push stays invisible while the data looks
+    // right. Replacing the array reference notifies Polymer (property change)
+    // and Lit-style renderers (property set) alike; lazy readers see the same
+    // contents either way. Shelf sheets render lazily on open, so only the
+    // reel overlay needs this.
+    if (attr === 'reelPlayerOverlayRenderer') {
+      const menu = getObjectByPath(obj[attr], 'menu.menuRenderer');
+      if (menu && Array.isArray(menu.items)) menu.items = menu.items.slice();
+    }
+
+    btLogMenu('inject', {
+      attr,
+      nativeItems: nativeCount,
+      totalItems: Array.isArray(items) ? items.length : 0,
+      hasChannel,
+      hasVideo,
+    });
 
     // Attach metadata only if needed
     if (hasChannel || hasVideo) {
@@ -3391,6 +3787,8 @@
       },
       removeParent: false,
       stopPlayer: true,
+      isShorts: false,
+      isWatch: false,
     };
   }
 
@@ -3409,6 +3807,7 @@
       removeParent: false,
       stopPlayer: false,
       isShorts: parentData.blockTube?.metadata?.isShorts === true,
+      isWatch: parentData.blockTube?.metadata?.isWatch === true,
     };
   }
 
@@ -3420,6 +3819,8 @@
       videoData: extracted.video,
       removeParent: true,
       stopPlayer: false,
+      isShorts: false,
+      isWatch: false,
     };
   }
 
@@ -3459,6 +3860,7 @@
       removeParent: resolved.removeParent,
       stopPlayer: resolved.stopPlayer,
       isShorts: resolved.isShorts === true,
+      isWatch: resolved.isWatch === true,
     };
   }
 
@@ -3589,13 +3991,28 @@
     } catch (e) {}
   }
 
+  // Best-effort pause of the reel player after blocking the playing Short
+  // (the watch-page equivalent of stopVideo on regular watch pages). The
+  // first <video> on /shorts/ is the reel itself.
+  function pauseReelPlayer() {
+    try {
+      if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+        return;
+      }
+      const video = document.querySelector('video');
+      if (video && typeof video.pause === 'function') video.pause();
+    } catch (e) {}
+  }
+
   // Shorts shelf cards have no native hide affordance — their sheet holds
   // only items like "Add to queue" / "Send feedback", so the cloned feedback
   // command that dismisses lockup cards leaves a Shorts card in place.
   // Dismiss it from the DOM instead: the card links to /shorts/<videoId>, so
   // the grid item wrapping that link gets the same "Blocked" placeholder the
-  // other surfaces show. Fail-open throughout: any miss leaves the card for
-  // the next data load, which the just-added filter entry already covers.
+  // other surfaces show, plus display:none so the card is gone even where the
+  // placeholder mechanism does not render. Fail-open throughout: any miss
+  // leaves the card for the next data load, which the just-added filter entry
+  // already covers.
   const SHORTS_CARD_SELECTORS = [
     'ytd-rich-item-renderer',
     'yt-lockup-view-model',
@@ -3710,13 +4127,32 @@
     // Get the parent dom and data from this
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
+    btLogMenu('resolve', {
+      menuAction,
+      isDataFromRightHandSide,
+      parentTag: parentDom && parentDom.tagName,
+      hasStamp: !!(parentData && parentData.blockTube),
+      originalAttr: parentData && parentData._btOriginalAttr,
+      target: describeTapTarget(this),
+    });
+
     // Get the data and type which is used for blocking the video
-    const { type, data, removeParent, stopPlayer, isShorts } = getBlockData(
+    const { type, data, removeParent, stopPlayer, isShorts, isWatch } = getBlockData(
       parentDom,
       parentData,
       isDataFromRightHandSide,
       menuAction,
     );
+
+    btLogMenu('block', {
+      type,
+      id: data && data.id,
+      text: data && data.text,
+      removeParent,
+      stopPlayer,
+      isShorts,
+      isWatch,
+    });
 
     // Notify system what data should be added to the block list
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
@@ -3729,13 +4165,17 @@
     // the card up with no feedback when only the stamp is checked.
     const isShortsTap = isShorts || parentData?._btOriginalAttr === 'shortsLockupViewModel';
     if (isShortsTap && isCardRemovingTap(type)) {
-      // Guaranteed feedback: shelf sheets have no native hide affordance, so
-      // without this the tap confirms with no visible effect.
+      // Guaranteed feedback first: the reel UI surfaces neither the sheet
+      // feedback nor the player error screen.
       toastShortsTap(type);
-      dismissShortsShelfCard(
-        shortsTapVideoId(parentData, type, data),
-        type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
-      );
+      if (isWatch) {
+        pauseReelPlayer();
+      } else {
+        dismissShortsShelfCard(
+          shortsTapVideoId(parentData, type, data),
+          type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
+        );
+      }
     }
     forwardMenuTap.call(this, event);
   }
@@ -3752,6 +4192,271 @@
       if (resolved && typeof resolved.video.id === 'string') return resolved.video.id;
     } catch (e) {}
     return undefined;
+  }
+
+  // ================== src/scripts/inject/shorts-overlay.js ==================
+
+  // Blocked-Shorts overlay (see SHORTS_STATUS.md §2: v1 was removed for
+  // first-paint offset, z-fighting with YouTube's own error layers and
+  // opacity variance; v2 anchored to the <video> rect with an overscan margin
+  // that bled over the masthead/search bar).
+  //
+  // This version anchors to the Shorts player root itself (`#shorts-player`,
+  // the WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_SHORTS rootElementId): the panel
+  // is appended as an absolutely-positioned child with inset 0, so it covers
+  // exactly the whole video — no rect math, no scroll/resize sync, no offset
+  // class of bugs, nothing above the player ever covered.
+  //
+  // Deliberately reason-only: no Block/Next buttons on the panel (a blocked
+  // video needs no affordances — the skip sweep autoplays next, and
+  // Block Channel / Block Video belong in the reel `...` menu, §4a). The
+  // panel shows what filter blocked the short (getBlockMessage, rule
+  // included) until the sweep navigates away.
+  //
+  // Exotic realms without DOM/timers never paint. Fail-open throughout.
+
+  // Last blocked Short, captured in disablePlayer before it wipes the player
+  // response (the overlay paint below keys on it).
+  let lastShortsBlock = null;
+  let shortsOverlayEl = null;
+  let shortsOverlaySyncTimer = 0;
+
+  // Attribution of a blocked player response, across the ytPlayer rule shapes
+  // (player response root, embed/player-config args). The video id drives the
+  // overlay lifecycle; the message carries the reason line.
+  function blockedPlayerAttribution(ytData) {
+    const videoId = blockedPlayerVideoId(ytData);
+    const channelId =
+      getObjectByPath(ytData, 'videoDetails.channelId') ||
+      getObjectByPath(ytData, 'args.raw_player_response.videoDetails.channelId');
+    const channelName =
+      getObjectByPath(ytData, 'videoDetails.author') ||
+      getObjectByPath(ytData, 'args.raw_player_response.videoDetails.author');
+    const title =
+      getObjectByPath(ytData, 'videoDetails.title') ||
+      getObjectByPath(ytData, 'args.raw_player_response.videoDetails.title');
+    return { videoId, channelId, channelName, title };
+  }
+
+  // The Shorts player root. Null when the DOM offers no way to look it up.
+  function shortsOverlayHost() {
+    try {
+      if (typeof document === 'undefined' || typeof document.getElementById !== 'function') {
+        return null;
+      }
+      return document.getElementById('shorts-player') || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Still on the blocked Short? The overlay lives only there; any navigation
+  // (skip-fired or manual) tears it down.
+  function shortsOverlayStillCurrent() {
+    try {
+      if (!lastShortsBlock || typeof lastShortsBlock.videoId !== 'string') return false;
+      return currentShortsId() === lastShortsBlock.videoId;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // The short on screen, from the /shorts/<id> URL. Undefined off-shorts.
+  function currentShortsId() {
+    try {
+      const match = document.location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
+      return match ? match[1] : undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  // Style a node property-by-property through CSSOM only (no <style>, no
+  // innerHTML), so page CSP and Trusted Types stay out of the way — the same
+  // constraint as the toast layer in context-menu.js.
+  function shortsOverlayStyle(el, props) {
+    try {
+      const style = el.style;
+      for (const key of Object.keys(props)) style[key] = props[key];
+    } catch (e) {}
+  }
+
+  // The player root must establish a positioning context for the absolute
+  // inset-0 panel. It already is positioned on stock YouTube; only touch it
+  // when it provably is not, and never throw.
+  function shortsOverlayEnsureHostPositioned(host) {
+    try {
+      let position = null;
+      if (typeof getComputedStyle === 'function') {
+        position = getComputedStyle(host).position;
+      } else if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+        position = window.getComputedStyle(host).position;
+      }
+      if (position === 'static' && host.style) host.style.position = 'relative';
+    } catch (e) {}
+  }
+
+  // Build the reason-only overlay node for the current lastShortsBlock. Null
+  // when the DOM offers no way to build it.
+  function shortsOverlayBuild() {
+    const block = lastShortsBlock;
+    if (!block) return null;
+    let root = null;
+    try {
+      root = document.createElement('div');
+    } catch (e) {
+      return null;
+    }
+    root.id = 'blocktube-shorts-block';
+    root.setAttribute('role', 'status');
+    shortsOverlayStyle(root, {
+      position: 'absolute',
+      top: '0',
+      left: '0',
+      right: '0',
+      bottom: '0',
+      zIndex: '2147483647',
+      backgroundColor: 'rgb(0, 0, 0)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    });
+
+    const panel = document.createElement('div');
+    shortsOverlayStyle(panel, {
+      maxWidth: '80%',
+      textAlign: 'center',
+      padding: '16px',
+    });
+
+    const title = document.createElement('div');
+    title.textContent = 'Blocked by BlockTube';
+    shortsOverlayStyle(title, {
+      color: '#fff',
+      fontSize: '16px',
+      fontWeight: 'bold',
+      fontFamily: 'Roboto, Arial, sans-serif',
+      marginBottom: '8px',
+    });
+    panel.appendChild(title);
+
+    const reason = document.createElement('div');
+    reason.textContent = block.message || 'Video blocked by BlockTube filter';
+    shortsOverlayStyle(reason, {
+      color: '#ccc',
+      fontSize: '13px',
+      fontFamily: 'Roboto, Arial, sans-serif',
+      overflowWrap: 'anywhere',
+    });
+    panel.appendChild(reason);
+
+    root.appendChild(panel);
+    return root;
+  }
+
+  // Tear the overlay down: navigation away, or a new block replacing it.
+  function removeShortsOverlay() {
+    try {
+      if (shortsOverlaySyncTimer && typeof clearInterval === 'function') {
+        clearInterval(shortsOverlaySyncTimer);
+      }
+    } catch (e) {}
+    shortsOverlaySyncTimer = 0;
+    if (shortsOverlayEl) {
+      try {
+        if (shortsOverlayEl.parentNode) shortsOverlayEl.parentNode.removeChild(shortsOverlayEl);
+      } catch (e) {}
+    }
+    shortsOverlayEl = null;
+  }
+
+  // Sweep tick: gone elsewhere → teardown (true). Panel dropped from the
+  // player root (YouTube re-render) → re-append. Otherwise nothing to do —
+  // inset 0 tracks the video without any rect sync.
+  function shortsOverlayTick() {
+    if (!shortsOverlayStillCurrent()) {
+      removeShortsOverlay();
+      return true;
+    }
+    if (!shortsOverlayEl) return false;
+    try {
+      const host = shortsOverlayHost();
+      if (host && shortsOverlayEl.parentNode !== host) host.appendChild(shortsOverlayEl);
+    } catch (e) {}
+    return false;
+  }
+
+  // Paint the stored block when it is the short on screen and no panel is
+  // up. No-op otherwise (wrong video, off-shorts, no host, already painted).
+  // Entry point for both the player-response path below and the
+  // yt-navigate-finish hook: prefetched shorts store their attribution
+  // before the swipe lands, and the landing paints them.
+  function shortsOverlayPaintCurrent() {
+    if (shortsOverlayEl) return;
+    if (!shortsOverlayStillCurrent()) return;
+    const host = shortsOverlayHost();
+    if (!host) return;
+    let el = null;
+    try {
+      el = shortsOverlayBuild();
+    } catch (e) {
+      el = null;
+    }
+    if (!el) return;
+    shortsOverlayEl = el;
+    shortsOverlayEnsureHostPositioned(host);
+    try {
+      host.appendChild(shortsOverlayEl);
+    } catch (e) {
+      shortsOverlayEl = null;
+      return;
+    }
+    if (typeof setInterval !== 'function') return;
+    shortsOverlaySyncTimer = setInterval(() => {
+      let done = false;
+      try {
+        done = shortsOverlayTick();
+      } catch (e) {
+        done = false;
+      }
+      if (done) {
+        try {
+          clearInterval(shortsOverlaySyncTimer);
+        } catch (e) {}
+        shortsOverlaySyncTimer = 0;
+      }
+    }, 250);
+  }
+
+  // Store a blocked Short's attribution + reason, painting only when it is
+  // the short on screen. Player responses also arrive for prefetched (not yet
+  // watched) shorts: painting those immediately would cover the wrong video
+  // and get torn down on swipe with nothing repainting the landed short, so
+  // they store only — the navigate-finish hook paints on landing.
+  function showBlockedShortOverlay(attribution, message) {
+    if (
+      !attribution ||
+      typeof attribution.videoId !== 'string' ||
+      attribution.videoId.length === 0
+    ) {
+      return;
+    }
+    try {
+      if (!document.location.pathname.startsWith('/shorts/')) return;
+    } catch (e) {
+      return;
+    }
+    lastShortsBlock = {
+      videoId: attribution.videoId,
+      channelId: attribution.channelId,
+      channelName: attribution.channelName,
+      videoName: attribution.title,
+      message,
+    };
+    // A prefetch for another short must not disturb the current panel.
+    if (currentShortsId() !== attribution.videoId) return;
+    removeShortsOverlay();
+    shortsOverlayPaintCurrent();
   }
 
   // ================== src/scripts/inject/comment-dom.js ==================
@@ -5218,6 +5923,37 @@
     // page repopulate it from fresh metadata, but until then a stale channel
     // must not attribute the new page's cards.
     pageChannel = null;
+    // Shorts skip accounting: a navigation we triggered keeps the consecutive
+    // counter; a manual one (new swipe, new page) resets it and disarms any
+    // pending sweep for the previous short. Logged when skip state exists so
+    // a skipped-innocent-video report can distinguish our navigation from a
+    // manual one. The blocked-Shorts overlay belongs to the old video either
+    // way, so it always tears down here (the next player response repaints).
+    try {
+      if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+    } catch (e) {}
+    try {
+      if (shortsSkipJustFired) {
+        shortsSkipJustFired = false;
+        btLogShorts('skip-navigated');
+      } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
+        btLogShorts('manual-navigate', { resetConsecutive: shortsConsecutiveSkips });
+        shortsConsecutiveSkips = 0;
+        shortsSkipArmedFor = null;
+        shortsSkipTriggeredAt = 0;
+      }
+    } catch (e) {}
+  });
+
+  window.addEventListener('yt-navigate-finish', () => {
+    // A blocked short prefetched before the swipe landed stored its
+    // attribution without painting (wrong video on screen then); the landed
+    // short paints now when it is the blocked one. Also repaints after a
+    // back-navigation, whose player response may come from cache with no ids
+    // left to trigger the player-response path.
+    try {
+      if (typeof shortsOverlayPaintCurrent === 'function') shortsOverlayPaintCurrent();
+    } catch (e) {}
   });
 
   // listen for messages from content script

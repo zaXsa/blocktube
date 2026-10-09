@@ -22,6 +22,7 @@ const DEFAULT_OPTIONS = {
   [OPTS.MIXES]: false,
   [OPTS.CHIPS_SHELVES]: false,
   [OPTS.SHORTS]: false,
+  [OPTS.SHORTS_SKIP_BLOCKED]: true,
   [OPTS.MOVIES]: false,
   [OPTS.SUGGESTIONS_ONLY]: false,
   [OPTS.AUTOPLAY]: false,
@@ -179,6 +180,7 @@ const utils = {
         console.warn('BlockTube: storage.filterData/options missing or invalid, keeping defaults');
       }
       storage = sanitized;
+      storage = utils.fillMissingOptions(storage);
       utils.checkShape(storage);
     }
     if (data !== undefined && Object.hasOwn(data, BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY)) {
@@ -192,17 +194,29 @@ const utils = {
     utils.sendFiltersToAll();
   },
 
-  // Non-mutating drift check against DEFAULT_OPTIONS: a missing option key
-  // reads as undefined downstream (which happens to behave like the default),
-  // so the failure mode is "invisible until somebody changes the default".
-  // Report mismatches so options.js/background.js edits that forget the other
-  // site are caught instead of silently shipping.
+  // Options added after a profile was created are absent from its stored
+  // blob; fill them from DEFAULT_OPTIONS so old profiles behave like fresh
+  // ones. Missing used to read as undefined downstream — invisible while
+  // every default was falsy, silently-off the moment a truthy default
+  // shipped. Only fills, never overwrites the user's stored values.
+  fillMissingOptions(current) {
+    if (!current || typeof current !== 'object') return current;
+    if (!current.options || typeof current.options !== 'object') return current;
+    for (const key of Object.keys(DEFAULT_OPTIONS)) {
+      if (!has.call(current.options, key)) current.options[key] = DEFAULT_OPTIONS[key];
+    }
+    return current;
+  },
+
+  // Non-mutating drift check against DEFAULT_OPTIONS: reports option keys
+  // the stored blob is missing (fillMissingOptions above heals them at load,
+  // so a report here means a bug in the fill or a brand-new key).
   checkShape(stored) {
     if (!(stored && stored.options)) return;
     const missing = Object.keys(DEFAULT_OPTIONS).filter((key) => !has.call(stored.options, key));
     if (missing.length > 0) {
       console.warn(
-        `BlockTube: storage.options missing keys (runtime defaults apply): ${missing.join(', ')}`,
+        `BlockTube: storage.options missing keys after fill (fill bug or brand-new key): ${missing.join(', ')}`,
       );
     }
   },
