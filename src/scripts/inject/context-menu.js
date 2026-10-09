@@ -397,8 +397,15 @@
 
   // Renderers without their own channel link (movies, reels) never attribute
   // a channel; the rest do when a byline path resolves to a browse endpoint.
+  // Shorts shelf cards are NOT excluded here: they carry no byline, but their
+  // channel resolves from reelWatchEndpoint.params via the channelId rule
+  // (see shortsLockupChannelId) through the dedicated branch below.
   function genericRendererHasChannel(renderer, attr) {
-    if (attr === 'movieRenderer' || attr === 'compactMovieRenderer' || attr === 'reelItemRenderer') {
+    if (
+      attr === 'movieRenderer' ||
+      attr === 'compactMovieRenderer' ||
+      attr === 'reelItemRenderer'
+    ) {
       return false;
     }
     if (
@@ -459,6 +466,9 @@
     if (attr === 'lockupViewModel') {
       return extractLockupMenuFlags(obj, attr);
     }
+    if (attr === 'shortsLockupViewModel') {
+      return extractShortsLockupMenuFlags(obj, attr);
+    }
     return extractGenericMenuFlags(obj, attr);
   }
 
@@ -486,6 +496,62 @@
         videoId,
         videoName,
         removeObject: true,
+      },
+    };
+
+    Object.defineProperty(sheetmodel, 'blockTube', {
+      value: metadataBlock,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+
+    return items;
+  }
+
+  // Shorts-shelf branch of extractMenuItems: the sheet lives under menuOnTap
+  // (not under metadata.menuButton like lockupViewModel). The channel id
+  // decodes from reelWatchEndpoint.params (see shortsLockupChannelId) — there
+  // is no channel name on the card — so the channel entry is offered only
+  // when an id resolved. The blockTube metadata stamp mirrors lockupViewModel
+  // so right-hand taps resolve through the same stamped path. Null when no
+  // sheet.
+  function extractShortsLockupMenuFlags(obj, attr) {
+    const items = extractFromShortsLockupViewModel(obj[attr]);
+    if (!items) return null;
+    const { channel, video } = channelAndVideoFrom(obj[attr], 'shortsLockupViewModel');
+    return {
+      items,
+      hasChannel: !!channel.id,
+      hasVideo: !!video.id,
+      isLockupViewModel: true,
+    };
+  }
+
+  // Specific extractor for shortsLockupViewModel
+  function extractFromShortsLockupViewModel(renderer) {
+    const path =
+      'menuOnTap.innertubeCommand.showSheetCommand.panelLoadingStrategy.inlineContent.sheetViewModel';
+    const sheetmodel = getObjectByPath(renderer, path);
+    if (!sheetmodel) return null;
+
+    const items = sheetmodel.content?.listViewModel?.listItems;
+    if (!items) return null;
+
+    const { channel, video } = channelAndVideoFrom(renderer, 'shortsLockupViewModel');
+
+    const metadataBlock = {
+      metadata: {
+        channelId: channel.id,
+        channelName: channel.text,
+        videoId: video.id,
+        videoName: video.text,
+        removeObject: true,
+        // Marks taps from a Shorts shelf card: their sheet has no native
+        // hide affordance, so menuOnTap dismisses the card from the DOM
+        // directly (see dismissShortsShelfCard) instead of relying on the
+        // cloned feedback command the way lockup cards do.
+        isShorts: true,
       },
     };
 
@@ -653,6 +719,18 @@
     }
   }
 
+  // Resolve the card id YouTube's hide-enclosing-container feedback needs.
+  // Regular lockups carry contentId; shorts shelf cards do not (they key on
+  // entityId / the reelWatch videoId instead), so without this fallback the
+  // feedback carries contentId: undefined and the blocked Short stays put.
+  function lockupFeedbackContentId(currentObj) {
+    if (currentObj && currentObj.contentId !== undefined) return currentObj.contentId;
+    if (currentObj && typeof currentObj.entityId === 'string') return currentObj.entityId;
+    const videoId = currentObj && getObjectByPath(currentObj, 'onTap.innertubeCommand.reelWatchEndpoint.videoId');
+    if (typeof videoId === 'string') return videoId;
+    return currentObj && currentObj.contentId;
+  }
+
   function createCleanContext(items, store, isChannel, currentObj, forAllow = false, forRemove = false) {
     // Allow/remove entries must never reuse YouTube's native command: it
     // hides the card (the home-grid removal reported for Allow taps). They
@@ -671,7 +749,7 @@
 
     const msg = lockupToastMessage(isChannel, forAllow, forRemove, store);
     const cleanContext = deepClone(baseContext);
-    overwriteOnTapCommand(cleanContext, msg, currentObj.contentId, forAllow, forRemove);
+    overwriteOnTapCommand(cleanContext, msg, lockupFeedbackContentId(currentObj), forAllow, forRemove);
 
     return cleanContext;
   }
@@ -1016,6 +1094,7 @@
       },
       removeParent: false,
       stopPlayer: false,
+      isShorts: parentData.blockTube?.metadata?.isShorts === true,
     };
   }
 
@@ -1065,6 +1144,7 @@
       ...result,
       removeParent: resolved.removeParent,
       stopPlayer: resolved.stopPlayer,
+      isShorts: resolved.isShorts === true,
     };
   }
 
@@ -1168,6 +1248,95 @@
   // native entry — prevent the tap-through and ignore it.
   const MENU_TAP_ACTIONS = ['Block Channel', 'Block Video', 'Allow Channel', 'Remove from Whitelist'];
 
+  // Menu-tap types that take the card off the page (allow taps keep it so it
+  // can be watched right away).
+  function isCardRemovingTap(type) {
+    return type === 'channelId' || type === 'videoId' || type === 'unwhitelist';
+  }
+
+  // Confirmation toast for Shorts taps: the reel UI does not reliably surface
+  // YouTube's own feedback (no hide affordance on shelf sheets, no error
+  // screen on watch), so without this a tap looks like it did nothing.
+  function toastShortsTap(type) {
+    try {
+      openToast(
+        type === 'unwhitelist'
+          ? 'Removed from whitelist'
+          : type === 'videoId'
+            ? 'Video Blocked'
+            : 'Channel Blocked',
+        4000,
+      );
+    } catch (e) {}
+  }
+
+  // Shorts shelf cards have no native hide affordance — their sheet holds
+  // only items like "Add to queue" / "Send feedback", so the cloned feedback
+  // command that dismisses lockup cards leaves a Shorts card in place.
+  // Dismiss it from the DOM instead: the card links to /shorts/<videoId>, so
+  // the grid item wrapping that link gets the same "Blocked" placeholder the
+  // other surfaces show. Fail-open throughout: any miss leaves the card for
+  // the next data load, which the just-added filter entry already covers.
+  const SHORTS_CARD_SELECTORS = [
+    'ytd-rich-item-renderer',
+    'yt-lockup-view-model',
+    'yt-shorts-lockup-view-model',
+    'ytd-reel-item-renderer',
+  ];
+
+  function dismissShortsShelfCard(videoId, message = 'Blocked') {
+    if (typeof videoId !== 'string' || videoId.length === 0) return;
+    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') {
+      return;
+    }
+    let links = null;
+    try {
+      // Video ids are [A-Za-z0-9_-]-only, so interpolation cannot break out
+      // of the attribute selector.
+      links = document.querySelectorAll(`a[href*="/shorts/${videoId}"]`);
+    } catch (e) {
+      return;
+    }
+    if (!links) return;
+    for (let i = 0; i < links.length; i += 1) {
+      try {
+        const anchor = links[i];
+        if (!anchor || typeof anchor.closest !== 'function') continue;
+        const card = anchor.closest(SHORTS_CARD_SELECTORS.join(','));
+        if (!card) continue;
+        removeParentHelper(true, card, message);
+        leaveShortsBlockedPlaceholder(card, message);
+      } catch (e) {}
+    }
+  }
+
+  // Inline "Blocked" placeholder for a Shorts card, mirroring what regular
+  // video cards show (removeParentHelper's dismissedRenderer): the card keeps
+  // its grid slot with a muted box instead of vanishing silently. The box is
+  // built node-by-node through CSSOM (no innerHTML), so page CSP and Trusted
+  // Types stay out of the way — the same constraint as the toast layer above.
+  function leaveShortsBlockedPlaceholder(card, message) {
+    let height = 0;
+    try {
+      height = card.offsetHeight || 0;
+    } catch (e) {}
+    const box = document.createElement('div');
+    box.textContent = message;
+    const style = box.style;
+    style.display = 'flex';
+    style.alignItems = 'center';
+    style.justifyContent = 'center';
+    style.minHeight = `${height > 40 ? height : 200}px`;
+    style.borderRadius = '12px';
+    style.backgroundColor = 'var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05))';
+    style.color = 'var(--yt-spec-text-secondary, #888)';
+    style.fontSize = '14px';
+    style.fontFamily = 'Roboto, Arial, sans-serif';
+    card.textContent = '';
+    card.appendChild(box);
+    if (card.style) card.style.display = '';
+  }
+
   // Apply the visible effect of a desktop menu tap: removals replace the card
   // with a placeholder, blocks do the same, allow taps keep the card in place
   // so it can be watched right away (the storage write is the whole effect).
@@ -1223,7 +1392,7 @@
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
     // Get the data and type which is used for blocking the video
-    const { type, data, removeParent, stopPlayer } = getBlockData(
+    const { type, data, removeParent, stopPlayer, isShorts } = getBlockData(
       parentDom,
       parentData,
       isDataFromRightHandSide,
@@ -1234,5 +1403,34 @@
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
+    // Shorts taps can resolve through the stamped sheet path (isShorts) or,
+    // when the tapped item renders a single formatted string, the generic rule
+    // path via _btOriginalAttr — both must confirm and dismiss. The id lands
+    // in the block list either way, which is why a tap can "work" yet leave
+    // the card up with no feedback when only the stamp is checked.
+    const isShortsTap = isShorts || parentData?._btOriginalAttr === 'shortsLockupViewModel';
+    if (isShortsTap && isCardRemovingTap(type)) {
+      // Guaranteed feedback: shelf sheets have no native hide affordance, so
+      // without this the tap confirms with no visible effect.
+      toastShortsTap(type);
+      dismissShortsShelfCard(
+        shortsTapVideoId(parentData, type, data),
+        type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
+      );
+    }
     forwardMenuTap.call(this, event);
+  }
+
+  // Video id of a shelf Shorts tap for the dismissal lookup: stamped metadata
+  // first; on the rule branch re-resolve through the Shorts rule (a Block
+  // Video tap already carries it as its payload).
+  function shortsTapVideoId(parentData, type, data) {
+    const stamped = parentData?.blockTube?.metadata?.videoId;
+    if (typeof stamped === 'string' && stamped.length > 0) return stamped;
+    if (type === 'videoId' && data && typeof data.id === 'string') return data.id;
+    try {
+      const resolved = channelAndVideoFrom(parentData, 'shortsLockupViewModel');
+      if (resolved && typeof resolved.video.id === 'string') return resolved.video.id;
+    } catch (e) {}
+    return undefined;
   }

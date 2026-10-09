@@ -14,6 +14,7 @@
     'playlistPanelVideoRenderer',
     'playlistVideoRenderer',
     'lockupViewModel',
+    'shortsLockupViewModel',
     'videoCardRenderer',
     'endScreenVideoRenderer',
     'endScreenPlaylistRenderer',
@@ -279,7 +280,15 @@
       }),
 
       shortsLockupViewModel: paths({
-        videoId: 'onTap.innertubeCommand.reelWatchEndpoint.videoId',
+        videoId: [
+          'onTap.innertubeCommand.reelWatchEndpoint.videoId',
+          'inlinePlayerData.onVisible.innertubeCommand.watchEndpoint.videoId',
+        ],
+        // Function path: the shelf card carries no byline/avatar link, so the
+        // channel id is decoded from reelWatchEndpoint.params (see
+        // shortsLockupChannelId in paths.js). No channel name exists on the
+        // card — overlayMetadata is title + view count only.
+        channelId: (renderer) => shortsLockupChannelId(renderer),
         title: 'overlayMetadata.primaryText.content',
         viewCount: 'overlayMetadata.secondaryText.content',
       }),

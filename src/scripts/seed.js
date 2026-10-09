@@ -329,15 +329,36 @@
 
   // spfjs is responsible for XHR requests; wrap request so the response flows
   // through spfFilter (passed up to the content script for post-processing).
+  // Configurable + idempotent: SPA navigations (notably /shorts/<id>) re-fire
+  // spfready, and redefining a non-configurable accessor throws
+  // "Cannot redefine property: request", which breaks filtering from then on.
   document.addEventListener('spfready', function (e) {
-    Object.defineProperty(window.spf, 'request', {
-      get() {
-        return this.requestValue;
-      },
-      set(v) {
-        this.requestValue = spfRequest(v);
-      },
-    });
+    if (!window.spf) return;
+    if (window.spf.__blockTubeSpfWrapped) return;
+    try {
+      const prevDesc = Object.getOwnPropertyDescriptor(window.spf, 'request');
+      if (prevDesc && prevDesc.configurable === false) return;
+    } catch (err) {
+      return;
+    }
+    try {
+      Object.defineProperty(window.spf, 'request', {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return this.requestValue;
+        },
+        set(v) {
+          this.requestValue = spfRequest(v);
+        },
+      });
+      Object.defineProperty(window.spf, '__blockTubeSpfWrapped', {
+        value: true,
+        configurable: true,
+        writable: true,
+        enumerable: false,
+      });
+    } catch (err) {}
   });
 
   if (isMobileInterface) {

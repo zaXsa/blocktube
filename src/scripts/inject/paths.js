@@ -361,6 +361,52 @@
     return lockupTitleChannelName(renderer);
   }
 
+  // The channel a shortsLockupViewModel card attributes itself to, or
+  // undefined. Shorts shelf cards carry no byline/avatar link — the only
+  // channel signal is the protobuf baked into
+  // onTap.innertubeCommand.reelWatchEndpoint.params (URL-encoded base64
+  // whose decoded bytes embed the UC-prefixed channel id). Decoded as
+  // latin1 and scanned for the UC-prefixed id, so protobuf framing changes
+  // outside the id bytes cannot break the read. No channel name exists on
+  // the card (overlayMetadata is title + view count only).
+  // Minimal base64 -> latin1 decoder (no atob/Buffer: the inject realm and
+  // the unit sandbox do not share either). Returns undefined on bad input.
+  function base64ToLatin1(input) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const clean = String(input).replace(/[^A-Za-z0-9+/=]/g, '');
+    if (clean.length === 0 || clean.length % 4 !== 0) return undefined;
+    let out = '';
+    for (let i = 0; i < clean.length; i += 4) {
+      const a = alphabet.indexOf(clean[i]);
+      const b = alphabet.indexOf(clean[i + 1]);
+      const c = clean[i + 2] === '=' ? 0 : alphabet.indexOf(clean[i + 2]);
+      const d = clean[i + 3] === '=' ? 0 : alphabet.indexOf(clean[i + 3]);
+      if (a < 0 || b < 0 || c < 0 || d < 0) return undefined;
+      const triple = (a << 18) | (b << 12) | (c << 6) | d;
+      out += String.fromCharCode((triple >> 16) & 0xff);
+      if (clean[i + 2] !== '=') out += String.fromCharCode((triple >> 8) & 0xff);
+      if (clean[i + 3] !== '=') out += String.fromCharCode(triple & 0xff);
+    }
+    return out;
+  }
+
+  function shortsLockupChannelId(renderer) {
+    const params = getObjectByPath(
+      renderer,
+      'onTap.innertubeCommand.reelWatchEndpoint.params',
+    );
+    if (typeof params !== 'string' || params.length === 0) return undefined;
+    let encoded = params;
+    try {
+      encoded = decodeURIComponent(params);
+    } catch (e) {}
+    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = base64ToLatin1(normalized);
+    if (typeof binary !== 'string') return undefined;
+    const match = binary.match(/UC[A-Za-z0-9_-]{22}/);
+    return match ? match[0] : undefined;
+  }
+
   // The channel that owns the current page (channel pages only), remembered
   // from the last payload that carried page metadata. Video cards on a
   // channel's own tabs omit per-card attribution (no avatar, no channel row),
