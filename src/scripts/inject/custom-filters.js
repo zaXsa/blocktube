@@ -134,10 +134,10 @@
   }
 
   // Blocked Shorts are removed, never messaged: advance the reel to the next
-  // short instead of painting anything over the player (an overlay can never
-  // be aligned reliably across layouts). Runs as a short fail-open sweep;
-  // when it cannot advance, the ERROR status above is the whole effect (the
-  // short stays frozen instead of playing). Prefetched (not yet watched)
+  // short while the reason-only overlay (shorts-overlay.js, anchored to the
+  // reel item) covers the blocked one. Runs as a short fail-open
+  // sweep; when it cannot advance, the overlay reason plus the ERROR status
+  // above is the whole effect (the short stays covered instead of playing). Prefetched (not yet watched)
   // shorts stay silent until swiped to; non-Shorts pages keep the native
   // error screen. Exotic realms without timers never schedule the sweep.
   function skipBlockedShort(videoId) {

@@ -1908,10 +1908,10 @@
   }
 
   // Blocked Shorts are removed, never messaged: advance the reel to the next
-  // short instead of painting anything over the player (an overlay can never
-  // be aligned reliably across layouts). Runs as a short fail-open sweep;
-  // when it cannot advance, the ERROR status above is the whole effect (the
-  // short stays frozen instead of playing). Prefetched (not yet watched)
+  // short while the reason-only overlay (shorts-overlay.js, anchored to the
+  // reel item) covers the blocked one. Runs as a short fail-open
+  // sweep; when it cannot advance, the overlay reason plus the ERROR status
+  // above is the whole effect (the short stays covered instead of playing). Prefetched (not yet watched)
   // shorts stay silent until swiped to; non-Shorts pages keep the native
   // error screen. Exotic realms without timers never schedule the sweep.
   function skipBlockedShort(videoId) {
@@ -4553,11 +4553,20 @@
   // opacity variance; v2 anchored to the <video> rect with an overscan margin
   // that bled over the masthead/search bar).
   //
-  // This version anchors to the Shorts player root itself (`#shorts-player`,
-  // the WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_SHORTS rootElementId): the panel
-  // is appended as an absolutely-positioned child with inset 0, so it covers
-  // exactly the whole video — no rect math, no scroll/resize sync, no offset
-  // class of bugs, nothing above the player ever covered.
+  // This version anchors one level above the Shorts player root: the main
+  // reel renderer (`ytd-reel-video-renderer#reel-video-renderer`), else the
+  // reel the player sits in, else `#shorts-player` itself
+  // (the WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_SHORTS rootElementId). YouTube
+  // keeps the player root in a separate subtree from the reel and lays the
+  // video layer out of sync with it on some layouts, so an inset-0 child of
+  // the player root alone inherits that offset gap; the reel spans the whole
+  // shorts column (player area included), so the same inset-0 panel covers
+  // the gap. No rect math, no scroll/resize sync, nothing above the reel
+  // ever covered. (The reel carries no is-active attribute — match by id.)
+  //
+  // Paint is retried briefly when the host is not in the DOM yet (player
+  // responses and SPA landings can precede the element upgrade), so a missed
+  // first attempt shows the panel ~150ms later instead of never.
   //
   // Deliberately reason-only: no Block/Next buttons on the panel (a blocked
   // video needs no affordances — the skip sweep autoplays next, and
@@ -4570,8 +4579,29 @@
   // Last blocked Short, captured in disablePlayer before it wipes the player
   // response (the overlay paint below keys on it).
   let lastShortsBlock = null;
+  // Every blocked Short by videoId (reason line), so swiping away and back
+  // repaints the panel even though lastShortsBlock above now holds a
+  // prefetched id. Bounded (insertion-ordered eviction) like
+  // shortsSkipFiredIds, so a long session cannot grow it without limit.
+  let shortsBlockedOverlays = new Map();
+  const SHORTS_BLOCKED_MAP_CAP = 100;
   let shortsOverlayEl = null;
   let shortsOverlaySyncTimer = 0;
+  // Pending-paint retry while the host is not in the DOM yet (see
+  // shortsOverlaySchedulePaintRetry). Cleared on paint, teardown, or expiry.
+  let shortsOverlayPendingTimer = 0;
+
+  // Remember one blocked Short's reason. Never throws.
+  function rememberShortsBlock(videoId, message) {
+    try {
+      if (typeof videoId !== 'string' || videoId.length === 0) return;
+      if (shortsBlockedOverlays.has(videoId)) shortsBlockedOverlays.delete(videoId);
+      shortsBlockedOverlays.set(videoId, message);
+      if (shortsBlockedOverlays.size > SHORTS_BLOCKED_MAP_CAP) {
+        shortsBlockedOverlays.delete(shortsBlockedOverlays.keys().next().value);
+      }
+    } catch (e) {}
+  }
 
   // Attribution of a blocked player response, across the ytPlayer rule shapes
   // (player response root, embed/player-config args). The video id drives the
@@ -4590,13 +4620,72 @@
     return { videoId, channelId, channelName, title };
   }
 
-  // The Shorts player root. Null when the DOM offers no way to look it up.
+  // Walk from a node up to its enclosing `ytd-reel-video-renderer`, if any.
+  // closest() alone is not enough: it stops at shadow-root boundaries, and
+  // the player may sit inside one — so also step out through getRootNode()
+  // hosts (bounded). Null when unreachable. Never throws.
+  function shortsOverlayReelFrom(node) {
+    try {
+      if (node && typeof node.closest === 'function') {
+        const reel = node.closest('ytd-reel-video-renderer');
+        if (reel) return reel;
+      }
+    } catch (e) {}
+    try {
+      let root = node && typeof node.getRootNode === 'function' ? node.getRootNode() : null;
+      let guard = 0;
+      while (root && root.host && guard < 4) {
+        guard += 1;
+        const host = root.host;
+        try {
+          const tag = host && typeof host.tagName === 'string' ? host.tagName.toLowerCase() : '';
+          if (tag === 'ytd-reel-video-renderer') return host;
+          if (host && typeof host.closest === 'function') {
+            const reel = host.closest('ytd-reel-video-renderer');
+            if (reel) return reel;
+          }
+        } catch (e) {}
+        try {
+          root = typeof host.getRootNode === 'function' ? host.getRootNode() : null;
+        } catch (e) {
+          root = null;
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // The reel item behind the Shorts player. Most specific first: the reel
+  // the player itself sits in (authoritative where the layouts nest it),
+  // then the main reel renderer by id (the player lives in a separate
+  // subtree and the reel carries no is-active attribute, so neither closest
+  // nor [is-active] reaches it), then any reel renderer, then the player
+  // root itself. Null when the DOM offers no lookup.
   function shortsOverlayHost() {
     try {
-      if (typeof document === 'undefined' || typeof document.getElementById !== 'function') {
-        return null;
+      if (typeof document === 'undefined') return null;
+      let player = null;
+      try {
+        if (typeof document.getElementById === 'function') {
+          player = document.getElementById('shorts-player') || null;
+        }
+      } catch (e) {
+        player = null;
       }
-      return document.getElementById('shorts-player') || null;
+      const ownReel = shortsOverlayReelFrom(player);
+      if (ownReel) return ownReel;
+      try {
+        if (typeof document.querySelector === 'function') {
+          const byId = document.querySelector('#reel-video-renderer');
+          if (byId) return byId;
+          const active = document.querySelector('ytd-reel-video-renderer[is-active]');
+          if (active) return active;
+          const anyReel = document.querySelector('ytd-reel-video-renderer');
+          if (anyReel) return anyReel;
+        }
+      } catch (e) {}
+      if (player) return player;
+      return null;
     } catch (e) {
       return null;
     }
@@ -4706,7 +4795,9 @@
     return root;
   }
 
-  // Tear the overlay down: navigation away, or a new block replacing it.
+  // Tear the overlay down: landing reconcile (yt-navigate-finish), an
+  // unblocked landing found by the sweep tick, or a new block replacing it.
+  // Also drops the pending-paint retry (it belongs to the old video).
   function removeShortsOverlay() {
     try {
       if (shortsOverlaySyncTimer && typeof clearInterval === 'function') {
@@ -4714,6 +4805,7 @@
       }
     } catch (e) {}
     shortsOverlaySyncTimer = 0;
+    shortsOverlayClearPending();
     if (shortsOverlayEl) {
       try {
         if (shortsOverlayEl.parentNode) shortsOverlayEl.parentNode.removeChild(shortsOverlayEl);
@@ -4722,9 +4814,10 @@
     shortsOverlayEl = null;
   }
 
-  // Sweep tick: gone elsewhere → teardown (true). Panel dropped from the
-  // player root (YouTube re-render) → re-append. Otherwise nothing to do —
-  // inset 0 tracks the video without any rect sync.
+  // Sweep tick: gone elsewhere → teardown (true). Host changed or panel
+  // dropped from the host (late upgrade, YouTube re-render) → move it to the
+  // current host. Otherwise nothing to do — inset 0 tracks the reel without
+  // any rect sync.
   function shortsOverlayTick() {
     if (!shortsOverlayStillCurrent()) {
       removeShortsOverlay();
@@ -4733,21 +4826,102 @@
     if (!shortsOverlayEl) return false;
     try {
       const host = shortsOverlayHost();
-      if (host && shortsOverlayEl.parentNode !== host) host.appendChild(shortsOverlayEl);
+      if (host && shortsOverlayEl.parentNode !== host) {
+        // First load can paint onto the small player root before the reel
+        // exists; the tick migrates the panel up once the reel arrives.
+        shortsOverlayEnsureHostPositioned(host);
+        host.appendChild(shortsOverlayEl);
+      }
     } catch (e) {}
     return false;
+  }
+
+  // Drop the pending-paint retry timer. Never throws.
+  function shortsOverlayClearPending() {
+    try {
+      if (shortsOverlayPendingTimer && typeof clearInterval === 'function') {
+        clearInterval(shortsOverlayPendingTimer);
+      }
+    } catch (e) {}
+    shortsOverlayPendingTimer = 0;
+  }
+
+  // True when the short on screen has a panel to show: it is the last
+  // blocked Short, or a remembered blocked one (swipe away and back). The
+  // pending-paint retry keys on this so it does not give up on a remembered
+  // short just because the last attribution belongs to a prefetch.
+  function shortsOverlayHasPaintTarget() {
+    try {
+      if (shortsOverlayStillCurrent()) return true;
+      const id = currentShortsId();
+      return typeof id === 'string' && shortsBlockedOverlays.has(id);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // The paint call sites (player response, SPA landing) can run before the
+  // reel container upgrades into the DOM; a single-shot lookup then misses
+  // and nothing retries, so the panel shows late or never. Retry briefly:
+  // every 150ms for ~3s, stopping on paint, navigation away, or expiry.
+  // Fail-open throughout; at most one pending timer at a time.
+  function shortsOverlaySchedulePaintRetry() {
+    if (shortsOverlayPendingTimer) return;
+    if (typeof setInterval !== 'function') return;
+    let tries = 0;
+    shortsOverlayPendingTimer = setInterval(() => {
+      tries += 1;
+      let painted = false;
+      let stale = false;
+      try {
+        painted = shortsOverlayEl !== null;
+        stale = !shortsOverlayHasPaintTarget();
+        if (!painted && !stale) {
+          shortsOverlayPaintCurrent();
+          painted = shortsOverlayEl !== null;
+        }
+      } catch (e) {
+        painted = false;
+      }
+      if (painted || stale || tries >= 20) shortsOverlayClearPending();
+    }, 150);
   }
 
   // Paint the stored block when it is the short on screen and no panel is
   // up. No-op otherwise (wrong video, off-shorts, no host, already painted).
   // Entry point for both the player-response path below and the
   // yt-navigate-finish hook: prefetched shorts store their attribution
-  // before the swipe lands, and the landing paints them.
+  // before the swipe lands, and the landing paints them. A swipe away and
+  // back also repaints: the last attribution may belong to a prefetched id
+  // by then, so fall back to the remembered per-video map.
   function shortsOverlayPaintCurrent() {
-    if (shortsOverlayEl) return;
-    if (!shortsOverlayStillCurrent()) return;
+    if (shortsOverlayEl) {
+      shortsOverlayClearPending();
+      return;
+    }
+    if (!shortsOverlayStillCurrent()) {
+      let remembered = null;
+      try {
+        const id = currentShortsId();
+        if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
+          remembered = { videoId: id, message: shortsBlockedOverlays.get(id) };
+        }
+      } catch (e) {
+        remembered = null;
+      }
+      if (!remembered) {
+        shortsOverlayClearPending();
+        return;
+      }
+      lastShortsBlock = remembered;
+    }
     const host = shortsOverlayHost();
-    if (!host) return;
+    if (!host) {
+      // Container not upgraded yet (or exotic realm): retry briefly rather
+      // than dropping the paint — the skip sweep still advances meanwhile.
+      shortsOverlaySchedulePaintRetry();
+      return;
+    }
     let el = null;
     try {
       el = shortsOverlayBuild();
@@ -4761,8 +4935,10 @@
       host.appendChild(shortsOverlayEl);
     } catch (e) {
       shortsOverlayEl = null;
+      shortsOverlaySchedulePaintRetry();
       return;
     }
+    shortsOverlayClearPending();
     if (typeof setInterval !== 'function') return;
     shortsOverlaySyncTimer = setInterval(() => {
       let done = false;
@@ -4805,6 +4981,9 @@
       videoName: attribution.title,
       message,
     };
+    // Remember every blocked Short (not just the current one) so a swipe
+    // away and back still repaints the panel — see shortsOverlayPaintCurrent.
+    rememberShortsBlock(attribution.videoId, message);
     // A prefetch for another short must not disturb the current panel.
     if (currentShortsId() !== attribution.videoId) return;
     removeShortsOverlay();
@@ -6279,11 +6458,11 @@
     // counter; a manual one (new swipe, new page) resets it and disarms any
     // pending sweep for the previous short. Logged when skip state exists so
     // a skipped-innocent-video report can distinguish our navigation from a
-    // manual one. The blocked-Shorts overlay belongs to the old video either
-    // way, so it always tears down here (the next player response repaints).
-    try {
-      if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
-    } catch (e) {}
+    // manual one. The blocked-Shorts overlay deliberately stays up through
+    // the transition (the reel element is reused across shorts — tearing
+    // down here flashes the blocked video); yt-navigate-finish below
+    // reconciles it for the landed short, and the sweep tick tears it down
+    // if the landing is unblocked.
     try {
       if (shortsSkipJustFired) {
         shortsSkipJustFired = false;
@@ -6300,9 +6479,14 @@
   window.addEventListener('yt-navigate-finish', () => {
     // A blocked short prefetched before the swipe landed stored its
     // attribution without painting (wrong video on screen then); the landed
-    // short paints now when it is the blocked one. Also repaints after a
-    // back-navigation, whose player response may come from cache with no ids
-    // left to trigger the player-response path.
+    // short paints now when it is a known-blocked one — including a
+    // swipe-back target from the remembered map, whose player response may
+    // come from cache with no ids left to trigger the player-response path.
+    // Remove first so a panel carried through the transition never shows a
+    // stale reason on the new short (or lingers on an unblocked one).
+    try {
+      if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+    } catch (e) {}
     try {
       if (typeof shortsOverlayPaintCurrent === 'function') shortsOverlayPaintCurrent();
     } catch (e) {}

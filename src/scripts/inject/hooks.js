@@ -442,11 +442,11 @@
     // counter; a manual one (new swipe, new page) resets it and disarms any
     // pending sweep for the previous short. Logged when skip state exists so
     // a skipped-innocent-video report can distinguish our navigation from a
-    // manual one. The blocked-Shorts overlay belongs to the old video either
-    // way, so it always tears down here (the next player response repaints).
-    try {
-      if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
-    } catch (e) {}
+    // manual one. The blocked-Shorts overlay deliberately stays up through
+    // the transition (the reel element is reused across shorts — tearing
+    // down here flashes the blocked video); yt-navigate-finish below
+    // reconciles it for the landed short, and the sweep tick tears it down
+    // if the landing is unblocked.
     try {
       if (shortsSkipJustFired) {
         shortsSkipJustFired = false;
@@ -463,9 +463,14 @@
   window.addEventListener('yt-navigate-finish', () => {
     // A blocked short prefetched before the swipe landed stored its
     // attribution without painting (wrong video on screen then); the landed
-    // short paints now when it is the blocked one. Also repaints after a
-    // back-navigation, whose player response may come from cache with no ids
-    // left to trigger the player-response path.
+    // short paints now when it is a known-blocked one — including a
+    // swipe-back target from the remembered map, whose player response may
+    // come from cache with no ids left to trigger the player-response path.
+    // Remove first so a panel carried through the transition never shows a
+    // stale reason on the new short (or lingers on an unblocked one).
+    try {
+      if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+    } catch (e) {}
     try {
       if (typeof shortsOverlayPaintCurrent === 'function') shortsOverlayPaintCurrent();
     } catch (e) {}
