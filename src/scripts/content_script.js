@@ -121,13 +121,20 @@
       // Comment-popup taps annotate their origin (`comment menu`) and drop
       // the handle-style leading @, so the entry records a clean name plus
       // where it came from: `// Blocked by comment menu (name) (date)`.
+      // Shorts taps (shelf cards and the watch-page `...` sheet) annotate
+      // `short context menu`, so the surface a block came from stays visible.
       // Anything else keeps the long-standing `context menu` wording.
       const viaComment = data.info && data.info.via === 'comment';
+      const viaShorts = data.info && data.info.via === 'shorts';
       const rawText = blockAnnotationText(data.info);
       const stripped = viaComment ? rawText.replace(/^@+/, '').trim() : rawText;
       const text = stripped || rawText;
       const verb = blockProvenanceVerb(blockType);
-      const origin = viaComment ? 'comment menu' : 'context menu';
+      const origin = viaComment
+        ? 'comment menu'
+        : viaShorts
+          ? 'short context menu'
+          : 'context menu';
       const entries = [`// ${verb} by ${origin} (${text}) (${now})`];
       entries.push(...blockEntryIds(data.info));
       entries.push('');

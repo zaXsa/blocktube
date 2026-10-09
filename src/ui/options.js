@@ -714,11 +714,13 @@
     return jsEditors[key].getValue().split('\n');
   }
 
-  // `context menu` / `direct add` / `comment menu` as the short "added via" tag.
+  // `context menu` / `direct add` / `comment menu` / `short context menu` as
+  // the short "added via" tag.
   function provenanceKind(kind) {
     if (kind === 'context menu') return 'context';
     if (kind === 'direct add') return 'manual';
     if (kind === 'comment menu') return 'comment';
+    if (kind === 'short context menu') return 'shorts';
     return kind;
   }
 

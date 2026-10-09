@@ -22,7 +22,9 @@ Work while focused in one of the filter textareas:
 * **Lines starting with `//` are comments and are ignored** by the filter
   engine. BlockTube itself writes these when you block via the context menu
   (`// Blocked by context menu (…) (…)` with the date), via a comment `...`
-  menu (`// Blocked by comment menu (…) (…)`), or the Add box
+  menu (`// Blocked by comment menu (…) (…)`), via a Shorts shelf card or
+  the Shorts watch-page `...` sheet (`// Blocked by short context menu (…)`
+  `(…)`), or the Add box
   (`// Blocked by direct add () (…)`). Allowlist entries use the same shape
   (`// Allowlisted by context menu (…) (…)` when you allow a channel).
   Removing one via `Remove from Whitelist` writes no comment: the entry is

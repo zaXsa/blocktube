@@ -19,6 +19,13 @@
     // video is handled through the player response). No filter rule on purpose
     // — matching it would delete the reel overlay out from under the player.
     'reelPlayerOverlayRenderer',
+    // Shorts reel topbar: the visible `...` sheet lives in the trailing-buttons
+    // MORE_VERT buttonViewModel's inline showSheetCommand, not in
+    // overlay.menu (a decoy copy). Live swipe responses carry `topbar` (and
+    // `overlay`) at the top level; the embedded prefetch wraps the same
+    // fields in `reelItemWatchResponse`. Menu entries only, same as above.
+    'topbar',
+    'reelItemWatchResponse',
     'videoCardRenderer',
     'endScreenVideoRenderer',
     'endScreenPlaylistRenderer',

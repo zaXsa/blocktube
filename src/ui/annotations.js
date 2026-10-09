@@ -124,14 +124,16 @@
   //
   // Provenance lines look like `// Blocked by context menu (<text>) (<date>)`
   // or `// Blocked by direct add () (<date>)`. Comment-popup blocks use the
-  // same shape with a `comment menu` kind (`// Blocked by comment menu …`).
+  // same shape with a `comment menu` kind (`// Blocked by comment menu …`),
+  // Shorts taps with a `short context menu` kind
+  // (`// Blocked by short context menu …`).
   // Allowlist entries use the same shape with an `Allowlisted` prefix
   // (`// Allowlisted by context menu …`, `// Allowlisted by direct add …`,
   // written by the whitelist context-menu and Add-box flows). Older entries predate the date
   // and have a single group: `// Blocked by context menu (<text>)`. The text
   // may itself contain parens, so in the two-group form the date is the LAST
   // paren group; the kind is the fixed `context menu` / `direct add` /
-  // `comment menu` word(s) right after the prefix. Anything else starting
+  // `comment menu` / `short context menu` word(s) right after the prefix. Anything else starting
   // with either prefix is kept as unparsed provenance.
   const PROVENANCE_PREFIXES = ['// Blocked by ', '// Allowlisted by '];
   const LABEL_PREFIX = '// Label:';
@@ -150,7 +152,7 @@
     const prefix = PROVENANCE_PREFIXES.find((p) => trimmed.startsWith(p));
     if (prefix === undefined) return null;
     const rest = line.trim().slice(prefix.length);
-    const kinds = ['context menu', 'direct add', 'comment menu'];
+    const kinds = ['short context menu', 'context menu', 'direct add', 'comment menu'];
     const kind = kinds.find((k) => rest === k || rest.startsWith(`${k} `));
     if (kind === undefined) return { kind: 'other', text: '', date: '', raw: line };
     const tail = rest.slice(kind.length).trim();

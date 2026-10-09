@@ -1,3 +1,25 @@
+  // Root shape of a reel response for the menu diagnostics (the topbar
+  // branch needs a `reelItemWatchResponse` root that live responses may not
+  // have — this line shows what they actually look like). Debug-gated: zero
+  // work in prod. Never throws.
+  function reelResponseKeys(resp) {
+    try {
+      if (resp === null || resp === undefined) return String(resp);
+      if (typeof resp !== 'object') return typeof resp;
+      if (resp instanceof Array) {
+        const first = resp[0];
+        return {
+          array: resp.length,
+          firstKeys:
+            first && typeof first === 'object' ? Object.keys(first).slice(0, 15) : typeof first,
+        };
+      }
+      return Object.keys(resp).slice(0, 15);
+    } catch (e) {
+      return '?';
+    }
+  }
+
   function fetchFilter(url, resp) {
     if (storageData === undefined) return;
 
@@ -29,6 +51,11 @@
       // like a watch-next response. Same treatment as /next above, minus the
       // autoplay fixups (no two-column results here): filter what matches and
       // stamp the Block menu entries.
+      try {
+        if (btMenusDebugEnabled()) {
+          btLogMenu('reel-root', { endpoint: url.pathname, keys: reelResponseKeys(resp) });
+        }
+      } catch (e) {}
       ObjectFilter(resp, mergedFilterRules, [], true);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
