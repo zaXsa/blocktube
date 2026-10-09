@@ -24,7 +24,8 @@ Work while focused in one of the filter textareas:
   (`// Blocked by context menu (…) (…)` with the date), via a comment `...`
   menu (`// Blocked by comment menu (…) (…)`), via a Shorts shelf card or
   the Shorts watch-page `...` sheet (`// Blocked by short context menu (…)`
-  `(…)`), or the Add box
+  `(…)` — shelf channel blocks leave the name empty, `()`, because shelf
+  cards carry a channel id but no channel name), or the Add box
   (`// Blocked by direct add () (…)`). Allowlist entries use the same shape
   (`// Allowlisted by context menu (…) (…)` when you allow a channel).
   Removing one via `Remove from Whitelist` writes no comment: the entry is
