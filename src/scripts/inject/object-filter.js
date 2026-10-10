@@ -99,10 +99,54 @@
     return entries.some((entry) => entry && values.some((v) => testFilterEntry(entry, v)));
   }
 
+  // Render one compiled filter entry the way the user wrote it, so the
+  // watch-page block message names the actual filter. Plain keywords compile
+  // to a boundary-wrapped wrapper `(^|BOUNDARY)(kw)(BOUNDARY|$)` that reads
+  // like random regex; unwrap the middle group and unescape it back to the
+  // keyword. Exact ids compile to `^id$`; strip the anchors. Raw `/re/flags`
+  // entries have no wrapper, so String(entry) already matches the input.
+  function displayFilterEntry(entry) {
+    try {
+      if (!entry || typeof entry.source !== 'string') return undefined;
+      const src = entry.source;
+      const flags = typeof entry.flags === 'string' ? entry.flags : '';
+      const kwMatch = /^\(\^\|.*\)\((.*)\)\(.*\|\$\)$/.exec(src);
+      if (flags === 'i' && kwMatch) {
+        const raw = kwMatch[1].replace(/\\([\\^$*+?.()|[\]{}])/g, '$1');
+        return raw.slice(0, 40);
+      }
+      if (
+        flags === '' &&
+        src.length >= 2 &&
+        src.charAt(0) === '^' &&
+        src.charAt(src.length - 1) === '$' &&
+        src.indexOf('(') === -1 &&
+        src.indexOf('|') === -1
+      ) {
+        return src.slice(1, -1).slice(0, 40);
+      }
+      return String(entry).slice(0, 40);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  // Find the first entry that tests positive against a candidate, so the
+  // block message can name the actual filter (not just the matched value).
+  function findMatchingEntry(filterEntries, candidate) {
+    if (!Array.isArray(filterEntries)) return undefined;
+    for (let i = 0; i < filterEntries.length; i += 1) {
+      const entry = filterEntries[i];
+      if (entry && testFilterEntry(entry, candidate)) return entry;
+    }
+    return undefined;
+  }
+
   // Collab videos (avatar stack): a blocked collaborator other than the first
   // creator isn't caught by the single channelId/channelName above, so test
   // every collaborator in the stack as well. ANY match blocks, and the
-  // returned descriptor names the collaborator that actually fired.
+  // returned descriptor names the filter that fired plus the collaborator
+  // value it matched.
   function matchCollabChannel(fieldName, rendererKey, filterEntries, obj) {
     if (rendererKey !== 'lockupViewModel') return null;
     if (!Array.isArray(filterEntries) || filterEntries.length === 0) return null;
@@ -110,8 +154,13 @@
       const collabIds = getCollaboratorChannelIds(obj);
       for (let i = 0; i < collabIds.length; i += 1) {
         const id = collabIds[i];
-        if (filterEntries.some((entry) => entry && testFilterEntry(entry, id))) {
-          return { name: fieldName, value: String(id).slice(0, 40) };
+        const entry = findMatchingEntry(filterEntries, id);
+        if (entry) {
+          return {
+            name: fieldName,
+            value: String(id).slice(0, 40),
+            filter: displayFilterEntry(entry),
+          };
         }
       }
       return null;
@@ -120,8 +169,13 @@
       const collabNames = getCollaboratorChannelNames(obj);
       for (let i = 0; i < collabNames.length; i += 1) {
         const collabName = collabNames[i];
-        if (filterEntries.some((entry) => entry && testFilterEntry(entry, collabName))) {
-          return { name: fieldName, value: String(collabName).slice(0, 40) };
+        const entry = findMatchingEntry(filterEntries, collabName);
+        if (entry) {
+          return {
+            name: fieldName,
+            value: String(collabName).slice(0, 40),
+            filter: displayFilterEntry(entry),
+          };
         }
       }
       return null;
@@ -202,25 +256,31 @@
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
       return { match: null, value };
     }
-    return { match: { name: fieldName, value }, value };
+    return {
+      match: { name: fieldName, value, filter: '(not allowlisted)' },
+      value,
+    };
   }
 
   // Regex-props branch of matchField: channelId/channelName may carry several
   // channels (search-result collab dialogs); a blocked one listed second must
-  // still match. Records the MATCHED VALUE (e.g. "Linus Tech Tips"), not the
-  // compiled pattern, so the player block message names what actually fired.
+  // still match. Records BOTH the user-readable filter that fired (unwrapped
+  // from the compiled pattern) and the value it matched, so the player block
+  // message can say e.g. `title filter "puppy" matched "Girl Wakes Up..."`.
   function matchFieldRegex(fieldName, value, filterEntries, allValues) {
-    // channelId/channelName may carry several channels (search-result collab
-    // dialogs); a blocked one listed second must still match.
+    // channelId/channelName can list several channels (collab dialogs);
+    // collect them all so a non-first match still blocks/allows.
     const candidates = allValues && allValues.length > 0 ? allValues : [value];
     for (let i = 0; i < candidates.length; i += 1) {
       const candidate = candidates[i];
       if (candidate === undefined) continue;
-      const hit = filterEntries.some(
-        (entry) => entry && testFilterEntry(entry, candidate),
-      );
-      if (hit) {
-        return { name: fieldName, value: String(candidate).slice(0, 40) };
+      const entry = findMatchingEntry(filterEntries, candidate);
+      if (entry) {
+        return {
+          name: fieldName,
+          value: String(candidate).slice(0, 40),
+          filter: displayFilterEntry(entry),
+        };
       }
     }
     return null;
@@ -509,7 +569,12 @@
   ObjectFilter.prototype.isExtendedMatched = function (filteredObject, rendererKey) {
     for (let idx = 0; idx < OPTION_MATCHERS.length; idx += 1) {
       const [optionKey, matcher] = OPTION_MATCHERS[idx];
-      if (storageData.options[optionKey] && matcher(filteredObject, rendererKey)) return true;
+      if (storageData.options[optionKey] && matcher(filteredObject, rendererKey)) {
+        // Record the option so the watch-page message names it instead of
+        // staying generic (or worse, reusing a stale field from an earlier video).
+        matchedFilterField = { name: 'option', filter: optionKey };
+        return true;
+      }
     }
     return this.isBlockedComment(filteredObject, rendererKey);
   };

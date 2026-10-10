@@ -6,11 +6,29 @@
 
   function getMatchedFilterText() {
     if (matchedFilterField === null) return null;
+    const name = matchedFilterField.name;
+    const filter = matchedFilterField.filter;
     const value = matchedFilterField.value;
-    if (value !== undefined) {
-      return `${matchedFilterField.name}: ${String(value).slice(0, 40)}`;
+    // Name the actual filter that fired plus the value it matched, so a
+    // title block reads e.g. `title filter "puppy" matched "Girl Wakes..."`.
+    // Showing only the value looks like the user added a filter for that
+    // exact title; showing only the compiled pattern reads like random regex.
+    if (filter !== undefined && value !== undefined) {
+      const f = String(filter).slice(0, 40);
+      const v = String(value).slice(0, 40);
+      // Exact-id filters (channelId/videoId `^id$`) match only themselves,
+      // so naming both reads as a stutter: (channelId filter "UC..." matched
+      // "UC..."). Collapse those to a single attribution.
+      if (f === v) return `${name}: "${f}"`;
+      return `${name} filter "${f}" matched "${v}"`;
     }
-    return matchedFilterField.name;
+    if (filter !== undefined) {
+      return `${name} filter "${String(filter).slice(0, 40)}"`;
+    }
+    if (value !== undefined) {
+      return `${name}: ${String(value).slice(0, 40)}`;
+    }
+    return name;
   }
 
   // Keep the native error panel informative even when block_message is empty.
