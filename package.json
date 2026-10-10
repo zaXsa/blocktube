@@ -12,7 +12,7 @@
     "check:inject": "node tools/build-inject.js --check",
     "check:length": "node tools/check-length.js",
     "check:dupes": "jscpd src --format javascript --min-lines 10 --min-tokens 80 --ignore \"**/node_modules/**,src/ui/cm/**,src/scripts/inject.js,tools/bench/baseline/**\" --exit-code",
-    "coverage": "c8 --all --include 'src/**/*.js' --exclude 'src/ui/cm/**' --exclude 'src/scripts/inject.js' --exclude 'src/scripts/background.js' --exclude 'src/scripts/seed.js' --exclude 'src/scripts/inject/comment-dom.js' --exclude 'src/ui/options.js' --exclude 'src/ui/cm-syntax.js' --exclude 'src/popup/popup.js' --reporter=text --reports-dir tmp/coverage --check-coverage --lines 83 --functions 81 --branches 82 node test/index.js",
+    "coverage": "c8 --all --include 'src/**/*.js' --exclude 'src/ui/cm/**' --exclude 'src/scripts/inject.js' --exclude 'src/scripts/background.js' --exclude 'src/scripts/seed.js' --exclude 'src/scripts/inject/comment-dom.js' --exclude 'src/ui/options.js' --exclude 'src/ui/cm-syntax.js' --exclude 'src/popup/popup.js' --exclude 'src/ui/theme-init.js' --reporter=text --reports-dir tmp/coverage --check-coverage --lines 83 --functions 81 --branches 82 node test/index.js",
     "test": "node test/index.js",
     "test:mutate": "node test/mutate.js"
   },

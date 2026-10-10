@@ -400,27 +400,29 @@
     } catch (e) {}
   }
 
+  // One node of the reel-response walk below. Fail-open throughout.
+  function visitReelThumbNode(node) {
+    try {
+      if (!node || typeof node !== 'object') return;
+      if (node instanceof Array) {
+        for (let i = 0; i < node.length; i += 1) visitReelThumbNode(node[i]);
+        return;
+      }
+      scrubReelThumbnailUrls(node);
+      const keys = Object.getOwnPropertyNames(node);
+      for (let i = 0; i < keys.length; i += 1) {
+        try {
+          visitReelThumbNode(node[keys[i]]);
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
   function scrubReelThumbnails() {
     const resp = this && this.object;
     if (!resp || typeof resp !== 'object') return;
-    const visitReelThumbs = (node) => {
-      try {
-        if (!node || typeof node !== 'object') return;
-        if (node instanceof Array) {
-          for (let i = 0; i < node.length; i += 1) visitReelThumbs(node[i]);
-          return;
-        }
-        scrubReelThumbnailUrls(node);
-        const keys = Object.getOwnPropertyNames(node);
-        for (let i = 0; i < keys.length; i += 1) {
-          try {
-            visitReelThumbs(node[keys[i]]);
-          } catch (e) {}
-        }
-      } catch (e) {}
-    };
     try {
-      visitReelThumbs(resp);
+      visitReelThumbNode(resp);
     } catch (e) {}
   }
 
