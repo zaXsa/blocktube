@@ -4420,6 +4420,8 @@
   // Pending-paint retry while the host is not in the DOM yet (see
   // shortsOverlaySchedulePaintRetry). Cleared on paint, teardown, or expiry.
   let shortsOverlayPendingTimer = 0;
+  // Pending-retry ticks before the paint may fall back to the player root
+  // (~150ms each: ~0.9s of waiting for the reel to upgrade first).
 
   // Remember one blocked Short's reason. Never throws.
   function rememberShortsBlock(videoId, message) {
@@ -4485,13 +4487,15 @@
     return null;
   }
 
-  // The reel item behind the Shorts player. Most specific first: the reel
-  // the player itself sits in (authoritative where the layouts nest it),
-  // then the main reel renderer by id (the player lives in a separate
-  // subtree and the reel carries no is-active attribute, so neither closest
-  // nor [is-active] reaches it), then any reel renderer, then the player
-  // root itself. Null when the DOM offers no lookup.
-  function shortsOverlayHost() {
+  // Reel-only host lookup (no player-root fallback): the reel the player
+  // itself sits in (authoritative where the layouts nest it), then the main
+  // reel renderer by id (the player lives in a separate subtree and the reel
+  // carries no is-active attribute, so neither closest nor [is-active]
+  // reaches it), then any reel renderer. Null until the reel upgrades into
+  // the DOM. First paint waits for this (see shortsOverlayPaintCurrent) so
+  // the panel appears once at full size instead of flashing small on the
+  // player root and jumping a tick later.
+  function shortsOverlayReelHost() {
     try {
       if (typeof document === 'undefined') return null;
       let player = null;
@@ -4514,8 +4518,33 @@
           if (anyReel) return anyReel;
         }
       } catch (e) {}
-      if (player) return player;
       return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // The player root fallback, for layouts where no reel ever appears. Paint
+  // reaches it only after the reel grace period below — never first — so the
+  // common case stays a single full-size paint.
+  function shortsOverlayPlayerHost() {
+    try {
+      if (typeof document === 'undefined') return null;
+      if (typeof document.getElementById === 'function') {
+        return document.getElementById('shorts-player') || null;
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Full host chain for the sweep tick (reel preferred, player fallback).
+  // First paint resolves the reel itself — see shortsOverlayPaintCurrent.
+  // Null when the DOM offers no lookup.
+  function shortsOverlayHost() {
+    try {
+      return shortsOverlayReelHost() || shortsOverlayPlayerHost();
     } catch (e) {
       return null;
     }
@@ -4650,8 +4679,8 @@
     try {
       const host = shortsOverlayHost();
       if (host && shortsOverlayEl.parentNode !== host) {
-        // First load can paint onto the small player root before the reel
-        // exists; the tick migrates the panel up once the reel arrives.
+        // Safety net for the player-root fallback (or a YouTube re-render
+        // dropping the panel): migrate it up once the reel arrives.
         shortsOverlayEnsureHostPositioned(host);
         host.appendChild(shortsOverlayEl);
       }
@@ -4668,6 +4697,8 @@
     } catch (e) {}
     shortsOverlayPendingTimer = 0;
   }
+
+  const SHORTS_REEL_GRACE_TRIES = 6;
 
   // True when the short on screen has a panel to show: it is the last
   // blocked Short, or a remembered blocked one (swipe away and back). The
@@ -4700,7 +4731,9 @@
         painted = shortsOverlayEl !== null;
         stale = !shortsOverlayHasPaintTarget();
         if (!painted && !stale) {
-          shortsOverlayPaintCurrent();
+          // Past the reel grace period the paint may use the player-root
+          // fallback, so layouts without a reel still end up covered.
+          shortsOverlayPaintCurrent(tries >= SHORTS_REEL_GRACE_TRIES);
           painted = shortsOverlayEl !== null;
         }
       } catch (e) {
@@ -4717,7 +4750,11 @@
   // before the swipe lands, and the landing paints them. A swipe away and
   // back also repaints: the last attribution may belong to a prefetched id
   // by then, so fall back to the remembered per-video map.
-  function shortsOverlayPaintCurrent() {
+  // `allowFallback` permits the player-root host: direct call sites omit it
+  // (reel only — a small-first paint that migrates up a tick later is the
+  // two-step flicker this avoids), while the pending retry passes true past
+  // the grace period so reel-less layouts still get covered.
+  function shortsOverlayPaintCurrent(allowFallback) {
     if (shortsOverlayEl) {
       shortsOverlayClearPending();
       return;
@@ -4738,9 +4775,21 @@
       }
       lastShortsBlock = remembered;
     }
-    const host = shortsOverlayHost();
+    let host = null;
+    try {
+      host = shortsOverlayReelHost();
+    } catch (e) {
+      host = null;
+    }
+    if (!host && allowFallback === true) {
+      try {
+        host = shortsOverlayPlayerHost();
+      } catch (e) {
+        host = null;
+      }
+    }
     if (!host) {
-      // Container not upgraded yet (or exotic realm): retry briefly rather
+      // Reel not upgraded yet (or exotic realm): retry briefly rather
       // than dropping the paint — the skip sweep still advances meanwhile.
       shortsOverlaySchedulePaintRetry();
       return;
