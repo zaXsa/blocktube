@@ -113,6 +113,35 @@
   // machine-gun the player; the ERROR status above still stops playback.
   const SHORTS_SKIP_CAP = 15;
 
+  // Navigation started: consume the skip accounting for the previous short.
+  // A navigation we triggered keeps the consecutive counter; a manual one
+  // (new swipe, new page) resets it and disarms any pending sweep. When the
+  // navigation is our own auto-advance past a blocked short, its reason
+  // panel is dropped now instead of riding into the next short — the black
+  // covers underneath keep the departing frame hidden until the landing
+  // verdict. Returns true when the panel was dropped. Never throws.
+  function shortsSkipNavigationStarted() {
+    let ours = false;
+    try {
+      if (shortsSkipJustFired) {
+        shortsSkipJustFired = false;
+        ours = true;
+      } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
+        shortsConsecutiveSkips = 0;
+        shortsSkipArmedFor = null;
+        shortsSkipTriggeredAt = 0;
+      }
+    } catch (e) {
+      ours = false;
+    }
+    if (ours) {
+      try {
+        if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+      } catch (e) {}
+    }
+    return ours;
+  }
+
   // Blocked Shorts are removed, never messaged: advance the reel to the next
   // short while the reason-only overlay (shorts-overlay.js, anchored to the
   // reel item) covers the blocked one. Runs as a short fail-open

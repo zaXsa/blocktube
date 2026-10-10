@@ -498,21 +498,16 @@
     // page repopulate it from fresh metadata, but until then a stale channel
     // must not attribute the new page's cards.
     pageChannel = null;
-    // Shorts skip accounting: a navigation we triggered keeps the consecutive
-    // counter; a manual one (new swipe, new page) resets it and disarms any
-    // pending sweep for the previous short. The blocked-Shorts overlay
-    // deliberately stays up through the transition (the reel element is reused
-    // across shorts — tearing down here flashes the blocked video);
-    // yt-navigate-finish below reconciles it for the landed short, and the
-    // sweep tick tears it down if the landing is unblocked.
+    // Shorts skip accounting + skip-fired panel teardown (see
+    // shortsSkipNavigationStarted): a navigation we triggered drops its
+    // reason panel now instead of carrying it into the next short, while a
+    // manual one keeps the panel for the finish handler below. The
+    // blocked-Shorts overlay otherwise stays up through the transition (the
+    // reel element is reused across shorts — tearing down here flashes the
+    // blocked video); yt-navigate-finish below reconciles it for the landed
+    // short, and the sweep tick tears it down if the landing is unblocked.
     try {
-      if (shortsSkipJustFired) {
-        shortsSkipJustFired = false;
-      } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
-        shortsConsecutiveSkips = 0;
-        shortsSkipArmedFor = null;
-        shortsSkipTriggeredAt = 0;
-      }
+      if (typeof shortsSkipNavigationStarted === 'function') shortsSkipNavigationStarted();
     } catch (e) {}
     // A swipe lands on pre-rendered reels whose covers were skipped while the
     // previous short held a clean verdict. The new short is undecided again:

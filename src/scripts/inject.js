@@ -1920,6 +1920,35 @@
   // machine-gun the player; the ERROR status above still stops playback.
   const SHORTS_SKIP_CAP = 15;
 
+  // Navigation started: consume the skip accounting for the previous short.
+  // A navigation we triggered keeps the consecutive counter; a manual one
+  // (new swipe, new page) resets it and disarms any pending sweep. When the
+  // navigation is our own auto-advance past a blocked short, its reason
+  // panel is dropped now instead of riding into the next short — the black
+  // covers underneath keep the departing frame hidden until the landing
+  // verdict. Returns true when the panel was dropped. Never throws.
+  function shortsSkipNavigationStarted() {
+    let ours = false;
+    try {
+      if (shortsSkipJustFired) {
+        shortsSkipJustFired = false;
+        ours = true;
+      } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
+        shortsConsecutiveSkips = 0;
+        shortsSkipArmedFor = null;
+        shortsSkipTriggeredAt = 0;
+      }
+    } catch (e) {
+      ours = false;
+    }
+    if (ours) {
+      try {
+        if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+      } catch (e) {}
+    }
+    return ours;
+  }
+
   // Blocked Shorts are removed, never messaged: advance the reel to the next
   // short while the reason-only overlay (shorts-overlay.js, anchored to the
   // reel item) covers the blocked one. Runs as a short fail-open
@@ -4971,7 +5000,10 @@
     });
 
     const panel = document.createElement('div');
+    // Fixed width (not shrink-to-fit): a menu tap ("Channel Blocked") and a
+    // filter block (long rule-carrying reason) must render the same panel.
     shortsOverlayStyle(panel, {
+      width: '80%',
       maxWidth: '80%',
       textAlign: 'center',
       padding: '16px',
@@ -6749,21 +6781,16 @@
     // page repopulate it from fresh metadata, but until then a stale channel
     // must not attribute the new page's cards.
     pageChannel = null;
-    // Shorts skip accounting: a navigation we triggered keeps the consecutive
-    // counter; a manual one (new swipe, new page) resets it and disarms any
-    // pending sweep for the previous short. The blocked-Shorts overlay
-    // deliberately stays up through the transition (the reel element is reused
-    // across shorts — tearing down here flashes the blocked video);
-    // yt-navigate-finish below reconciles it for the landed short, and the
-    // sweep tick tears it down if the landing is unblocked.
+    // Shorts skip accounting + skip-fired panel teardown (see
+    // shortsSkipNavigationStarted): a navigation we triggered drops its
+    // reason panel now instead of carrying it into the next short, while a
+    // manual one keeps the panel for the finish handler below. The
+    // blocked-Shorts overlay otherwise stays up through the transition (the
+    // reel element is reused across shorts — tearing down here flashes the
+    // blocked video); yt-navigate-finish below reconciles it for the landed
+    // short, and the sweep tick tears it down if the landing is unblocked.
     try {
-      if (shortsSkipJustFired) {
-        shortsSkipJustFired = false;
-      } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
-        shortsConsecutiveSkips = 0;
-        shortsSkipArmedFor = null;
-        shortsSkipTriggeredAt = 0;
-      }
+      if (typeof shortsSkipNavigationStarted === 'function') shortsSkipNavigationStarted();
     } catch (e) {}
     // A swipe lands on pre-rendered reels whose covers were skipped while the
     // previous short held a clean verdict. The new short is undecided again:

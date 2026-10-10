@@ -510,7 +510,10 @@
     });
 
     const panel = document.createElement('div');
+    // Fixed width (not shrink-to-fit): a menu tap ("Channel Blocked") and a
+    // filter block (long rule-carrying reason) must render the same panel.
     shortsOverlayStyle(panel, {
+      width: '80%',
       maxWidth: '80%',
       textAlign: 'center',
       padding: '16px',
