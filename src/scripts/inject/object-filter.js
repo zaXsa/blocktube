@@ -598,7 +598,9 @@
   };
 
   // Comments are blocked by id, not by option. The two renderer shapes bury
-  // the id at different depths.
+  // the id at different depths. Records the attribution like every other
+  // matcher: without this, a comment hit would leave whatever an earlier
+  // renderer set behind (stale-filter log lines).
   ObjectFilter.prototype.isBlockedComment = function (filteredObject, rendererKey) {
     let commentId;
     if (rendererKey === 'commentThreadRenderer') {
@@ -611,7 +613,11 @@
     } else {
       return false;
     }
-    return commentId !== undefined && this.blockedComments.includes(commentId);
+    const blocked = commentId !== undefined && this.blockedComments.includes(commentId);
+    if (blocked) {
+      matchedFilterField = { name: rendererKey, filter: '(blocked comment)', value: commentId };
+    }
+    return blocked;
   };
 
   ObjectFilter.prototype.matchFilterRule = function (obj, objKeys = Object.keys(obj)) {
@@ -634,10 +640,15 @@
         this.isExtendedMatched(filteredObject, rendererKey) ||
         this.matchFilterProperties(filterPaths, filteredObject, rendererKey);
       if (isMatch) {
+        // Snapshot this rule's attribution: the global still holds the LAST
+        // match in this node when several keys match, so a customFunc (and
+        // its log line) would otherwise report a sibling renderer's filter.
+        // Each descriptor is a fresh object per match, so a reference is safe.
         res.push({
           name: rendererKey,
           customFunc,
           related,
+          match: matchedFilterField,
         });
       }
     }
@@ -665,6 +676,13 @@
   function applyMatchedRule(filterCtx, obj, rule) {
     let customRet = true;
     if (rule.customFunc !== undefined) {
+      // Restore this rule's snapshot (see matchFilterRule): sibling matches
+      // in the same node must not leak their attribution into this call.
+      if (rule.match !== undefined) {
+        try {
+          matchedFilterField = rule.match;
+        } catch (e) {}
+      }
       try {
         customRet = rule.customFunc.call(filterCtx, obj, rule.name);
       } catch (e) {

@@ -67,7 +67,19 @@ or one entry of `actions[]` / `contents[]`:
 
 With those four, the miss is reproducible without access to your account.
 
-## 4. From capture to unit test (contributors)
+## 4. Diagnosing an unexpected block (false positive)
+
+The reverse of a miss: playback stops with
+`Video blocked by BlockTube filter (...)`. The parenthesized part already
+names the filter and what it matched, e.g.
+`(title filter "puppy" matched "Girl Wakes Up ...")` — exact-ID blocks
+collapse to `(channelId: "UC…")`. That names the culprit entry to remove or
+narrow on the options page. Note the matched value is truncated to 40
+characters, and a broad character range (e.g. `/[À-ỹ]/`) can fire on a
+lookalike far into the title (e.g. Greek `α`, or `×` reading as `x`) — when
+in doubt, test the entry against the full title in isolation.
+
+## 5. From capture to unit test (contributors)
 
 Renderer shapes are pinned in `test/cases/filters.js` so a YouTube field
 rename fails loudly instead of silently unblocking. The pattern, using a live
