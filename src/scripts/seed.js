@@ -157,6 +157,211 @@
   }
 
   // Start
+  // Shorts first-frame guard (see shorts-overlay.js): the filter verdict needs
+  // extension storage, which arrives async AFTER this script runs, while a
+  // blocked Short's player response already ships playable streams AND
+  // thumbnails. Hiding <video> alone cannot work: Shorts pre-render thumbnail
+  // and poster images that are not video elements. So every Shorts media host
+  // (#shorts-player, ytd-reel-video-renderer — the same hosts the reason panel
+  // anchors to) gets a plain black cover div the moment it appears, covering
+  // video, thumbnails and posters alike. Covers stay until a verdict lifts
+  // them (clean) or keeps them under the reason panel (blocked). Runs before
+  // the early-abort check below on purpose: even when YouTube initialized
+  // first, the covers still apply and the later verdict still lands. Inline
+  // styles only (no <style>), fail-open throughout. The blockTubeReady
+  // fail-safe below guarantees a page with no verdict (e.g. storage never
+  // arrived) never stays covered.
+  try {
+    if (document.location.pathname.startsWith('/shorts/')) {
+      const SHORTS_COVER_ATTR = 'data-bt-cover';
+      const SHORTS_REVEALED_ATTR = 'data-bt-revealed';
+      const styleShortsCover = (cover) => {
+        try {
+          cover.style.position = 'absolute';
+          cover.style.top = '0';
+          cover.style.left = '0';
+          cover.style.right = '0';
+          cover.style.bottom = '0';
+          cover.style.backgroundColor = '#000';
+          cover.style.zIndex = '2147483646';
+          cover.style.pointerEvents = 'none';
+        } catch (e) {}
+      };
+      const positionShortsHost = (host) => {
+        try {
+          let position = null;
+          if (typeof getComputedStyle === 'function') {
+            position = getComputedStyle(host).position;
+          }
+          if (position === 'static' && host.style) host.style.position = 'relative';
+        } catch (e) {}
+      };
+      // A clean verdict for the short on screen is already recorded
+      // (window.__blockTubeShortsVerdict, set by shorts-overlay.js). A host
+      // that is BOTH decided-clean and in the viewport right now is the
+      // visible current short (e.g. arrived after its verdict on initial
+      // load) and needs no cover. Everything else is covered — in particular
+      // prefetched neighbours, which are always inserted OFF-viewport and
+      // would otherwise peek in during the swipe before navigation starts.
+      // Zero-area or unreadable rects fail closed (covered): only a host
+      // provably on screen is left open.
+      const hostInViewport = (host) => {
+        try {
+          if (!host || typeof host.getBoundingClientRect !== 'function') return false;
+          const r = host.getBoundingClientRect();
+          if (!r || r.width === 0 || r.height === 0) return false;
+          const vh = window.innerHeight || 0;
+          const vw = window.innerWidth || 0;
+          return r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw;
+        } catch (e) {
+          return false;
+        }
+      };
+      const skipShortsCover = (host) => {
+        try {
+          const v = window.__blockTubeShortsVerdict;
+          if (!v || v.clean !== true || typeof v.videoId !== 'string') return false;
+          if (!document.location.pathname.startsWith(`/shorts/${v.videoId}`)) return false;
+          return hostInViewport(host);
+        } catch (e) {
+          return false;
+        }
+      };
+      const ensureShortsCover = (host) => {
+        try {
+          if (!host || typeof host.querySelectorAll !== 'function') return;
+          if (host.hasAttribute && host.hasAttribute(SHORTS_REVEALED_ATTR)) return;
+          if (host.querySelector(`[${SHORTS_COVER_ATTR}]`)) return;
+          let cover = null;
+          try {
+            cover = document.createElement('div');
+          } catch (e) {
+            return;
+          }
+          cover.setAttribute(SHORTS_COVER_ATTR, '1');
+          styleShortsCover(cover);
+          positionShortsHost(host);
+          try {
+            host.appendChild(cover);
+          } catch (e) {}
+        } catch (e) {}
+      };
+      // The upcoming-short strip renders each preload as a plain div with the
+      // frame baked in as a CSS background-image
+      // (.reel-video-in-sequence-thumbnail) — no video, no img, no JSON the
+      // filter ever sees after first render. Hide those divs the moment they
+      // appear, same protocol as the covers (hidden until a verdict reveals).
+      const SHORTS_SEQ_THUMB_SEL = '.reel-video-in-sequence-thumbnail';
+      const hideShortsSeqThumbsIn = (root) => {
+        try {
+          if (!root) return;
+          if (
+            root.classList &&
+            typeof root.classList.contains === 'function' &&
+            root.classList.contains('reel-video-in-sequence-thumbnail') &&
+            root.style
+          ) {
+            root.style.opacity = '0';
+          }
+          if (typeof root.querySelectorAll === 'function') {
+            const thumbs = root.querySelectorAll(SHORTS_SEQ_THUMB_SEL);
+            for (let i = 0; i < thumbs.length; i += 1) {
+              try {
+                if (thumbs[i] && thumbs[i].style) thumbs[i].style.opacity = '0';
+              } catch (e) {}
+            }
+          }
+        } catch (e) {}
+      };
+      const coverShortsHostsIn = (root) => {
+        try {
+          if (!root || typeof root.querySelectorAll !== 'function') return;
+          const candidates = [];
+          if (root.tagName === 'YTD-REEL-VIDEO-RENDERER' || root.id === 'shorts-player') {
+            candidates.push(root);
+          }
+          const reels = root.querySelectorAll('ytd-reel-video-renderer');
+          for (let i = 0; i < reels.length; i += 1) {
+            if (candidates.indexOf(reels[i]) === -1) candidates.push(reels[i]);
+          }
+          let player = null;
+          try {
+            player =
+              typeof root.getElementById === 'function'
+                ? root.getElementById('shorts-player')
+                : document.getElementById('shorts-player');
+          } catch (e) {
+            player = null;
+          }
+          if (player && candidates.indexOf(player) === -1) candidates.push(player);
+          for (let c = 0; c < candidates.length; c += 1) {
+            try {
+              if (!skipShortsCover(candidates[c])) ensureShortsCover(candidates[c]);
+            } catch (e) {}
+          }
+        } catch (e) {}
+      };
+      const clearShortsCovers = () => {
+        try {
+          const covers = document.querySelectorAll(`[${SHORTS_COVER_ATTR}]`);
+          for (let i = 0; i < covers.length; i += 1) {
+            try {
+              if (covers[i] && covers[i].parentNode) covers[i].parentNode.removeChild(covers[i]);
+            } catch (e) {}
+          }
+        } catch (e) {}
+      };
+      try {
+        coverShortsHostsIn(document);
+        hideShortsSeqThumbsIn(document);
+      } catch (e) {}
+      try {
+        if (typeof MutationObserver === 'function' && document.documentElement) {
+          const shortsPrehideObserver = new MutationObserver((mutations) => {
+            for (let m = 0; m < mutations.length; m += 1) {
+              const added = mutations[m].addedNodes;
+              if (!added) continue;
+              for (let n = 0; n < added.length; n += 1) {
+                coverShortsHostsIn(added[n]);
+                hideShortsSeqThumbsIn(added[n]);
+              }
+            }
+          });
+          shortsPrehideObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+          });
+          window.__blockTubeShortsPrehide = shortsPrehideObserver;
+        }
+      } catch (e) {}
+      // Fail-open: verdicts always land through shorts-overlay.js (which sets
+      // window.__blockTubeShortsVerdict). If none ever does, drop the covers
+      // rather than leaving Shorts black.
+      try {
+        window.addEventListener(
+          'blockTubeReady',
+          () => {
+            try {
+              setTimeout(() => {
+                try {
+                  if (!window.__blockTubeShortsVerdict) {
+                    try {
+                      if (window.__blockTubeShortsPrehide) {
+                        window.__blockTubeShortsPrehide.disconnect();
+                      }
+                    } catch (e) {}
+                    clearShortsCovers();
+                  }
+                } catch (e) {}
+              }, 5000);
+            } catch (e) {}
+          },
+          { once: true },
+        );
+      } catch (e) {}
+    }
+  } catch (e) {}
+
   if (window.writeEmbed || window.ytplayer || window.Polymer) {
     console.error('BlockTube: page already initialized before seed.js ran, aborted early');
     return;

@@ -211,6 +211,278 @@
     } catch (e) {}
   }
 
+  // Every <video> YouTube may already have decoding the blocked Short. The
+  // player response ships playable streams with status OK (ytInitialPlayer
+  // Response carries streamingData + thumbnails), and the reel host upgrades
+  // after the response, so the reason panel alone leaves the first frame
+  // visible. Hiding the element shows the black container behind it instead.
+  // Fail-open throughout; exotic realms without DOM do nothing.
+  function shortsOverlayVideoNodes() {
+    try {
+      if (typeof document === 'undefined') return [];
+      if (typeof document.querySelectorAll !== 'function') return [];
+      const nodes = document.querySelectorAll('video');
+      if (!nodes) return [];
+      if (typeof nodes.length !== 'number') return [];
+      const out = [];
+      for (let i = 0; i < nodes.length; i += 1) {
+        if (nodes[i]) out.push(nodes[i]);
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // The upcoming-short strip renders each preload as a plain div with the
+  // frame baked in as a CSS background-image
+  // (.reel-video-in-sequence-thumbnail): no video, no img, invisible to the
+  // video hide above. Same hide-until-verdict protocol. Fail-open throughout.
+  function shortsOverlaySequenceThumbNodes() {
+    try {
+      if (typeof document === 'undefined') return [];
+      if (typeof document.querySelectorAll !== 'function') return [];
+      const nodes = document.querySelectorAll('.reel-video-in-sequence-thumbnail');
+      if (!nodes) return [];
+      if (typeof nodes.length !== 'number') return [];
+      const out = [];
+      for (let i = 0; i < nodes.length; i += 1) {
+        if (nodes[i]) out.push(nodes[i]);
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Hide the current Short's frame at once (pause stops audio too), plus the
+  // preloaded strip thumbnails (they may already show a blocked next short).
+  // Runs before/with the panel paint, which may wait for the reel to upgrade.
+  function shortsOverlayBlankVideo() {
+    const nodes = shortsOverlayVideoNodes();
+    for (let i = 0; i < nodes.length; i += 1) {
+      try {
+        if (typeof nodes[i].pause === 'function') nodes[i].pause();
+      } catch (e) {}
+      try {
+        if (nodes[i].style) nodes[i].style.opacity = '0';
+      } catch (e) {}
+    }
+    const thumbs = shortsOverlaySequenceThumbNodes();
+    for (let i = 0; i < thumbs.length; i += 1) {
+      try {
+        if (thumbs[i].style) thumbs[i].style.opacity = '0';
+      } catch (e) {}
+    }
+  }
+
+  // Reveal again on teardown (navigation away, unblocked landing). Never
+  // autoplays — just restores the stylesheet default.
+  function shortsOverlayUnblankVideo() {
+    const nodes = shortsOverlayVideoNodes().concat(shortsOverlaySequenceThumbNodes());
+    for (let i = 0; i < nodes.length; i += 1) {
+      try {
+        if (nodes[i].style) nodes[i].style.opacity = '';
+      } catch (e) {}
+    }
+  }
+
+  // Black-cover markers shared with the seed.js first-frame guard (which
+  // carries its own copy: seed.js runs before this bundle exists, so it
+  // cannot call these). Covers sit below the reason panel (2147483647).
+  // data-bt-cover: a black cover div planted on a Shorts media host.
+  // data-bt-revealed: the host's short earned a clean verdict; never re-cover.
+  function shortsOverlayCoverHost(host) {
+    try {
+      if (!host || typeof host.querySelector !== 'function') return;
+      if (host.hasAttribute && host.hasAttribute('data-bt-revealed')) return;
+      if (host.querySelector('[data-bt-cover]')) return;
+      let cover = null;
+      try {
+        cover = document.createElement('div');
+      } catch (e) {
+        return;
+      }
+      cover.setAttribute('data-bt-cover', '1');
+      shortsOverlayStyle(cover, {
+        position: 'absolute',
+        top: '0',
+        left: '0',
+        right: '0',
+        bottom: '0',
+        zIndex: '2147483646',
+        backgroundColor: 'rgb(0, 0, 0)',
+        pointerEvents: 'none',
+      });
+      shortsOverlayEnsureHostPositioned(host);
+      try {
+        host.appendChild(cover);
+      } catch (e) {}
+    } catch (e) {}
+  }
+
+  // Every Shorts media host currently in the DOM. The reel renderers include
+  // prefetched neighbours (off-screen); the player root covers the gap the
+  // reel misses on some layouts — same host set the seed.js guard covers.
+  function shortsOverlayAllHosts() {
+    const hosts = [];
+    try {
+      if (typeof document.querySelectorAll === 'function') {
+        const reels = document.querySelectorAll('ytd-reel-video-renderer');
+        for (let i = 0; i < reels.length; i += 1) {
+          if (reels[i] && hosts.indexOf(reels[i]) === -1) hosts.push(reels[i]);
+        }
+      }
+    } catch (e) {}
+    try {
+      const player =
+        typeof document.getElementById === 'function'
+          ? document.getElementById('shorts-player')
+          : null;
+      if (player && hosts.indexOf(player) === -1) hosts.push(player);
+    } catch (e) {}
+    return hosts;
+  }
+
+  // Shorts media hosts holding the short on screen: the reel (preferred, the
+  // same host the reason panel anchors to) plus the player root. Cover lifts
+  // are scoped to these so prefetched neighbours stay covered until swiped to.
+  function shortsOverlayCurrentHosts() {
+    const hosts = [];
+    try {
+      const reel = shortsOverlayReelHost();
+      if (reel) hosts.push(reel);
+    } catch (e) {}
+    try {
+      const player = shortsOverlayPlayerHost();
+      if (player && hosts.indexOf(player) === -1) hosts.push(player);
+    } catch (e) {}
+    return hosts;
+  }
+
+  // Record this short's verdict for the seed.js guard (which skips covering
+  // hosts of a short with a clean verdict) and for the no-verdict fail-safe.
+  function shortsOverlayRecordVerdict(videoId, clean) {
+    try {
+      if (typeof videoId === 'string' && videoId.length > 0) {
+        window.__blockTubeShortsVerdict = { videoId, clean: clean === true };
+      }
+    } catch (e) {}
+  }
+
+  // Drop the black covers from the current hosts and mark them revealed so
+  // the still-connected guard never re-covers them. Neighbour reels keep
+  // their covers until their own verdict or landing. The guard observer is
+  // deliberately left connected: hosts appearing later (late upgrades,
+  // pre-renders) are covered on insertion unless a clean verdict says
+  // otherwise — no timing anywhere in this protocol.
+  function shortsOverlayRevealPrehide() {
+    const hosts = shortsOverlayCurrentHosts();
+    for (let i = 0; i < hosts.length; i += 1) {
+      try {
+        const kids = hosts[i].children;
+        if (kids) {
+          for (let k = kids.length - 1; k >= 0; k -= 1) {
+            try {
+              const kid = kids[k];
+              const mark =
+                kid && kid.getAttribute ? kid.getAttribute('data-bt-cover') : null;
+              if (mark !== null && mark !== undefined && hosts[i].removeChild) {
+                hosts[i].removeChild(kid);
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      try {
+        if (hosts[i].setAttribute) hosts[i].setAttribute('data-bt-revealed', '1');
+      } catch (e) {}
+    }
+    shortsOverlayUnblankVideo();
+  }
+
+  // Cover every unrevealed Shorts host: the swipe-start counterpart to the
+  // reveal above. A swipe lands on pre-rendered reels whose covers were
+  // skipped while the previous short held a clean verdict; re-covering them
+  // here (synchronously at navigation start) means the landing decision —
+  // keep for blocked, lift for clean — never races a paint.
+  function shortsOverlayEnsureCovers() {
+    const hosts = shortsOverlayAllHosts();
+    for (let i = 0; i < hosts.length; i += 1) {
+      try {
+        shortsOverlayCoverHost(hosts[i]);
+      } catch (e) {}
+    }
+  }
+
+  // Swipe-start counterpart to the landing reveal below: the new short is
+  // undecided again. Drop the old verdict marker and re-cover every
+  // unrevealed host now (synchronously at navigation start) so the finish
+  // decision never races a paint. Leaving a short also re-blanks videos and
+  // strip thumbnails (pausing the departing short); the teardown/landing
+  // below restores what the verdict allows. Only acts when leaving a Shorts
+  // page — pausing videos anywhere else would brick playback with no Shorts
+  // verdict coming to restore it. Never throws.
+  function shortsOverlayNavigateStart() {
+    try {
+      window.__blockTubeShortsVerdict = null;
+    } catch (e) {}
+    try {
+      if (
+        typeof document === 'undefined' ||
+        !document.location ||
+        !document.location.pathname.startsWith('/shorts/')
+      ) {
+        return;
+      }
+      shortsOverlayEnsureCovers();
+      shortsOverlayBlankVideo();
+    } catch (e) {}
+  }
+
+  // A landing with no blocked paint target is a clean short: lift its covers
+  // (its verdict may have arrived as a prefetch whose paint was correctly
+  // skipped). Blocked landings keep their covers under the repainted panel.
+  // True when revealed. Never throws.
+  function shortsOverlayLandingReveal() {
+    try {
+      if (shortsOverlayHasPaintTarget()) return false;
+      const id = currentShortsId();
+      shortsOverlayRevealPrehide();
+      shortsOverlayRecordVerdict(id, true);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Lift the covers when this player response is a clean verdict for the
+  // short on screen. One-line call for the filter paths (initial response,
+  // /player); blocked and off-screen verdicts no-op. Never throws.
+  function maybeRevealShortsPrehide(ytData) {
+    try {
+      if (shortsOverlayVerdictIsCleanCurrent(ytData)) {
+        shortsOverlayRecordVerdict(blockedPlayerVideoId(ytData), true);
+        shortsOverlayRevealPrehide();
+      }
+    } catch (e) {}
+  }
+
+  // True when the player response belongs to the short on screen and its
+  // verdict is clean: the seed.js guard may reveal the frame it hid. Strict
+  // on identity (a clean prefetch for another short must not reveal the
+  // current one), fail-open otherwise.
+  function shortsOverlayVerdictIsCleanCurrent(ytData) {
+    try {
+      if (playerHasBeenBlocked) return false;
+      const id = blockedPlayerVideoId(ytData);
+      if (typeof id !== 'string' || id.length === 0) return false;
+      return id === currentShortsId();
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Build the reason-only overlay node for the current lastShortsBlock. Null
   // when the DOM offers no way to build it.
   function shortsOverlayBuild() {
@@ -286,6 +558,7 @@
       } catch (e) {}
     }
     shortsOverlayEl = null;
+    shortsOverlayUnblankVideo();
   }
 
   // Sweep tick: gone elsewhere → teardown (true). Host changed or panel
@@ -397,6 +670,9 @@
       }
       lastShortsBlock = remembered;
     }
+    // The panel may wait for the reel to upgrade (retry below); the video
+    // element exists already, so hide its frame now rather than with the paint.
+    shortsOverlayBlankVideo();
     let host = null;
     try {
       host = shortsOverlayReelHost();
@@ -476,6 +752,10 @@
     rememberShortsBlock(attribution.videoId, message);
     // A prefetch for another short must not disturb the current panel.
     if (currentShortsId() !== attribution.videoId) return;
+    // Decided for the short on screen: blocked. Record it for the seed.js
+    // guard (covers stay) and the no-verdict fail-safe, then paint.
+    shortsOverlayRecordVerdict(attribution.videoId, false);
     removeShortsOverlay();
+    shortsOverlayBlankVideo();
     shortsOverlayPaintCurrent();
   }

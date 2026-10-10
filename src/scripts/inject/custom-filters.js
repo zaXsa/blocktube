@@ -285,6 +285,87 @@
     delete vid.thumbnailOverlays;
   }
 
+  // Filter one reel sequence response: the fetch reel endpoints (network.js)
+  // and the initial ytInitialReelWatchSequenceResponse (hooks.js). Embedded
+  // prefetched player responses carry full videoDetails — verified against a
+  // real capture: exactly one videoDetails per sequence, no args/PLAYER_VARS
+  // shapes, so the ytPlayer table can only match genuine players. The ytPlayer
+  // pass blocks prefetches whose channel matches (wiping their stream and
+  // remembering the id for the landing panel + skip sweep, exactly like a
+  // /player block); the scrub then neutralizes every preloaded frame,
+  // unconditionally (Shorts only — these payloads never leave Shorts).
+  // playerHasBeenBlocked is preserved: a prefetch verdict must never leak
+  // into the page-level flow that reads the flag after us. Fail-open.
+  function filterReelSequenceResponse(resp) {
+    if (!resp || typeof resp !== 'object') return;
+    const wasBlocked = playerHasBeenBlocked;
+    try {
+      ObjectFilter(resp, filterRules.ytPlayer, []);
+    } catch (e) {}
+    try {
+      playerHasBeenBlocked = wasBlocked;
+    } catch (e) {}
+    try {
+      scrubReelThumbnails.call({ object: resp });
+    } catch (e) {}
+  }
+  // Blanket video-thumbnail scrub for the reel responses (reel_item_watch,
+  // reel_watch_sequence — Shorts pages only): every video frame/poster URL in
+  // the payload is replaced with a neutral placeholder, unconditionally. Reel
+  // entries carry no channel linkage, and the point is precisely that no
+  // preloaded frame ever paints: blocked or not, the video itself still loads
+  // and plays, so allowed shorts are unaffected beyond their preload image.
+  // Only i.ytimg.com frame/poster URLs are touched — channel avatars (yt3)
+  // and menu icons stay intact, and player responses ride a different
+  // endpoint branch (streams must survive for playback). Fail-open throughout.
+  function scrubReelThumbnailUrls(node) {
+    try {
+      if (!node || typeof node !== 'object' || node instanceof Array) return;
+      for (const key of ['thumbnails', 'sources']) {
+        try {
+          const list = node[key];
+          if (!(list instanceof Array)) continue;
+          for (let i = 0; i < list.length; i += 1) {
+            try {
+              const item = list[i];
+              if (
+                item &&
+                typeof item.url === 'string' &&
+                item.url.indexOf('i.ytimg.com') !== -1
+              ) {
+                item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
+  function scrubReelThumbnails() {
+    const resp = this && this.object;
+    if (!resp || typeof resp !== 'object') return;
+    const visitReelThumbs = (node) => {
+      try {
+        if (!node || typeof node !== 'object') return;
+        if (node instanceof Array) {
+          for (let i = 0; i < node.length; i += 1) visitReelThumbs(node[i]);
+          return;
+        }
+        scrubReelThumbnailUrls(node);
+        const keys = Object.getOwnPropertyNames(node);
+        for (let i = 0; i < keys.length; i += 1) {
+          try {
+            visitReelThumbs(node[keys[i]]);
+          } catch (e) {}
+        }
+      } catch (e) {}
+    };
+    try {
+      visitReelThumbs(resp);
+    } catch (e) {}
+  }
+
   function markAutoplay(obj, name) {
     if (isMobileInterface) {
       obj.playerOverlayAutoplayRenderer._deleted = true;

@@ -273,7 +273,8 @@
   }
 
   // Initial player response: filter at once (clearing the blocked flag first),
-  // or trap until present.
+  // or trap until present. A clean verdict for the short on screen also lifts
+  // the seed.js first-frame guard (blocked shorts stay hidden under the panel).
   function hookInitialPlayerResponse() {
     if (
       typeof window.ytInitialPlayerResponse === 'object' &&
@@ -281,12 +282,70 @@
     ) {
       playerHasBeenBlocked = false;
       ObjectFilter(window.ytInitialPlayerResponse, filterRules.ytPlayer);
+      maybeRevealShortsPrehide(window.ytInitialPlayerResponse);
     } else {
       trapObjectPath('ytInitialPlayerResponse', undefined, (v) => {
         playerHasBeenBlocked = false;
         ObjectFilter(v, filterRules.ytPlayer);
+        maybeRevealShortsPrehide(v);
       });
     }
+  }
+
+  // Reentrancy guard for the sequence filter below: filtering the string
+  // phase writes the filtered JSON back through the trap, which would
+  // otherwise re-enter the filter on every write.
+  let reelSequenceScrubbing = false;
+
+  // Filter one reel-sequence value in whatever phase it arrives in. YouTube
+  // assigns this global twice: first the escaped JSON string, later the
+  // parsed object (`window[x] = JSON.parse(x)`). Strings are parsed, filtered
+  // and written back (so the later parse yields an already-filtered object);
+  // objects are filtered in place, which is what the reel then consumes.
+  function scrubSequenceValue(v) {
+    if (typeof v === 'string') {
+      if (reelSequenceScrubbing) return;
+      try {
+        const parsed = JSON.parse(v);
+        filterReelSequenceResponse(parsed);
+        reelSequenceScrubbing = true;
+        try {
+          window.ytInitialReelWatchSequenceResponse = JSON.stringify(parsed);
+        } finally {
+          reelSequenceScrubbing = false;
+        }
+      } catch (e) {}
+      return;
+    }
+    try {
+      filterReelSequenceResponse(v);
+    } catch (e) {}
+  }
+
+  // Initial reel sequence (the upcoming-shorts queue a direct Shorts load
+  // embeds in the page): filter its embedded players and neutralize its
+  // preloaded video frames at once, or trap until present. Shorts-only.
+  function hookInitialReelSequence() {
+    try {
+      if (!document.location.pathname.startsWith('/shorts/')) return;
+    } catch (e) {
+      return;
+    }
+    let current = null;
+    try {
+      current = window.ytInitialReelWatchSequenceResponse;
+    } catch (e) {
+      current = null;
+    }
+    if (current !== undefined && current !== null) {
+      // Object (parsed) or string (escaped JSON): scrubSequenceValue handles
+      // both, and a present value must never be hidden behind a trap.
+      scrubSequenceValue(current);
+      return;
+    }
+    trapObjectPath('ytInitialReelWatchSequenceResponse', undefined, (v) => {
+      scrubSequenceValue(v);
+    });
   }
 
   // Initial page data: filter at once (redirecting when a block already
@@ -330,6 +389,7 @@
       hookGuideData();
       hookInitialPlayerResponse();
       hookInitialData();
+      hookInitialReelSequence();
     } catch (e) {
       console.error('BlockTube startHook exception (data left in place)', e);
     }
@@ -454,6 +514,13 @@
         shortsSkipTriggeredAt = 0;
       }
     } catch (e) {}
+    // A swipe lands on pre-rendered reels whose covers were skipped while the
+    // previous short held a clean verdict. The new short is undecided again:
+    // drop the verdict marker and re-cover its hosts now (synchronously at
+    // navigation start) so the finish decision below never races a paint.
+    try {
+      if (typeof shortsOverlayNavigateStart === 'function') shortsOverlayNavigateStart();
+    } catch (e) {}
   });
 
   window.addEventListener('yt-navigate-finish', () => {
@@ -464,8 +531,12 @@
     // come from cache with no ids left to trigger the player-response path.
     // Remove first so a panel carried through the transition never shows a
     // stale reason on the new short (or lingers on an unblocked one).
+    // A landing with no blocked paint target is clean: lift its covers.
     try {
       if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
+    } catch (e) {}
+    try {
+      if (typeof shortsOverlayLandingReveal === 'function') shortsOverlayLandingReveal();
     } catch (e) {}
     try {
       if (typeof shortsOverlayPaintCurrent === 'function') shortsOverlayPaintCurrent();

@@ -26,15 +26,22 @@
     ) {
       // Swiping between Shorts loads each reel (overlay, channel bar and the
       // `...` menu the Block entries live in) through these endpoints, shaped
-      // like a watch-next response. Same treatment as /next above, minus the
-      // autoplay fixups (no two-column results here): filter what matches and
-      // stamp the Block menu entries.
+      // like a watch-next response. The sequence filter first blocks embedded
+      // prefetched players whose channel matches and neutralizes every
+      // preloaded frame (those entries carry no channel linkage, and no
+      // preloaded frame may ever paint); then the usual pass filters what
+      // matches and stamps the Block menu entries (no autoplay fixups here —
+      // there are no two-column results).
+      filterReelSequenceResponse(resp);
       ObjectFilter(resp, mergedFilterRules, [], true);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {
       playerHasBeenBlocked = false;
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
+      // A clean verdict for the short on screen lifts the seed.js first-frame
+      // guard (blocked shorts stay hidden under the reason panel).
+      maybeRevealShortsPrehide(resp);
     } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       ObjectFilter(resp, filterRules.comments, [], true);
     }
