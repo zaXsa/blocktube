@@ -547,6 +547,24 @@
     'statementBannerRenderer',
   ]);
 
+  // Search "People also search for" shelves arrive as plain shelfRenderer
+  // (title = entity, subtitle = "People also search for", no endpoint), so
+  // the wholesale Set above never catches them. Match on the subtitle text
+  // (simpleText or runs) instead of wholesale-blocking shelfRenderer, which
+  // also hosts legitimate channel shelves.
+  function isPeopleAlsoSearchForShelf(obj) {
+    const subtitle = flattenRuns(getObjectByPath(obj, 'subtitle'));
+    return (
+      typeof subtitle === 'string' && subtitle.trim().toLowerCase() === 'people also search for'
+    );
+  }
+
+  function matchesChipsShelf(obj, rendererKey) {
+    if (CHIPS_SHELF_RENDERERS.has(rendererKey)) return true;
+    if (rendererKey === 'shelfRenderer') return isPeopleAlsoSearchForShelf(obj);
+    return false;
+  }
+
   // A YouTube-generated playlist: the radio renderers, or a collection lockup
   // badged MIX/COURSE.
   function matchesGeneratedPlaylist(obj, rendererKey) {
@@ -562,7 +580,7 @@
   const OPTION_MATCHERS = [
     [OPT.MOVIES, matchesMovie],
     [OPT.SHORTS, matchesShort],
-    [OPT.CHIPS_SHELVES, (obj, rendererKey) => CHIPS_SHELF_RENDERERS.has(rendererKey)],
+    [OPT.CHIPS_SHELVES, matchesChipsShelf],
     [OPT.MIXES, matchesGeneratedPlaylist],
   ];
 
