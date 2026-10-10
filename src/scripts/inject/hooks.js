@@ -440,19 +440,15 @@
     pageChannel = null;
     // Shorts skip accounting: a navigation we triggered keeps the consecutive
     // counter; a manual one (new swipe, new page) resets it and disarms any
-    // pending sweep for the previous short. Logged when skip state exists so
-    // a skipped-innocent-video report can distinguish our navigation from a
-    // manual one. The blocked-Shorts overlay deliberately stays up through
-    // the transition (the reel element is reused across shorts — tearing
-    // down here flashes the blocked video); yt-navigate-finish below
-    // reconciles it for the landed short, and the sweep tick tears it down
-    // if the landing is unblocked.
+    // pending sweep for the previous short. The blocked-Shorts overlay
+    // deliberately stays up through the transition (the reel element is reused
+    // across shorts — tearing down here flashes the blocked video);
+    // yt-navigate-finish below reconciles it for the landed short, and the
+    // sweep tick tears it down if the landing is unblocked.
     try {
       if (shortsSkipJustFired) {
         shortsSkipJustFired = false;
-        btLogShorts('skip-navigated');
       } else if (shortsSkipArmedFor !== null || shortsConsecutiveSkips > 0) {
-        btLogShorts('manual-navigate', { resetConsecutive: shortsConsecutiveSkips });
         shortsConsecutiveSkips = 0;
         shortsSkipArmedFor = null;
         shortsSkipTriggeredAt = 0;

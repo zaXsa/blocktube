@@ -254,6 +254,39 @@
   }
 
   const BROWSE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  // Shared Shorts identity: the /shorts/<id> URL owns the id on every Shorts
+  // surface (player responses, reel menus, overlay lifecycle). One regex and
+  // two helpers here so custom-filters.js, context-menu.js and
+  // shorts-overlay.js cannot drift apart. Defined early (paths.js loads
+  // before all three) — later fragments must reuse these, not redeclare.
+  const SHORTS_ID_RE = /^\/shorts\/([A-Za-z0-9_-]{11})/;
+
+  // The short on screen, from the /shorts/<id> URL. Undefined off-shorts.
+  // Never throws (exotic realms, missing location).
+  function currentShortsId() {
+    try {
+      const match = document.location.pathname.match(SHORTS_ID_RE);
+      return match ? match[1] : undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  // The playing Short: id from the URL above, name from the document title
+  // ("<title> - YouTube"). Both missing off-shorts. Fail-open throughout.
+  function currentShortsVideo() {
+    let id;
+    let text;
+    try {
+      id = currentShortsId();
+    } catch (e) {}
+    try {
+      const title = typeof document.title === 'string' ? document.title : '';
+      const name = title.replace(/\s*-\s*YouTube\s*$/, '').trim();
+      text = name.length > 0 ? name : undefined;
+    } catch (e) {}
+    return { id, text };
+  }
   const LOCKUP_ROWS_PATH =
     'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
   const PART_LINK_PATH = 'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId';

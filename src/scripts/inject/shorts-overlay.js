@@ -154,15 +154,8 @@
     }
   }
 
-  // The short on screen, from the /shorts/<id> URL. Undefined off-shorts.
-  function currentShortsId() {
-    try {
-      const match = document.location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
-      return match ? match[1] : undefined;
-    } catch (e) {
-      return undefined;
-    }
-  }
+  // The short on screen: shared currentShortsId() in paths.js (single
+  // SHORTS_ID_RE for all fragments) — do not redeclare locally.
 
   // Style a node property-by-property through CSSOM only (no <style>, no
   // innerHTML), so page CSP and Trusted Types stay out of the way — the same

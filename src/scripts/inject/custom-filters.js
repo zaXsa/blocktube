@@ -73,7 +73,10 @@
   }
 
   // Video id of a blocked player response, across the ytPlayer rule shapes
-  // (player response root, embed/player-config args).
+  // (player response root, embed/player-config args). Shared helper:
+  // shorts-overlay.js blockedPlayerAttribution() reuses this — keep the name
+  // and signature stable. Load order (tools/build-inject.js) guarantees this
+  // fragment evaluates before shorts-overlay.js.
   function blockedPlayerVideoId(ytData) {
     const candidates = [
       'videoDetails.videoId',
@@ -110,29 +113,6 @@
   // machine-gun the player; the ERROR status above still stops playback.
   const SHORTS_SKIP_CAP = 15;
 
-  // Shorts diagnostics. Enable in the page console with
-  // `localStorage.setItem('blocktube_debug', '1')` (the menus flag from
-  // context-menu.js enables these too), reload, and watch the page console
-  // for `[BlockTube shorts]` lines: sweep scheduling, triggers and cap hits.
-  function btDebugEnabled() {
-    try {
-      if (typeof localStorage === 'undefined') return false;
-      return (
-        localStorage.getItem('blocktube_debug') === '1' ||
-        localStorage.getItem('blocktube_debug_menus') === '1'
-      );
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function btLogShorts(...args) {
-    if (!btDebugEnabled()) return;
-    try {
-      console.info('[BlockTube shorts]', ...args);
-    } catch (e) {}
-  }
-
   // Blocked Shorts are removed, never messaged: advance the reel to the next
   // short while the reason-only overlay (shorts-overlay.js, anchored to the
   // reel item) covers the blocked one. Runs as a short fail-open
@@ -153,17 +133,10 @@
       return;
     }
     if (shortsSkipArmedFor === videoId) return;
-    if (shortsSkipFiredIds.has(videoId)) {
-      btLogShorts('skip-already-fired', { videoId });
-      return;
-    }
-    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) {
-      btLogShorts('skip-cap', { videoId, consecutive: shortsConsecutiveSkips });
-      return;
-    }
+    if (shortsSkipFiredIds.has(videoId)) return;
+    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return;
     shortsSkipArmedFor = videoId;
     shortsSkipTriggeredAt = 0;
-    btLogShorts('skip-sweep-start', { videoId });
     if (typeof setInterval !== 'function') return;
     let tries = 0;
     const timer = setInterval(() => {
@@ -199,10 +172,7 @@
     }
     if (shortsSkipTriggeredAt > 0) {
       try {
-        if (Date.now() - shortsSkipTriggeredAt > 4000) {
-          btLogShorts('skip-timeout', { videoId });
-          return true;
-        }
+        if (Date.now() - shortsSkipTriggeredAt > 4000) return true;
       } catch (e) {
         return true;
       }
@@ -217,15 +187,29 @@
       if (shortsSkipFiredIds.size > SHORTS_SKIP_FIRED_CAP) {
         shortsSkipFiredIds.delete(shortsSkipFiredIds.values().next().value);
       }
-      btLogShorts('skip-fired', { videoId, consecutive: shortsConsecutiveSkips });
     }
     return false;
   }
 
   // Click YouTube's own Next button. True when clicked (navigation lands
-  // async — the tick watches for it).
+  // async — the tick watches for it). Scoped to the reel containers first so
+  // a page with many buttons does not pay a full-document scan per tick; the
+  // document-wide fallback keeps working if YouTube renames the container.
   function clickReelNextButton() {
-    const buttons = document.querySelectorAll('button');
+    try {
+      const scoped = document.querySelectorAll(
+        'ytd-reel-video-renderer button, #reel-video-renderer button',
+      );
+      if (scoped && scoped.length > 0 && pickReelNextButton(scoped)) return true;
+    } catch (e) {}
+    try {
+      return pickReelNextButton(document.querySelectorAll('button'));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function pickReelNextButton(buttons) {
     if (!buttons) return false;
     for (let i = 0; i < buttons.length; i += 1) {
       const label = buttons[i].getAttribute && buttons[i].getAttribute('aria-label');

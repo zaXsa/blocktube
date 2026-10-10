@@ -14,64 +14,6 @@
     return opts?.[key] !== false;
   }
 
-  // Menu diagnostics (Shorts menus, tap resolution). Enable in the page
-  // console with `localStorage.setItem('blocktube_debug_menus', '1')`, reload,
-  // reproduce, and watch the page console for `[BlockTube menus]` lines:
-  // injection reports per menu (renderer, native count, offered flags) and
-  // every Block/Allow tap reports how it resolved (which branch, stamp
-  // presence, resulting block target). A denied localStorage (or any exotic
-  // realm) degrades to off instead of throwing.
-  function btMenusDebugEnabled() {
-    try {
-      return typeof localStorage !== 'undefined' && localStorage.getItem('blocktube_debug_menus') === '1';
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function btLogMenu(...args) {
-    if (!btMenusDebugEnabled()) return;
-    try {
-      console.info('[BlockTube menus]', ...args);
-    } catch (e) {}
-  }
-
-  // Tap-target inspector for the menu diagnostics above: reports what a tap
-  // (e.g. on the native "Description" row) actually resolves from — element
-  // tag, data shape, command type and whether our blockTube stamp is
-  // reachable. That pinpoints "where the row was created": a row bound to
-  // listItemViewModel rendererContext data shows the command keys, a classic
-  // service-item row shows its serviceEndpoint, and hasStamp tells whether
-  // the tap can ever reach our channel/video identity.
-  function describeTapTarget(el) {
-    try {
-      const out = { tag: (el && el.tagName) || null };
-      const data =
-        (el && el.data) || (el && getObjectByPath(el, '__instance.props.data'));
-      if (!data || typeof data !== 'object') {
-        out.data = typeof data;
-        return out;
-      }
-      out.dataKeys = Object.keys(data);
-      const rc =
-        data.rendererContext ||
-        (data.listItemViewModel && data.listItemViewModel.rendererContext);
-      if (rc && typeof rc === 'object') {
-        out.hasRendererContext = true;
-        out.hasStamp = !!(rc.blockTube || data.blockTube);
-        const cmd = getObjectByPath(rc, 'commandContext.onTap.innertubeCommand');
-        out.cmdKeys = cmd && typeof cmd === 'object' ? Object.keys(cmd) : typeof cmd;
-      }
-      const se =
-        data.serviceEndpoint ||
-        (data.menuServiceItemRenderer && data.menuServiceItemRenderer.serviceEndpoint);
-      if (se) out.hasServiceEndpoint = true;
-      return out;
-    } catch (e) {
-      return { error: true };
-    }
-  }
-
   // The toast notification item shown after a mobile block tap ("Channel
   // blocked" rendered in place by YouTube).
   function buildToastNotificationItem(toastText) {
@@ -696,16 +638,7 @@
   function extractReelTopbarMenuFlags(obj, attr) {
     const root = attr === 'reelItemWatchResponse' ? obj[attr] : obj;
     const found = findReelTopbarSheet(root);
-    if (!found) {
-      // Silent nulls are undebuggable live: say which hop failed, but only
-      // when a reel-like topbar exists at all — unrelated responses that
-      // happen to carry a `topbar` key stay quiet.
-      try {
-        const slots = getObjectByPath(root, 'topbar.topBarViewModel.trailingButtons');
-        if (Array.isArray(slots)) btLogMenu('topbar-miss', reelTopbarMissInfo(root));
-      } catch (e) {}
-      return null;
-    }
+    if (!found) return null;
     const overlay = getObjectByPath(root, 'overlay.reelPlayerOverlayRenderer');
     const channel = overlay
       ? reelOverlayChannelFrom(overlay)
@@ -783,23 +716,6 @@
     return { sheet, listItems };
   }
 
-  // Miss diagnostics for the topbar branch (see extractReelTopbarMenuFlags):
-  // which hop failed, computed defensively — never throws, never blocks.
-  function reelTopbarMissInfo(response) {
-    const info = { attr: 'reel-topbar' };
-    try {
-      const topbar = response && response.topbar;
-      info.hasTopbar = !!topbar;
-      const slots = getObjectByPath(response, 'topbar.topBarViewModel.trailingButtons');
-      info.trailingButtons = Array.isArray(slots) ? slots.length : typeof slots;
-      info.hasMoreButton = !!findReelTopbarButton(response);
-      info.topKeys = response && typeof response === 'object' ? Object.keys(response).slice(0, 12) : typeof response;
-    } catch (e) {
-      info.error = true;
-    }
-    return info;
-  }
-
   // Channel bar paths, avatar link first, handle command-runs second. The
   // metadataItems hop is an array; the dotted-path walker reads the first
   // element owning the key, which is the single channel bar.
@@ -818,23 +734,9 @@
     };
   }
 
-  // The playing Short: id from the /shorts/<id> URL, name from the document
-  // title ("<title> - YouTube"). Both missing off-shorts (the menu branch
-  // only runs on the overlay, which only exists there, but stay fail-open).
-  function currentShortsVideo() {
-    let id;
-    let text;
-    try {
-      const match = document.location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})/);
-      id = match ? match[1] : undefined;
-    } catch (e) {}
-    try {
-      const title = typeof document.title === 'string' ? document.title : '';
-      const name = title.replace(/\s*-\s*YouTube\s*$/, '').trim();
-      text = name.length > 0 ? name : undefined;
-    } catch (e) {}
-    return { id, text };
-  }
+  // The playing Short: shared helper in paths.js (id from the /shorts/<id>
+  // URL, name from the document title). Used here for menu stamps and tap
+  // resolution — do not redeclare locally.
 
   // Generic fallback for renderers with menu.menuRenderer.items
   function extractFromGenericRenderer(renderer) {
@@ -873,12 +775,14 @@
     isReelOverlay,
   ) {
     if (isReelOverlay) {
-      return injectReelOverlayButtons(items, hasChannel, hasVideo, store);
+      injectReelOverlayButtons(items, hasChannel, hasVideo, store);
+      return;
     }
     if (isLockupViewModel) {
-      return injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store);
+      injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store);
+      return;
     }
-    return injectStandardMenuButtons(items, hasChannel, hasVideo, store);
+    injectStandardMenuButtons(items, hasChannel, hasVideo, store);
   }
 
   // Watch-page reel entries: clone a native row and retitle it. The popup's
@@ -890,9 +794,9 @@
   // (Description/Save/... opening on a Block tap). The replacement is the
   // same feedback-only no-op the lockup sheets use (see
   // overwriteOnTapCommand): silent, no hide — menuOnTap's own block post +
-  // overlay/skip are the whole effect (no toast by design). Skipping forwardMenuTap alone
-  // is not enough, because the row's native handler fires on its own via the
-  // framework click binding. Params stay unique per entry (rows sharing a
+  // overlay/skip are the whole effect (no toast by design). Skipping
+  // forwardMenuTap alone is not enough, because the row's native handler
+  // fires on its own via the framework click binding. Params stay unique per entry (rows sharing a
   // command verbatim collapse into the native row under param dedupe), and
   // each clone is stamped so a cached response filtered twice never
   // duplicates entries. Icon swapped to the BlockTube action; the blockTube
@@ -950,12 +854,12 @@
   }
 
   function injectReelOverlayButtons(items, hasChannel, hasVideo, store) {
-    if (!items.length) return true;
-    if (items.some(isOurReelEntry)) return true;
+    if (!items.length) return;
+    if (items.some(isOurReelEntry)) return;
     const template = items.find(
       (item) => item && item.listItemViewModel && !isOurReelEntry(item),
     );
-    if (!template) return true;
+    if (!template) return;
 
     const fresh = [];
     if (isWhitelistMenuMode(store)) {
@@ -972,26 +876,6 @@
     }
     // Appended to the bottom, after the native rows.
     for (let i = 0; i < fresh.length; i += 1) items.push(fresh[i]);
-    return true;
-  }
-
-  // Titles of listItem rows for the inject debug line: proves build currency
-  // (entry order) and data content without a live DOM probe. Computed only
-  // when menu diagnostics are on.
-  function menuItemTitles(items) {
-    try {
-      return items.map((item) => {
-        const vm = item && item.listItemViewModel;
-        const title = vm && vm.title;
-        if (title && typeof title.content === 'string') return title.content;
-        if (title && Array.isArray(title.runs)) {
-          return title.runs.map((run) => (run && run.text) || '').join('');
-        }
-        return '?';
-      });
-    } catch (e) {
-      return [];
-    }
   }
 
   function injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store) {
@@ -1012,7 +896,7 @@
         'REMOVE',
       );
       if (hasChannel) items.push(removeChannelItem);
-      return true;
+      return;
     }
 
     // Block mode additionally offers allowlisting, so the allowlist can be
@@ -1026,8 +910,6 @@
     if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
-
-    return true;
   }
 
   // Native-command fast path for real block entries: reuse YouTube's own
@@ -1188,7 +1070,7 @@
       // Whitelist mode: the visible cards are already allowlisted, so offer
       // removal instead of a pointless re-allow (videos can't be allowlisted).
       if (hasChannel) items.push(removeChannelItem);
-      return false;
+      return;
     }
 
     // Block mode additionally offers allowlisting, so the allowlist can be
@@ -1197,8 +1079,6 @@
     if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
-
-    return false;
   }
 
   // Desktop overflow menu: a minimal menuServiceItemRenderer entry appended to
@@ -1225,7 +1105,6 @@
     const { items, hasChannel, hasVideo, isLockupViewModel, isReelOverlay, sheet, attr } =
       extracted;
 
-    const nativeCount = Array.isArray(items) ? items.length : 0;
     injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, obj[attr], storageData, isReelOverlay);
 
     // Reactive renderers re-render on property assignment, not on in-place
@@ -1244,16 +1123,6 @@
       if (list && Array.isArray(list.listItems)) list.listItems = list.listItems.slice();
     }
 
-    btLogMenu('inject', {
-      attr,
-      nativeItems: nativeCount,
-      totalItems: Array.isArray(items) ? items.length : 0,
-      hasChannel,
-      hasVideo,
-      isReelOverlay: isReelOverlay === true,
-      titles: btMenusDebugEnabled() ? menuItemTitles(items) : undefined,
-    });
-
     // Attach metadata only if needed
     if (hasChannel || hasVideo) {
       obj[attr]._btOriginalAttr = attr;
@@ -1269,9 +1138,7 @@
   // stay out of the way; pointer-events:none so it can never swallow clicks.
   let toastTimer = 0;
 
-  // Create the toast div, styled property-by-property through CSSOM only
-  // (no <style>, no innerHTML), so page CSP and Trusted Types stay out of
-  // the way; pointer-events:none so it can never swallow clicks.
+  // Create the toast div (see constraints above).
   function createToastElement() {
     const el = document.createElement('div');
     el.id = 'blocktube-toast';
@@ -1834,15 +1701,6 @@
     // Get the parent dom and data from this
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
-    btLogMenu('resolve', {
-      menuAction,
-      isDataFromRightHandSide,
-      parentTag: parentDom && parentDom.tagName,
-      hasStamp: !!(parentData && parentData.blockTube),
-      originalAttr: parentData && parentData._btOriginalAttr,
-      target: describeTapTarget(this),
-    });
-
     // Get the data and type which is used for blocking the video
     const { type, data, removeParent, stopPlayer, isShorts, isWatch } = getBlockData(
       parentDom,
@@ -1850,16 +1708,6 @@
       isDataFromRightHandSide,
       menuAction,
     );
-
-    btLogMenu('block', {
-      type,
-      id: data && data.id,
-      text: data && data.text,
-      removeParent,
-      stopPlayer,
-      isShorts,
-      isWatch,
-    });
 
     // Notify system what data should be added to the block list. Shorts taps
     // carry their provenance along: the options-page entry then reads
@@ -1901,6 +1749,8 @@
   // the same auto-advance sweep a filtered response would. When skip is off
   // or capped, the pause + panel are the whole effect — the short stays put
   // but covered and silent instead of playing on. Fail-open throughout.
+  // Called only for card-removing taps (channelId/videoId/unwhitelist — see
+  // isCardRemovingTap above), so allow taps never reach here.
   function applyWatchBlockEffect(type, data, parentData) {
     try {
       pauseReelPlayer();
@@ -1919,25 +1769,22 @@
         (type !== 'videoId' && data && typeof data.id === 'string' && data.id) ||
         (typeof stamp.channelId === 'string' && stamp.channelId) ||
         undefined;
-      const message =
-        type === 'videoId' ? 'Video Blocked' : type === 'whitelist' ? 'Channel Allowed' : 'Channel Blocked';
-      if (type !== 'whitelist') {
-        try {
-          showBlockedShortOverlay(
-            {
-              videoId,
-              channelId,
-              channelName:
-                (type !== 'videoId' && data && data.text) || stamp.channelName || undefined,
-              title: (type === 'videoId' && data && data.text) || live.text || stamp.videoName,
-            },
-            message,
-          );
-        } catch (e) {}
-        try {
-          skipBlockedShort(videoId);
-        } catch (e) {}
-      }
+      const message = type === 'videoId' ? 'Video Blocked' : 'Channel Blocked';
+      try {
+        showBlockedShortOverlay(
+          {
+            videoId,
+            channelId,
+            channelName:
+              (type !== 'videoId' && data && data.text) || stamp.channelName || undefined,
+            title: (type === 'videoId' && data && data.text) || live.text || stamp.videoName,
+          },
+          message,
+        );
+      } catch (e) {}
+      try {
+        skipBlockedShort(videoId);
+      } catch (e) {}
     } catch (e) {}
   }
 
