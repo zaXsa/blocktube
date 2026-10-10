@@ -156,6 +156,17 @@
     } catch (e) {
       return;
     }
+    // Prefetches (not yet watched) arm nothing: their sweep would instantly
+    // complete ("not on screen" reads as "navigated away" in the tick below)
+    // and burn the one sweep per video, so a blocked short landed on later —
+    // whose player response may come from cache with nothing re-triggering
+    // this path — would never advance. The landing hook (hooks.js
+    // yt-navigate-finish) arms the sweep when actually watched instead.
+    try {
+      if (currentShortsId() !== videoId) return;
+    } catch (e) {
+      return;
+    }
     try {
       if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return;
     } catch (e) {

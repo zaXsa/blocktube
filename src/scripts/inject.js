@@ -1963,6 +1963,17 @@
     } catch (e) {
       return;
     }
+    // Prefetches (not yet watched) arm nothing: their sweep would instantly
+    // complete ("not on screen" reads as "navigated away" in the tick below)
+    // and burn the one sweep per video, so a blocked short landed on later —
+    // whose player response may come from cache with nothing re-triggering
+    // this path — would never advance. The landing hook (hooks.js
+    // yt-navigate-finish) arms the sweep when actually watched instead.
+    try {
+      if (currentShortsId() !== videoId) return;
+    } catch (e) {
+      return;
+    }
     try {
       if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return;
     } catch (e) {
@@ -6810,6 +6821,10 @@
     // Remove first so a panel carried through the transition never shows a
     // stale reason on the new short (or lingers on an unblocked one).
     // A landing with no blocked paint target is clean: lift its covers.
+    // A landing WITH one is a known-blocked short whose player response may
+    // have come from cache with nothing triggering the player-response path:
+    // arm its auto-advance sweep here, on screen (prefetches never arm, so
+    // this is the only sweep a cached landing gets).
     try {
       if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
     } catch (e) {}
@@ -6818,6 +6833,17 @@
     } catch (e) {}
     try {
       if (typeof shortsOverlayPaintCurrent === 'function') shortsOverlayPaintCurrent();
+    } catch (e) {}
+    try {
+      if (
+        typeof shortsOverlayHasPaintTarget === 'function' &&
+        typeof skipBlockedShort === 'function' &&
+        typeof currentShortsId === 'function' &&
+        shortsOverlayHasPaintTarget()
+      ) {
+        const landedId = currentShortsId();
+        if (typeof landedId === 'string') skipBlockedShort(landedId);
+      }
     } catch (e) {}
   });
 
