@@ -7,21 +7,22 @@ Filter and block unwanted content from YouTube™.
 
 * Block videos via: **Video Title** / **Channel Name** / **Channel ID** / **Video ID**
 * Block comments via **User** / **Comment content**
-* Block videos within YouTube using context menus
-* Blocked videos do not appear anywhere on the site
-* Support for `m.youtube.com` on Firefox for Android and Kiwi Browser
-* Block complete channels
+* Block videos/channels via context menus on videos, Shorts, and the comment `...` menu (allowlist entries included)
+* Blocked videos are removed from feeds, search, and suggestions (watch-page blocks show a message instead; `%`-watched matches are hidden only; `Disable direct access blocking` and the history-page opt-out exempt some surfaces)
+* Works on `m.youtube.com` (mobile layout) as well as desktop
+* Block complete channels (channel pages redirect to home)
+* Shorts blocking with skip-blocked-Shorts, Movies / Mixes / Chips-shelves blocks, runtime (duration) allow/block range, hide-by-watch-progress
 * Whitelist mode: show only allowlisted channels, hide everything else
 * Supports both keywords and raw Regex
-* Does not break or limit any features of YouTube like playlist or autoplay
-* Hide and block the Trending section
+* Blocked playlist rows are neutered in place; autoplay can advance to the next video on block when enabled
+* Block the Explore page (Trending + Explore)
 * Protect extension options with a password
-* Filtering is done before any DOM rendering
-* Advanced blocking via custom JavaScript filter (`video`, `objectType`) — see below
+* Filtering hooks network data before render; Shorts covers, comment menus, and toasts apply at the DOM layer
+* Advanced blocking via custom JavaScript filter (`video`, `objectType`, forced off in whitelist mode) — see below
 
 ## Install
 
-* [**Chrome Webstore**](https://chrome.google.com/webstore/detail/blocktube/bbeaicapbccfllodepmimpkgecanonai?hl=en-US)
+* [**Chrome Webstore**](https://chromewebstore.google.com/detail/blocktube/bbeaicapbccfllodepmimpkgecanonai?hl=en-US)
 * [**Firefox AMO**](https://addons.mozilla.org/en-US/firefox/addon/blocktube/)
 
 ## Guides
@@ -38,7 +39,7 @@ Filter and block unwanted content from YouTube™.
 Sidebar sections, one panel at a time (header shows entry counts, Save /
 Discard, and an `Unsaved changes` flag):
 
-* **General** — every other option (theme, password, runtime, checkboxes).
+* **General** — theme, password, blocked-message text, hide-by-watch-progress, runtime allow/block range, whitelist switch, and checkboxes (Explore/Mixes/Movies/Chips-shelves/Shorts blocks, autoplay-next, direct-access and history opt-outs, feedback, playback tweaks, menu entries, Ctrl+S shortcut).
 * **Channel ID / Video ID / Channel Name / Video Title / Comments** — each
   list as a searchable table (one row per entry with its date, source, and
   an editable label; single-click remove; paging for large lists) plus a
@@ -94,6 +95,7 @@ Discard, and an `Unsaved changes` flag):
   allowlisted channels show; title/name/ID/comment filters, duration and
   watch-progress rules, and the custom JavaScript filter do nothing, but
   everything is preserved and applies again when you switch the mode off.
+  Section-level toggles (Shorts / Movies / Mixes / Chips-shelves) still apply.
 
 * Where is my allowlist?  
   In the dedicated `Whitelist` panel on the options page (visible only while
@@ -105,8 +107,10 @@ Discard, and an `Unsaved changes` flag):
 
 Options page > `Advanced` panel. Check `Enable advanced blocking`,
 edit the function, then `Save`. It runs **after** the built-in
-title/channel/regex/duration options and only while the checkbox is checked —
-return truthy to block, falsy to allow:
+title/channel/regex/duration matchers (percent-watched, comment, and
+section-level matchers are evaluated separately; section-level blocks run
+first) and only while the checkbox is checked — and it is forced off in
+whitelist mode. Return truthy to block, falsy to allow:
 
 ```js
 (video, objectType) => {
@@ -130,8 +134,9 @@ examples): [docs/advanced-blocking.md](docs/advanced-blocking.md).
   arbitrary executable code, so it must never silently start running.
 * After an import: open the `Advanced` panel, review the imported code,
   re-check `Enable advanced blocking` only if you trust it, then `Save`.
-  Until you do, the imported function is stored but inert. If the backup
-  contained a custom filter, the `Export / Import` panel keeps a reminder
+  Until you do, the imported function is stored but inert. If the imported
+  backup contains any non-blank JavaScript (including the untouched default
+  template text), the `Export / Import` panel keeps a reminder
   up until you re-enable it.
 
 ## Development & Build
@@ -140,9 +145,10 @@ examples): [docs/advanced-blocking.md](docs/advanced-blocking.md).
 ```
 # Prerequisites
 sudo apt install nodejs npm
+# Node 16+ (CI lints on Node 20, releases on Node 16)
 
-# Clone Repo
-git clone https://github.com/amitbl/blocktube
+# Clone Repo (this fork/branch — upstream `amitbl/blocktube` master lacks this branch)
+git clone -b AllChanges https://github.com/zaXsa/blocktube
 cd blocktube
 npm install
 
@@ -167,10 +173,13 @@ npm run check:length
 # Build package
 ./tools/build.sh firefox
 ./tools/build.sh chrome
+./tools/build.sh firefox_selfhosted
 
-# Output packages locations
+# Output packages locations (<VERSION> comes from the VERSION file —
+# the release track, independent of package.json)
 ./dist/firefox/blocktube_firefox_v<VERSION>.zip
 ./dist/chrome/blocktube_chrome_v<VERSION>.zip
+./dist/firefox_selfhosted/blocktube_firefox_selfhosted_v<VERSION>.zip
 
 # Temporary installation / debugging
 Firefox: https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/
