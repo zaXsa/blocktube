@@ -185,13 +185,37 @@
     return el;
   }
 
+  // Live comment text color for the placeholder note, sampled BEFORE the
+  // thread is wiped. Sampling #content-text (else the comment node itself)
+  // matches the surrounding comments by construction, in any theme and
+  // under recolor extensions; the yt-spec token is the fallback. Never
+  // throws (empty string on any failure — the caller falls back).
+  function btSampleCommentTextColor(commentEl) {
+    try {
+      let ref = commentEl;
+      try {
+        if (commentEl && typeof commentEl.querySelector === 'function') {
+          ref = commentEl.querySelector('#content-text') || commentEl;
+        }
+      } catch (e) {}
+      if (ref && typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+        const sampled = window.getComputedStyle(ref).color;
+        if (typeof sampled === 'string' && sampled.length > 0) return sampled;
+      }
+    } catch (e) {}
+    return '';
+  }
+
   // Drop the thread owning a comment node, leaving a placeholder note in
   // its place (mirrors blocked videos keeping a "Blocked" card instead of
-  // vanishing). Falls back to plain removal when the placeholder cannot
-  // be built.
+  // vanishing). The note is pinned to the sampled text color: it sets no
+  // color of its own, so it inherited whatever the emptied root computed —
+  // black in the field report's dark-theme context. Falls back to plain
+  // removal when the placeholder cannot be built.
   function placeholderCommentThread(commentEl, message) {
     const root = commentThreadRoot(commentEl);
     if (!root) return;
+    const textColor = btSampleCommentTextColor(commentEl);
     try {
       while (root.firstChild) root.removeChild(root.firstChild);
       const note = document.createElement('div');
@@ -201,6 +225,7 @@
       style.fontSize = '14px';
       style.fontFamily = 'Roboto, Arial, sans-serif';
       style.opacity = '0.7';
+      style.color = textColor || 'var(--yt-spec-text-primary)';
       root.appendChild(note);
     } catch (e) {
       try {
@@ -856,6 +881,15 @@
   function injectCommentMenuEntries(scope, anchorEl, store) {
     const report = commentPopupReport(scope);
     if (!report || !report.parentNode) return 0;
+    // A real native popup is open: sample its theme and row-icon size for
+    // the fallback menu (measurement, not a guess — see
+    // btSampleNativeMenuTheme / btSampleNativeRowIcon).
+    try {
+      btSampleNativeMenuTheme(report);
+    } catch (e) {}
+    try {
+      btSampleNativeRowIcon(report);
+    } catch (e) {}
     const entries = commentMenuEntries(
       store || (typeof storageData !== 'undefined' ? storageData : undefined),
     );
@@ -988,6 +1022,812 @@
     } catch (e) {}
   }
 
+  // Fallback when the native `...` is missing/hidden (seen in some regions
+  // while logged out / incognito: no Report, sometimes no menu button at
+  // all, so the popup path above never fires). We inject our own trigger
+  // per rendered comment and show our own menu from it.
+  // True when the native `...` menu exists and is visibly laid out (the
+  // popup path owns it). Must ONLY match menu candidates: matching any
+  // visible button (Like/Dislike/author avatar) wrongly skips every
+  // comment. A menu candidate is a menu host with size, or a button whose
+  // aria-label looks like a menu (`...` buttons carry "More actions"-style
+  // labels — the same /more|action|menu/i match trackCommentMenuAnchor
+  // uses). Visibility is by rect (offsetParent is unreliable inside
+  // flex/YouTube layouts).
+  function btHasNativeMenu(commentEl) {
+    try {
+      const hosts = commentEl.querySelectorAll('ytd-menu-renderer, #menu, #action-menu');
+      for (let i = 0; i < hosts.length; i += 1) {
+        try {
+          const r = hosts[i].getBoundingClientRect();
+          if (r && r.width > 0 && r.height > 0) return true;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    try {
+      const buttons = commentEl.querySelectorAll('button[aria-label], [aria-label]');
+      for (let i = 0; i < buttons.length; i += 1) {
+        let label = '';
+        try {
+          label = buttons[i].getAttribute ? buttons[i].getAttribute('aria-label') || '' : '';
+        } catch (e) {}
+        if (!/more|action|menu/i.test(label)) continue;
+        try {
+          const r = buttons[i].getBoundingClientRect();
+          if (r && r.width > 0 && r.height > 0) return true;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  // Currently open fallback menu + its cleanup (outside-click / Escape /
+  // scroll dismiss). Only one open at a time.
+  let btFallbackMenuEl = null;
+  let btFallbackCleanup = null;
+
+  function btCloseFallbackMenu() {
+    try {
+      if (btFallbackCleanup) {
+        const fn = btFallbackCleanup;
+        btFallbackCleanup = null;
+        fn();
+      }
+    } catch (e) {}
+    try {
+      if (btFallbackMenuEl && typeof btFallbackMenuEl.remove === 'function') {
+        btFallbackMenuEl.remove();
+      }
+    } catch (e) {}
+    btFallbackMenuEl = null;
+  }
+
+  // Fallback pixel-match helpers: measure YouTube's own nodes instead of
+  // guessing, so the trigger + menu render like the native `...` / Report
+  // popup in both themes. Trigger metrics come from a visible native icon
+  // button (resolved once per page; a miss retries every 25th call, so
+  // per-comment sweeps never scan the whole document per comment) and the
+  // icon is the static official SVG above. Menu colors are sampled from a
+  // real native popup whenever one opens (see btSampleNativeMenuTheme).
+  let btNativeTemplateCache = null;
+  let btNativeTemplateCalls = 0;
+
+  // First visible native `...`-style button on the page. Video/header menus
+  // still render one even where comments have none — that is the template.
+  // Skips our own fallback nodes. Must contain a <yt-icon>: the previous
+  // version matched a 40x40 "Show more"-style text button (aria containing
+  // "more", no icon), which produced the oversized icon-less trigger.
+  function btFindVisibleMenuButton() {
+    try {
+      if (typeof document === 'undefined' || !document.querySelectorAll) return null;
+      const nodes = document.querySelectorAll('button[aria-label], yt-icon-button');
+      for (let i = 0; i < nodes.length; i += 1) {
+        const n = nodes[i];
+        try {
+          if (n.closest && n.closest('[data-bt-fallback-menu],[data-bt-fallback-btn]')) {
+            continue;
+          }
+        } catch (e) {}
+        let label = '';
+        try {
+          label = n.getAttribute ? n.getAttribute('aria-label') || '' : '';
+        } catch (e) {}
+        if (!/more|action|menu/i.test(label)) continue;
+        try {
+          if (typeof n.querySelector === 'function' && !n.querySelector('yt-icon')) {
+            continue;
+          }
+        } catch (e) {}
+        try {
+          const r = n.getBoundingClientRect();
+          if (r && r.width > 0 && r.height > 0) return n;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // Official `...` icon, copied dot-for-dot from the native comment menu
+  // button's own HTML (field capture: <button id="button"
+  // class="style-scope yt-icon-button" aria-label="Action menu"> wrapping a
+  // 24x24 svg of three filled circles with fill=currentcolor; icon box
+  // --yt-icon-button-icon-width/height: 24px on a 40px host). Built via DOM
+  // + SVG namespace (no innerHTML — page CSP and Trusted Types). This
+  // replaces the earlier `⋮` text glyph, which rendered visibly thinner
+  // than the official filled dots, and the arbitrary-button <yt-icon>
+  // clone, which risked copying the wrong icon. 24px box; the 40px
+  // trigger's flex layout centers it, exactly like the native host.
+  const BT_OFFICIAL_MENU_PATH =
+    'M12 4a2 2 0 100 4 2 2 0 000-4Zm0 6a2 2 0 100 4 2 2 0 000-4Zm0 6a2 2 0 100 4 2 2 0 000-4Z';
+
+  // One <svg> element with a single path, via the SVG namespace (no
+  // innerHTML — page CSP and Trusted Types). Null when SVG DOM is
+  // unavailable or any step throws. Shared by the trigger icon and the
+  // menu row icons.
+  function btSvgWithPath(pathD, sizePx) {
+    try {
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(svgNS, 'svg');
+      if (!svg || typeof svg.setAttribute !== 'function') return null;
+      svg.setAttribute('height', String(sizePx));
+      svg.setAttribute('width', String(sizePx));
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('focusable', 'false');
+      svg.setAttribute('aria-hidden', 'true');
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('d', pathD);
+      svg.appendChild(path);
+      return svg;
+    } catch (e) {}
+    return null;
+  }
+
+  // 24px box + positioning span around a trigger svg, mirroring the
+  // native yt-icon host structure (span.yt-icon-shape > fill div > svg).
+  // Null when the wrapper cannot be built.
+  function btWrapTriggerIcon(svg) {
+    try {
+      const box = document.createElement('div');
+      const span = document.createElement('span');
+      span.setAttribute('class', 'yt-icon-shape ytSpecIconShapeHost');
+      styleDialogNode(box, {
+        width: '24px',
+        height: '24px',
+        display: 'block',
+        fill: 'currentcolor',
+      });
+      styleDialogNode(svg, {
+        pointerEvents: 'none',
+        display: 'block',
+        width: '100%',
+        height: '100%',
+      });
+      styleDialogNode(span, {
+        display: 'inline-flex',
+        width: '24px',
+        height: '24px',
+      });
+      box.appendChild(svg);
+      span.appendChild(box);
+      return span;
+    } catch (e) {}
+    return null;
+  }
+
+  function btOfficialMenuIcon() {
+    try {
+      const svg = btSvgWithPath(BT_OFFICIAL_MENU_PATH, 24);
+      if (!svg) return null;
+      return btWrapTriggerIcon(svg);
+    } catch (e) {}
+    return null;
+  }
+
+  // Measured template { w, h, color } or null. w/h are measured px and
+  // color is the resolved rgb() so the copy matches even in the comment
+  // subtree where `inherit`/vars resolve differently (the dark-theme black
+  // icon came from exactly that). Metrics only — the icon itself is always
+  // the static official SVG above, and the trigger carries no YouTube
+  // classes (a copied host class once pulled in a foreign border rule).
+  function btNativeTriggerTemplate() {
+    try {
+      if (btNativeTemplateCache) return btNativeTemplateCache;
+      btNativeTemplateCalls += 1;
+      if (btNativeTemplateCalls % 25 !== 1) return null;
+      const t = btFindVisibleMenuButton();
+      if (!t) return null;
+      let w = 0;
+      let h = 0;
+      try {
+        const r = t.getBoundingClientRect();
+        w = Math.round(r.width);
+        h = Math.round(r.height);
+      } catch (e) {}
+      if (!w || !h) return null;
+      let color = '';
+      try {
+        if (window.getComputedStyle) color = window.getComputedStyle(t).color || '';
+      } catch (e) {}
+      btNativeTemplateCache = {
+        w,
+        h,
+        color,
+      };
+      return btNativeTemplateCache;
+    } catch (e) {}
+    return null;
+  }
+
+  // Dark-theme check for the fallback menu: YouTube marks <html dark>
+  // in dark mode; matchMedia covers the rest. Plain boolean, never throws.
+  function btFallbackIsDark() {
+    try {
+      if (typeof document !== 'undefined' && document.documentElement) {
+        if (typeof document.documentElement.hasAttribute === 'function') {
+          if (document.documentElement.hasAttribute('dark')) return true;
+        }
+      }
+    } catch (e) {}
+    try {
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  // Menu colors sampled from a real native comment popup
+  // ({ bg, color, border, boxShadow }), when one has opened on this page.
+  // Null until the first sample: the fallback menu then uses the hardcoded
+  // dark/light defaults below. Never guessed per-theme values — the sample
+  // is the native renderer's own computed style, so theme changes and
+  // per-account variations carry over automatically.
+  let btNativeMenuTheme = null;
+
+  // Sample one native popup's theme from its container. Called with the
+  // Report entry of an opened native comment menu (see
+  // injectCommentMenuEntries): the closest ytd-menu-popup-renderer carries
+  // the background/border/shadow, its computed color the row text color.
+  // Never throws.
+  function btSampleNativeMenuTheme(report) {
+    try {
+      if (!report || typeof report.closest !== 'function') return;
+      if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return;
+      }
+      const popup = report.closest('ytd-menu-popup-renderer');
+      if (!popup) return;
+      const style = window.getComputedStyle(popup);
+      if (!style) return;
+      const bg = style.backgroundColor || '';
+      const color = style.color || '';
+      if (typeof bg !== 'string' || bg.length === 0) return;
+      if (typeof color !== 'string' || color.length === 0) return;
+      const border = typeof style.border === 'string' ? style.border : '';
+      const boxShadow = typeof style.boxShadow === 'string' ? style.boxShadow : '';
+      btNativeMenuTheme = { bg, color, border, boxShadow };
+    } catch (e) {}
+  }
+
+  // Block icon path, captured from a live native menu ([BT-ICONS] field
+  // capture): the NOT_INTERESTED glyph YouTube renders for block entries,
+  // on its native 24 grid. CHECK/REMOVE paths (allow / unwhitelist rows)
+  // are still pending a capture — those rows stay text-only until then.
+  const BT_BLOCK_ICON_PATH =
+    'M12 1C5.925 1 1 5.925 1 12s4.925 11 11 11 11-4.925 11-11S18.075 1 12 1Zm0 2a9 9 0 018.246 12.605L4.755 6.661A8.99 8.99 0 0112 3ZM3.754 8.393l15.491 8.944A9 9 0 013.754 8.393Z';
+
+  // Row icon per entry type. Missing/unknown stays text-only.
+  const BT_ROW_ICON_PATHS = {
+    channelId: BT_BLOCK_ICON_PATH,
+    comment: BT_BLOCK_ICON_PATH,
+    whitelist: null,
+    unwhitelist: null,
+  };
+
+  // One grid-drawn SVG icon node (no innerHTML — page CSP/Trusted Types).
+  // fill=currentcolor so it tracks the row text color. 24 renders the
+  // native 24 grid 1:1; anything else scales uniformly.
+  function btSvgIcon(pathD, sizePx) {
+    try {
+      const size = sizePx > 0 ? sizePx : 24;
+      const svg = btSvgWithPath(pathD, size);
+      if (!svg) return null;
+      const box = document.createElement('span');
+      styleDialogNode(box, {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: `${size}px`,
+        height: `${size}px`,
+        flex: '0 0 auto',
+      });
+      styleDialogNode(svg, {
+        pointerEvents: 'none',
+        display: 'block',
+        width: '100%',
+        height: '100%',
+        fill: 'currentcolor',
+      });
+      try {
+        box.appendChild(svg);
+      } catch (e) {
+        return null;
+      }
+      return box;
+    } catch (e) {}
+    return null;
+  }
+
+  // Sampled native row-icon size (px, 0 until sampled). Measured off a
+  // Report row's yt-icon whenever a native popup opens (see
+  // btSampleNativeRowIcon); the 24 default renders the captured grid 1:1.
+  let btNativeRowIconPx = 0;
+
+  // Measure one native menu row's yt-icon box (light DOM or shadow root).
+  // Called with the Report entry of an opened native comment menu.
+  // Implausible sizes are ignored so a mis-hit can never distort the rows.
+  function btSampleNativeRowIcon(report) {
+    try {
+      if (!report) return;
+      let icon = null;
+      try {
+        icon =
+          (report.shadowRoot && report.shadowRoot.querySelector('yt-icon')) ||
+          (typeof report.querySelector === 'function'
+            ? report.querySelector('yt-icon')
+            : null);
+      } catch (e) {}
+      if (!icon || typeof icon.getBoundingClientRect !== 'function') return;
+      const r = icon.getBoundingClientRect();
+      if (r && r.width >= 16 && r.width <= 32 && r.height >= 16 && r.height <= 32) {
+        btNativeRowIconPx = Math.round((r.width + r.height) / 2);
+      }
+    } catch (e) {}
+  }
+  // Bare fallback-menu row button: attrs + flex styling, no content yet.
+  // Null when the button cannot be built (callers skip null rows).
+  function btMakeFallbackRowButton(label, type, colors) {
+    try {
+      const item = document.createElement('button');
+      item.setAttribute('role', 'menuitem');
+      item.setAttribute('type', 'button');
+      item.setAttribute('data-bt-fallback-item', type);
+      item.setAttribute('aria-label', label);
+      styleDialogNode(item, {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        width: '100%',
+        boxSizing: 'border-box',
+        textAlign: 'left',
+        padding: '8px 16px',
+        fontSize: '14px',
+        fontFamily: 'Roboto, Arial, sans-serif',
+        color: colors.text,
+        backgroundColor: 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      });
+      return item;
+    } catch (e) {}
+    return null;
+  }
+
+  // Row content: captured native icon where one is known for the type
+  // (text-only otherwise — allow/unwhitelist paths still pending a
+  // capture), then the label. A failed label span falls back to plain
+  // button text so the row never renders empty.
+  function btFillFallbackRow(item, label, type) {
+    try {
+      const path = BT_ROW_ICON_PATHS[type];
+      if (path) {
+        const icon = btSvgIcon(path, btNativeRowIconPx || 24);
+        if (icon) item.appendChild(icon);
+      }
+    } catch (e) {}
+    try {
+      const text = document.createElement('span');
+      text.textContent = label;
+      item.appendChild(text);
+    } catch (e) {
+      try {
+        item.textContent = label;
+      } catch (ignored) {}
+    }
+  }
+
+  // Row behavior: hover highlight plus the tap path (same path as popup
+  // entries, anchored on commentEl directly — no fresh `...` anchor exists
+  // in this scenario). The tap listener is added before the dismiss one so
+  // it runs first (stopPropagation, not stopImmediatePropagation).
+  function btWireFallbackRow(item, commentEl, type, colors) {
+    try {
+      item.addEventListener('mouseenter', () => {
+        item.style.backgroundColor = colors.hover;
+      });
+      item.addEventListener('mouseleave', () => {
+        item.style.backgroundColor = 'transparent';
+      });
+    } catch (e) {}
+    try {
+      item.addEventListener('click', onCommentMenuTap(commentEl, type));
+      item.addEventListener('click', () => btCloseFallbackMenu());
+    } catch (e) {}
+  }
+
+  // One plain-HTML row for the fallback menu: a real <button> with
+  // guaranteed layout (no YouTube custom-element upgrade needed), icon +
+  // label in a flex row like the native rows. Null when unbuildable.
+  function btBuildFallbackRow(label, type, commentEl, colors) {
+    const item = btMakeFallbackRowButton(label, type, colors);
+    if (!item) return null;
+    btFillFallbackRow(item, label, type);
+    btWireFallbackRow(item, commentEl, type, colors);
+    return item;
+  }
+
+  // Menu entries for one fallback opening, honoring the General toggles.
+  // Toasts and returns [] when nothing is enabled — the caller bails out.
+  function btFallbackMenuEntries() {
+    let entries = [];
+    try {
+      entries = commentMenuEntries(
+        typeof storageData !== 'undefined' ? storageData : undefined,
+      );
+    } catch (e) {
+      entries = [];
+    }
+    if (!entries || entries.length === 0) {
+      try {
+        window.blockTubeExports.openToast('BlockTube has no comment actions enabled', 3000);
+      } catch (e) {}
+      return [];
+    }
+    return entries;
+  }
+
+  // Text/hover colors for fallback rows: sampled native colors win, the
+  // hardcoded pair is only the pre-sample default.
+  function btFallbackRowColors(dark) {
+    if (btNativeMenuTheme) return { text: btNativeMenuTheme.color, hover: 'rgba(128, 128, 128, 0.25)' };
+    if (dark) return { text: '#ffffff', hover: '#3d3d3d' };
+    return { text: '#0f0f0f', hover: '#f2f2f2' };
+  }
+
+  // Bare fallback menu container. Borderless by default (the native popup
+  // is borderless — elevation comes from the shadow alone); sampled
+  // border/shadow carry over automatically when measured.
+  function btMakeFallbackMenu(rowColors, dark) {
+    const menu = styleDialogNode(document.createElement('div'), {
+      position: 'fixed',
+      display: 'block',
+      minWidth: '220px',
+      maxWidth: '300px',
+      padding: '8px 0',
+      borderRadius: '12px',
+      border:
+        btNativeMenuTheme && btNativeMenuTheme.border ? btNativeMenuTheme.border : 'none',
+      backgroundColor: btNativeMenuTheme ? btNativeMenuTheme.bg : dark ? '#212121' : '#ffffff',
+      color: rowColors.text,
+      boxShadow:
+        btNativeMenuTheme && btNativeMenuTheme.boxShadow
+          ? btNativeMenuTheme.boxShadow
+          : '0 4px 16px rgba(0, 0, 0, 0.3)',
+      zIndex: '2147483647',
+      fontFamily: 'Roboto, Arial, sans-serif',
+      fontSize: '14px',
+    });
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('data-bt-fallback-menu', '1');
+    return menu;
+  }
+
+  // Append one row per entry. Returns the row count (0 when unbuildable).
+  function btFillFallbackMenu(menu, entries, commentEl, rowColors) {
+    let rows = 0;
+    for (let i = 0; i < entries.length; i += 1) {
+      let item = null;
+      try {
+        item = btBuildFallbackRow(entries[i].label, entries[i].type, commentEl, rowColors);
+      } catch (e) {
+        item = null;
+      }
+      if (!item) continue;
+      try {
+        menu.appendChild(item);
+        rows += 1;
+      } catch (e) {}
+    }
+    return rows;
+  }
+
+  // Anchor the menu to the trigger rect, clamped to the viewport: below
+  // the button when it fits, flipped above it otherwise.
+  function btPlaceFallbackMenu(menu, rect, rows) {
+    try {
+      const vw = window.innerWidth || 800;
+      const vh = window.innerHeight || 600;
+      const mw = menu.offsetWidth || 220;
+      const mh = menu.offsetHeight || rows * 36 + 16;
+      let left = rect ? rect.left : 100;
+      let top = rect ? rect.bottom + 4 : 100;
+      if (left + mw > vw - 8) left = Math.max(8, vw - mw - 8);
+      if (top + mh > vh - 8) top = Math.max(8, (rect ? rect.top : 100) - mh - 4);
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${Math.max(8, top)}px`;
+    } catch (e) {}
+  }
+
+  // Dismiss wiring for the open menu: outside-click, Escape and scroll.
+  // Only one menu is open at a time (see btCloseFallbackMenu).
+  function btWireFallbackMenuDismiss(menu, btn) {
+    const onDocClick = (event) => {
+      try {
+        if (menu.contains(event.target) || (btn && btn.contains(event.target))) return;
+      } catch (e) {}
+      btCloseFallbackMenu();
+    };
+    const onKey = (event) => {
+      if (event && event.key === 'Escape') btCloseFallbackMenu();
+    };
+    const onScroll = () => btCloseFallbackMenu();
+    try {
+      document.addEventListener('click', onDocClick, true);
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('scroll', onScroll, true);
+    } catch (e) {}
+    btFallbackCleanup = () => {
+      try {
+        document.removeEventListener('click', onDocClick, true);
+      } catch (e) {}
+      try {
+        document.removeEventListener('keydown', onKey, true);
+      } catch (e) {}
+      try {
+        document.removeEventListener('scroll', onScroll, true);
+      } catch (e) {}
+    };
+  }
+
+  // Own menu for the fallback button: plain-HTML rows in a plain <div>
+  // (deliberately NOT ytd-menu-popup-renderer /
+  // ytd-menu-navigation-item-renderer). The custom-element version rendered
+  // 0-wide outside YouTube's popup scaffold — data-bound rows need the
+  // native container's Polymer upgrade + CSS to lay out, so the menu opened
+  // invisibly (field log: rows=6 menu=0x16) and the trigger looked dead.
+  // Plain divs lay out anywhere, in both themes. Positioned from the button
+  // rect and clamped to the viewport. Taps reuse the same paths as popup
+  // entries, anchored on commentEl directly (no fresh `...` anchor exists
+  // in this scenario).
+  function btShowFallbackMenu(btn, commentEl) {
+    btCloseFallbackMenu();
+    if (typeof document === 'undefined') return;
+    const entries = btFallbackMenuEntries();
+    if (entries.length === 0) return;
+    let rect = null;
+    try {
+      rect = btn.getBoundingClientRect();
+    } catch (e) {}
+    const dark = btNativeMenuTheme ? null : btFallbackIsDark();
+    const rowColors = btFallbackRowColors(dark);
+    const menu = btMakeFallbackMenu(rowColors, dark);
+    const rows = btFillFallbackMenu(menu, entries, commentEl, rowColors);
+    if (rows === 0) return;
+    try {
+      (document.body || document.documentElement).appendChild(menu);
+    } catch (e) {
+      return;
+    }
+    btPlaceFallbackMenu(menu, rect, rows);
+    btFallbackMenuEl = menu;
+    btWireFallbackMenuDismiss(menu, btn);
+  }
+
+  // Trigger metrics + styling. Measured values win over `inherit`/vars:
+  // w/h px plus the resolved rgb() color, so the copy matches the native
+  // `...` even in the comment subtree where they resolve differently. The
+  // default is 40px (native host size, field capture); outline:none mirrors
+  // the official button — without it the focused trigger paints a focus
+  // ring that reads as a border.
+  function btStyleFallbackTrigger(btn, tpl) {
+    const btW = tpl && tpl.w ? `${tpl.w}px` : '40px';
+    const btH = tpl && tpl.h ? `${tpl.h}px` : '40px';
+    const btColor = tpl && tpl.color ? tpl.color : 'var(--yt-spec-icon-inactive, #909090)';
+    styleDialogNode(btn, {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: btW,
+      height: btH,
+      minWidth: btW,
+      padding: '0',
+      margin: '0',
+      fontSize: '22px',
+      lineHeight: '1',
+      color: btColor,
+      opacity: '1',
+      backgroundColor: 'transparent',
+      borderRadius: '50%',
+      border: 'none',
+      outline: 'none',
+      cursor: 'pointer',
+      flex: '0 0 auto',
+    });
+  }
+
+  // Bare trigger button: attrs set, metrics + styling applied. Deliberately
+  // no YouTube classes — only inline styles, so no page (or
+  // recolor-extension) rule can lend it a border.
+  function btMakeFallbackTrigger(tpl) {
+    const btn = document.createElement('button');
+    btn.setAttribute('data-bt-fallback-btn', '1');
+    btn.setAttribute('aria-label', 'BlockTube block comment');
+    btn.setAttribute('title', 'BlockTube');
+    btn.setAttribute('type', 'button');
+    btStyleFallbackTrigger(btn, tpl);
+    return btn;
+  }
+
+  // The static official SVG icon (see btOfficialMenuIcon): exact native
+  // dots, never a font glyph. `⋮` text is the last resort only, for realms
+  // without SVG DOM support.
+  function btFillFallbackTriggerIcon(btn) {
+    try {
+      const official = btOfficialMenuIcon();
+      if (official) {
+        btn.appendChild(official);
+        return;
+      }
+    } catch (e) {}
+    try {
+      btn.textContent = '⋮';
+    } catch (e) {}
+  }
+
+  // Slot placement: appending to #action-menu inherits the exact native
+  // position. The slot is 0x0 only because it is empty — a 40x40 child
+  // gives it size. A `hidden` gate from YouTube is lifted first. True when
+  // the button landed (later slots are skipped), false to fall through.
+  function btPlaceTriggerInSlot(commentEl, btn) {
+    let slot = null;
+    try {
+      slot = commentEl.querySelector('#action-menu');
+    } catch (e) {
+      return false;
+    }
+    if (!slot) return false;
+    try {
+      if (typeof slot.hasAttribute === 'function' && slot.hasAttribute('hidden')) {
+        slot.removeAttribute('hidden');
+      }
+    } catch (e) {}
+    try {
+      slot.style.display = 'flex';
+      slot.style.alignItems = 'center';
+      slot.style.justifyContent = 'center';
+      slot.style.visibility = 'visible';
+      slot.appendChild(btn);
+      return true;
+    } catch (e) {}
+    return false;
+  }
+
+  // Header-row placement: pushed right like the native `...`.
+  function btPlaceTriggerInHeader(commentEl, btn) {
+    let header = null;
+    try {
+      header = commentEl.querySelector('#header');
+    } catch (e) {
+      return false;
+    }
+    if (!header) return false;
+    try {
+      btn.style.marginLeft = 'auto';
+      btn.style.alignSelf = 'center';
+      header.appendChild(btn);
+      return true;
+    } catch (e) {}
+    return false;
+  }
+
+  // Absolute placement, last resort when neither slot nor header row
+  // exists. True when the button landed.
+  function btPlaceTriggerAbsolute(commentEl, btn) {
+    try {
+      const pos = window.getComputedStyle
+        ? window.getComputedStyle(commentEl).position
+        : commentEl.style.position;
+      if (pos === 'static' || !pos) commentEl.style.position = 'relative';
+    } catch (e) {
+      try {
+        if (!commentEl.style.position) commentEl.style.position = 'relative';
+      } catch (ignored) {}
+    }
+    try {
+      btn.style.position = 'absolute';
+      btn.style.top = '4px';
+      btn.style.right = '4px';
+      commentEl.appendChild(btn);
+      return true;
+    } catch (e) {}
+    return false;
+  }
+
+  // Anchor the trigger where the native one would be: #action-menu slot,
+  // else #header row, else absolute top-right. True when it landed.
+  function btPlaceFallbackTrigger(commentEl, btn) {
+    if (btPlaceTriggerInSlot(commentEl, btn)) return true;
+    if (btPlaceTriggerInHeader(commentEl, btn)) return true;
+    return btPlaceTriggerAbsolute(commentEl, btn);
+  }
+
+  // Trigger behavior: hover disc plus opening our menu on tap.
+  function btWireFallbackTrigger(btn, commentEl) {
+    try {
+      btn.addEventListener('mouseenter', () => {
+        btn.style.backgroundColor = 'rgba(128, 128, 128, 0.25)';
+      });
+      btn.addEventListener('mouseleave', () => {
+        btn.style.backgroundColor = 'transparent';
+      });
+      btn.addEventListener('click', (event) => {
+        try {
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        } catch (e) {}
+        btShowFallbackMenu(btn, commentEl);
+      });
+    } catch (e) {}
+  }
+
+  // One comment's fallback button. Skips when a native menu host is visible
+  // (popup path owns it) or a button was already added. The trigger carries
+  // the official `...` SVG (see btOfficialMenuIcon), not a text glyph, and
+  // it is anchored where the native one would be (#action-menu slot, else
+  // #header row, else absolute top-right) so it reads as the normal menu.
+  // Our aria-label deliberately avoids "more/action/menu" so
+  // trackCommentMenuAnchor() ignores taps on it.
+  // Returns 'added' | 'native' | 'skip'.
+  function btEnsureFallbackButton(commentEl) {
+    try {
+      if (!commentEl || commentEl.nodeType !== 1) return 'skip';
+      if (typeof commentEl.querySelector !== 'function') return 'skip';
+      if (commentEl.querySelector('[data-bt-fallback-btn]')) return 'skip';
+      if (btHasNativeMenu(commentEl)) return 'native';
+      const btn = btMakeFallbackTrigger(btNativeTriggerTemplate());
+      btFillFallbackTriggerIcon(btn);
+      if (!btPlaceFallbackTrigger(commentEl, btn)) return 'skip';
+      btWireFallbackTrigger(btn, commentEl);
+      return 'added';
+    } catch (e) {}
+    return 'skip';
+  }
+
+  // Comment renderers under one added node: the node itself when it is
+  // one, plus its matching descendants (capped). Never throws.
+  function btSweepCandidates(node) {
+    const candidates = [];
+    try {
+      if (typeof node.matches === 'function' && node.matches(LIVE_COMMENT_SELECTORS)) {
+        candidates.push(node);
+      }
+    } catch (e) {}
+    try {
+      if (typeof node.querySelectorAll === 'function') {
+        const found = node.querySelectorAll(LIVE_COMMENT_SELECTORS);
+        for (let i = 0; i < found.length && candidates.length < 100; i += 1) {
+          candidates.push(found[i]);
+        }
+      }
+    } catch (e) {}
+    return candidates;
+  }
+
+  // Sweep one added node (plus its subtree, capped) for comment renderers
+  // lacking a native menu. Returns { seen, added, native } for the summary.
+  function btSweepForFallbacks(node) {
+    const out = { seen: 0, added: 0, native: 0 };
+    try {
+      if (!node || node.nodeType !== 1) return out;
+      const candidates = btSweepCandidates(node);
+      for (let i = 0; i < candidates.length; i += 1) {
+        out.seen += 1;
+        let verdict = 'skip';
+        try {
+          verdict = btEnsureFallbackButton(candidates[i]);
+        } catch (e) {
+          verdict = 'skip';
+        }
+        if (verdict === 'added') out.added += 1;
+        else if (verdict === 'native') out.native += 1;
+      }
+    } catch (e) {}
+    return out;
+  }
+
   // Watch for popup menus as comment threads stream in (continuations,
   // replies, sort changes all render late). Started once from hooks.js
   // after the first real storage payload so labels match the mode. The
@@ -1011,10 +1851,18 @@
           try {
             maybeInjectCommentMenu(added[j]);
           } catch (e) {}
+          try {
+            btSweepForFallbacks(added[j]);
+          } catch (e) {}
         }
       }
     });
     try {
       observer.observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {}
+    // Sweep comments already rendered before boot (continuations, replies
+    // and sort changes arrive later through the observer above).
+    try {
+      btSweepForFallbacks(document.documentElement);
     } catch (e) {}
   }
