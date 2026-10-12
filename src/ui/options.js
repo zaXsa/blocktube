@@ -809,8 +809,11 @@
     state.firstVisible = state.renderStart;
     $(t.rows).textContent = '';
     $(t.page).value = String(safe);
-    $(t.scroll).scrollTop = scrollTop;
     renderTablePage(key);
+    // Restore after render: setting scrollTop while the tbody is empty
+    // clamps to 0, so a remove jumped back to the top.
+    $(t.scroll).scrollTop = scrollTop;
+    updateTableBottomEdge(key);
   }
 
   // Keep the page number in sync with the scroll position, derived from the
