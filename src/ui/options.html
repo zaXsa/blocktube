@@ -63,40 +63,40 @@
           <div class="opt-panels" id="opt-panels">
             <section class="opt-panel" id="panel-general" aria-label="General">
               <h2>General</h2>
-              <fieldset>
-          <div>
-            <label class="block-label" for="ui_theme">UI Theme</label>
-            <select id="ui_theme" class="select">
+              <fieldset class="general-fieldset">
+          <div class="form-row">
+            <label for="ui_theme">UI Theme</label>
+            <span class="form-control"><select id="ui_theme" class="select">
               <option value="light">Light</option>
               <option value="dark">Dark</option>
-            </select>
+            </select></span>
           </div>
-          <div>
-            <label class="block-label" for="pass_save">UI Password</label>
-            <input id="pass_save" type="password" autocomplete="off" />
+          <div class="form-row">
+            <label for="pass_save">UI Password</label>
+            <span class="form-control"><input id="pass_save" type="password" autocomplete="off" /></span>
           </div>
-          <div>
-            <label class="block-label" for="block_message">Video blocked message</label>
-            <input id="block_message" type="text" autocomplete="off" /> <span class="tooltip" title="Shown on the watch page instead of a blocked video. Blank uses the default text.">?</span>
+          <div class="form-row">
+            <label for="block_message">Video blocked message</label>
+            <span class="form-control"><input id="block_message" type="text" autocomplete="off" /> <span class="tooltip" title="Shown on the watch page instead of a blocked video. Blank uses the default text.">?</span></span>
           </div>
-          <div>
-            <label class="block-label" for="percent_watched_hide">Hide videos watched more than</label>
-            <input id="percent_watched_hide" size="3" type="number" min="0" max="100" autocomplete="off" /> % <span class="tooltip" title="* This feature uses Youtube's watch time tracking and will only work when logged in&#10; * Matched videos are only hidden and will work on direct access and playlists">?</span>
+          <div class="form-row">
+            <label for="percent_watched_hide">Hide videos watched more than</label>
+            <span class="form-control"><input id="percent_watched_hide" size="3" type="number" min="0" max="100" autocomplete="off" /> % <span class="tooltip" title="* This feature uses Youtube's watch time tracking and will only work when logged in&#10; * Matched videos are only hidden and will work on direct access and playlists">?</span></span>
           </div>
-          <div>
-            <label class="block-label" for="vidLength_0">Runtime blocking</label>
-            <select id="vidLength_type" class="select">
+          <div class="form-row">
+            <label for="vidLength_0">Runtime blocking</label>
+            <span class="form-control"><select id="vidLength_type" class="select">
               <option value="block">Block</option>
               <option value="allow">Allow</option>
             </select>
-            <span style="font-size:small; font-style:italic">videos between</span>
+            <span class="form-hint">videos between</span>
             <input id="vidLength_0" type="number" min="0" max="99999" size="5" />
             <small>-</small>
             <input id="vidLength_1" type="number" min="0" max="99999" size="5" />
-            <span style="font-size:small; font-style:italic">seconds long</span> <span class="tooltip" title="Block hides videos in the range, Allow hides everything outside it. Blank field means no limit.">?</span>
+            <span class="form-hint">seconds long</span> <span class="tooltip" title="Block hides videos in the range, Allow hides everything outside it. Blank field means no limit.">?</span></span>
           </div>
           <div class="multi-column-content">
-          <div style="margin-top: 0">
+          <div>
             <input id="whitelist_mode" type="checkbox" />
             <label for="whitelist_mode">Whitelist <span class="tooltip" title="When on, only allowlisted channels show; other filters are bypassed, not deleted. Manage the allowlist in the Whitelist panel.">?</span></label>
           </div>

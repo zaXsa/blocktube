@@ -239,6 +239,137 @@ fieldset:last-of-type div {
   margin-block: 1em;
 }
 
+/* GENERAL PANEL — compact single-column list. Top rows are flex rows with
+   a fixed label width so every control starts at the same x but only takes
+   the width its content needs (no full-width stretch, no trailing void).
+   Checkboxes stay in one column for easy vertical scanning — a multi-column
+   grid wraps long labels into uneven rows and hurts readability. */
+.general-fieldset {
+  padding: .5em .8em;
+  display: flex;
+  flex-direction: column;
+  gap: .15em;
+}
+.general-fieldset > div {
+  margin-block: 0;
+  padding-inline: 0;
+}
+/* NOTE: no space between fieldset and .general-fieldset — the fieldset IS
+   the .general-fieldset (a descendant selector never matches here and loses
+   to the global `fieldset:last-of-type div` rule, leaving 1em gaps). */
+fieldset.general-fieldset:last-of-type > div,
+fieldset.general-fieldset > div {
+  margin-block: 0;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: .7em;
+  flex-wrap: wrap;
+  padding-block: .2em;
+  line-height: 1.3;
+}
+.form-row > label {
+  /* Wide enough for "Hide videos watched more than" on one line, so every
+     row stays the same height and controls stay aligned. */
+  flex: 0 0 17em;
+  font-weight: 600;
+  font-size: small;
+}
+.form-control {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.form-hint {
+  font-size: small;
+  font-style: italic;
+  opacity: .8;
+}
+
+/* Unified text/select look on the General panel (same bg, padding, radius).
+   Kept short (.25em) so rows stay compact. */
+.general-fieldset input[type="text"],
+.general-fieldset input[type="password"],
+.general-fieldset input[type="number"],
+.general-fieldset select.select {
+  background: var(--btn-bg);
+  border: 2px solid transparent;
+  border-radius: 3px;
+  color: var(--white);
+  padding-inline: .5em;
+  padding-block: .25em;
+  min-width: 0;
+  flex: none;
+  line-height: 1.3;
+}
+.general-fieldset input[type="text"]:focus,
+.general-fieldset input[type="password"]:focus,
+.general-fieldset input[type="number"]:focus,
+.general-fieldset select.select:focus,
+.general-fieldset select.select:active {
+  background-color: var(--btn-bg-focus);
+  border-bottom: 2px solid var(--white);
+  outline: none;
+}
+#block_message {
+  width: 20em;
+  max-width: 100%;
+}
+#pass_save {
+  width: 12em;
+  max-width: 100%;
+}
+#percent_watched_hide,
+#vidLength_0,
+#vidLength_1 {
+  width: 4.5em;
+}
+
+/* Checkbox list: single column, tight rows, label hugs its checkbox.
+   Specificity beats the global `fieldset:last-of-type div` rule, which
+   otherwise re-adds 1em above/below every nested row. */
+.multi-column-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--borders);
+  padding-top: .5em;
+  margin-top: .55em;
+}
+fieldset.general-fieldset:last-of-type .multi-column-content > div,
+fieldset.general-fieldset .multi-column-content > div {
+  display: flex;
+  align-items: flex-start;
+  gap: .5em;
+  margin-block: 0;
+  padding-block: .16em;
+  font-size: small;
+  line-height: 1.4;
+}
+.multi-column-content input[type="checkbox"] {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  margin: .2em 0 0 0;
+  padding: 0;
+  accent-color: #06c;
+  cursor: pointer;
+}
+.multi-column-content label {
+  cursor: pointer;
+}
+
+@media only screen and (max-width: 640px) {
+  .form-row > label {
+    flex: 1 1 100%;
+  }
+}
+
 /* Tooltip */
 .tooltip-link, .tooltip {
   background: #a43c46;
