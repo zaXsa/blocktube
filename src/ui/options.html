@@ -77,7 +77,7 @@
           </div>
           <div>
             <label class="block-label" for="block_message">Video blocked message</label>
-            <input id="block_message" type="text" autocomplete="off" />
+            <input id="block_message" type="text" autocomplete="off" /> <span class="tooltip" title="Shown on the watch page instead of a blocked video. Blank uses the default text.">?</span>
           </div>
           <div>
             <label class="block-label" for="percent_watched_hide">Hide videos watched more than</label>
@@ -93,7 +93,7 @@
             <input id="vidLength_0" type="number" min="0" max="99999" size="5" />
             <small>-</small>
             <input id="vidLength_1" type="number" min="0" max="99999" size="5" />
-            <span style="font-size:small; font-style:italic">seconds long</span>
+            <span style="font-size:small; font-style:italic">seconds long</span> <span class="tooltip" title="Block hides videos in the range, Allow hides everything outside it. Blank field means no limit.">?</span>
           </div>
           <div class="multi-column-content">
           <div style="margin-top: 0">
@@ -102,11 +102,11 @@
           </div>
           <div>
             <input id="disable_mixes" type="checkbox" />
-            <label for="disable_mixes">Block YouTube's auto-generated playlists and courses</label>
+            <label for="disable_mixes">Block YouTube's auto-generated playlists and courses <span class="tooltip" title="Hides auto-generated Mix / Radio playlists and Courses shelves">?</span></label>
           </div>
           <div>
             <input id="disable_trending" type="checkbox" />
-            <label for="disable_trending">Block Explore page</label>
+            <label for="disable_trending">Block Explore page <span class="tooltip" title="Blocks the Explore and Trending pages (/feed/explore, /feed/trending)">?</span></label>
           </div>
           <div>
             <input id="disable_shorts" type="checkbox" />
@@ -118,15 +118,15 @@
           </div>
           <div>
             <input id="disable_movies" type="checkbox" />
-            <label for="disable_movies">Block Youtube Movies videos</label>
+            <label for="disable_movies">Block Youtube Movies videos <span class="tooltip" title="Hides YouTube Movies &amp; TV offers and paid film shelves">?</span></label>
           </div>
           <div>
             <input id="disable_chips_shelves" type="checkbox" />
-            <label for="disable_chips_shelves">Block Youtube Chips shelves videos</label>
+            <label for="disable_chips_shelves">Block Youtube Chips shelves videos <span class="tooltip" title="Hides YouTube-generated shelves (e.g. People also search for, brand-video promos and banner shelves) rather than individual videos">?</span></label>
           </div>
           <div>
             <input id="autoplay" type="checkbox" />
-            <label for="autoplay">Enable Auto-playing next suggested video when blocking occurs</label>
+            <label for="autoplay">Enable Auto-playing next suggested video when blocking occurs <span class="tooltip" title="Watch-page only: when the open video is blocked, jump to the next suggestion instead of showing the blocked message. No effect in playlists.">?</span></label>
           </div>
           <div>
               <input id="suggestions_only" type="checkbox" />
@@ -146,7 +146,7 @@
           </div>
           <div>
             <input id="disable_on_history" type="checkbox" />
-            <label for="disable_on_history">Disable blocking on watch history page</label>
+            <label for="disable_on_history">Disable blocking on watch history page <span class="tooltip" title="Exempts the watch-history page (/feed/history) from blocking; all other surfaces still filter.">?</span></label>
           </div>
           <div>
             <input id="menu_allow_channel" type="checkbox" />
