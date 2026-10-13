@@ -122,7 +122,9 @@ html[data-theme="dark"] {
 }
 
 body {
-  margin-inline: 15%;
+  margin-inline: auto;
+  max-width: 1400px;
+  padding-inline: clamp(8px, 3vw, 32px);
   font-family: "Overpass", "Open Sans", Helvetica, sans-serif;
   background-color: var(--dark);
   color: var(--white);
@@ -403,6 +405,7 @@ input#import {
   display: flex;
   align-items: center;
   gap: .6em;
+  flex-wrap: wrap;
   margin-top: 1.5em;
   padding: .6em .8em;
   background: var(--light);
@@ -436,6 +439,14 @@ input#import {
 
 .opt-head-spacer {
   flex: 1 1 auto;
+}
+
+/* Save/Discard travel as one unit when the header wraps on narrow windows. */
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: .6em;
+  flex: none;
 }
 
 .opt-head input[type="button"] {
@@ -524,18 +535,21 @@ input#import {
   font-weight: 600;
 }
 
-/* One-line Add box above the ID editors */
+/* One-line Add box above the ID editors: the input caps at 28em and only
+   shrinks (never grows); the button is pinned to the right edge — narrow
+   windows squeeze the field, the button never drops a line. */
 .add-row {
   position: relative;
   display: flex;
   align-items: center;
   gap: .4em;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .add-input {
-  flex: none;
-  width: min(28em, 100%);
+  flex: 0 1 28em;
+  min-width: 0;
+  width: auto;
   background: var(--btn-bg);
   border: 2px solid transparent;
   border-radius: 3px;
@@ -550,6 +564,7 @@ input#import {
 }
 
 .add-row input[type="button"] {
+  flex: none;
   margin-left: auto;
   color: var(--white-force);
   text-transform: uppercase;
@@ -584,16 +599,30 @@ input#import {
   display: none;
 }
 
-/* Entity tables on the ID panels */
+/* Entity tables on the ID panels: wrap instead of overflowing the page.
+   The search field takes the free space; buttons keep their size and drop
+   to a second line on narrow windows rather than going offscreen. */
 .table-toolbar {
   display: flex;
   align-items: center;
   gap: .4em;
+  flex-wrap: wrap;
+  /* Size container: the right-push below keys off the TOOLBAR's own width
+     (not the viewport), so it tracks sidebars, padding and fonts exactly.
+     Older engines ignore @container and simply keep the trio left-packed. */
+  container-type: inline-size;
 }
 
 .table-search {
-  flex: 1 1 auto;
-  min-width: 0;
+  /* Bounded flexible: zero basis so breaks are driven only by the
+     fixed-size siblings (28ch count, trio); grows to fill its row (no dead
+     space); hard-capped so the width never breathes unboundedly; floored
+     at a genuinely usable width. Below the floor it takes its own
+     full-width row and the count/trio stack beneath — one stable state
+     per width. */
+  flex: 1 1 0%;
+  min-width: 10em;
+  max-width: min(28em, 100%);
   background: var(--btn-bg);
   border: 2px solid transparent;
   border-radius: 3px;
@@ -608,7 +637,8 @@ input#import {
 }
 
 .table-toolbar input[type="button"] {
-  min-width: 6em;
+  flex: none;
+  min-width: 0;
   color: var(--white-force);
   text-transform: uppercase;
   background-color: var(--btn-bg);
@@ -627,14 +657,78 @@ input#import {
   white-space: nowrap;
 }
 
+/* Count text ("150 of 1499 (from 16000)") varies with list size; a fixed
+   floor + tabular digits keep the search field a stable length instead of
+   breathing with the counts — in table AND raw mode alike (raw texts are
+   always the shorter ones, so one floor covers both). */
+.table-toolbar .table-shown {
+  min-width: 28ch;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Footer range ("Rows 1–150 of 16000") likewise holds its width so the
+   pager group never shifts while paging. */
+.table-footer > span.table-shown:first-child {
+  min-width: 22ch;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "of N" page count ("of 107" vs "of 1"): same treatment, so the pager
+   never changes width while flipping pages. 6ch covers into the hundreds
+   of pages; thousands grow a fraction (rare, harmless). */
+.pager-group > span.table-shown {
+  min-width: 6ch;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Raw mode empties the range text (the span stays for layout): without a
+   strut its row would collapse and the footer would change height on every
+   table/raw toggle. Same nbsp trick as the date cells below. */
+.table-footer > span.table-shown:first-child:empty::before {
+  content: '\00a0';
+}
+
+/* Wrap-atomic units: the Page + Top/Prev/Go/Next/End pager and the toolbar
+   Top/End/Raw trio each move to the next line as one block, never stranding
+   controls one by one. */
+.pager-group,
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: .4em;
+  flex: none;
+}
+
+/* The trio hugs the right edge only where it provably fits (toolbar room
+   for search + count + trio): the fixed-width search no longer eats row-1
+   free space, so a viewport query would misfire around the sidebar — the
+   container query below measures the toolbar itself. Any wrapped trio
+   stays left-aligned. */
+@container (min-width: 790px) {
+  .table-toolbar .toolbar-group {
+    margin-left: auto;
+  }
+}
+
+/* The Raw/Table toggle flips its label on every switch ("Raw list" vs
+   "Table"); a fixed floor keeps the trio an identical width in both modes
+   so toggling never re-wraps the toolbar. (Element-qualified: bare
+   `.raw-toggle` loses to `.table-toolbar input[type="button"]`.) */
+.table-toolbar input.raw-toggle {
+  min-width: 7em;
+  text-align: center;
+}
+
 .table-footer {
   display: flex;
   align-items: center;
   gap: .4em;
   margin-top: .4em;
+  flex-wrap: wrap;
 }
 
 .table-footer input[type="button"] {
+  flex: none;
   color: var(--white-force);
   text-transform: uppercase;
   background-color: var(--btn-bg);
@@ -648,7 +742,7 @@ input#import {
 }
 
 .page-input {
-  width: 4.5em;
+  width: 3em;
   background: var(--btn-bg);
   border: 2px solid transparent;
   border-radius: 3px;
@@ -674,14 +768,80 @@ input#import {
   overflow-x: auto;
   border: 1px solid var(--borders);
   border-radius: 8px;
+  /* Native thickness (like the raw editors' fake bars): same gutter on both
+     sides of a table/raw toggle, so the content never reflows. Only colors
+     are customized; the transparent track keeps the rounded corners clean. */
+  scrollbar-color: var(--borders) transparent;
+}
+
+/* One scrollbar look for the table AND the raw editors, minus a dead end:
+   the table paints native bars on `.table-scroll`, but raw editors show
+   CodeMirror's fake-bar divs (the real `.CodeMirror-scroll` bars are clipped
+   away by the -50px hack), so each gets its own scrollers below. Fake-bar
+   thickness stays native — CodeMirror measures it for layout — only
+   track/thumb colors are matched. */
+
+.table-scroll::-webkit-scrollbar-track,
+.table-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--borders);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.table-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--btn-bg-focus);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.CodeMirror-vscrollbar,
+.CodeMirror-hscrollbar {
+  scrollbar-color: var(--borders) transparent;
+}
+
+.CodeMirror-vscrollbar::-webkit-scrollbar-track,
+.CodeMirror-hscrollbar::-webkit-scrollbar-track,
+.CodeMirror-vscrollbar::-webkit-scrollbar-corner,
+.CodeMirror-hscrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.CodeMirror-vscrollbar::-webkit-scrollbar-thumb,
+.CodeMirror-hscrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--borders);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.CodeMirror-vscrollbar::-webkit-scrollbar-thumb:hover,
+.CodeMirror-hscrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--btn-bg-focus);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Corner square between the fake bars (white by default — glaring on dark). */
+.CodeMirror-scrollbar-filler,
+.CodeMirror-gutter-filler {
+  background-color: transparent;
 }
 
 /* Fixed equal heights for the table/raw views so toggling never jumps.
    Both views fill the same viewport-relative box; inner areas scroll.
-   (Class selectors, so the `hidden` attribute keeps working.) */
+   (Class selectors, so the `hidden` attribute keeps working.)
+   The min-height is capped by the viewport (min ... calc(100vh - ...)) so
+   short windows shrink the list instead of adding a second page-level
+   scrollbar next to the table's own: the 340px reserves the surrounding
+   chrome (header, toolbar, footer, resizer). */
 .fixed-view {
   height: min(54vh, calc(100vh - 340px));
-  min-height: 220px;
+  min-height: max(140px, min(220px, calc(100vh - 340px)));
   display: flex;
   flex-direction: column;
 }
@@ -715,6 +875,7 @@ input#import {
 
 .entity-table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: small;
@@ -892,7 +1053,7 @@ input#discard_btn {
 /* Mobile */
 @media only screen and (max-width: 800px) {
   body {
-    margin-inline: 1%;
+    padding-inline: 8px;
   }
   #logo-text {
     display: none;
@@ -904,9 +1065,10 @@ input#discard_btn {
   .opt-shell {
     flex-direction: column;
   }
+  /* Narrow: the nav stays a vertical stack (full width, each tab below the
+     previous) instead of a wrapping row — wrapped tabs pop between "below"
+     and "right" while resizing, a vertical list has no such state. */
   .opt-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
     min-width: 0;
     align-self: stretch;
   }
@@ -924,9 +1086,51 @@ input#discard_btn {
 
 }
 
+/* Narrow phones: tighter pager buttons so Top/Prev/Go/Next/End fit without
+   wrapping into a tall stack; the wrap above remains as the backstop. */
+@media only screen and (max-width: 560px) {
+  .table-footer {
+    gap: .3em;
+  }
+  .table-footer input[type="button"] {
+    padding-inline: .6em;
+  }
+  .table-toolbar input[type="button"] {
+    padding-inline: .8em;
+  }
+  .opt-head-spacer {
+    flex-basis: 100%;
+    height: 0;
+  }
+}
+
 .flex-break {
   flex-basis: 100%;
   height: 0;
+}
+
+/* Escape hatch for very narrow screens (≤480px): the merged pager cannot
+   fit ~360px viewports at all (Page + input + count + five buttons ≈ 430px
+   even floored), so a break element splits it into Page row + button row —
+   each still atomic, never stranding single buttons or pushing END
+   offscreen. Hidden everywhere else (single-row pager). */
+.pager-break {
+  display: none;
+}
+
+@media only screen and (max-width: 480px) {
+  /* Definite width first: % basis below needs it (the group is otherwise
+     max-content-sized, which makes the percentage circular and blows up). */
+  .pager-group {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .pager-break {
+    display: block;
+    /* Total content overflows down here: without this the break itself
+       shrinks away to 0 width and the buttons stay on the overflowing row. */
+    flex-shrink: 0;
+  }
 }
 
 .alert{

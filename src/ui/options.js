@@ -853,11 +853,16 @@
     const t = TABLE_EDITORS[key];
     const state = tableState[key];
     if (!$(t.editorWrap).hidden) {
+      // Raw mode shows the editor's line count, not the parsed filter-item
+      // count: comments and blank lines are lines on screen but never rows.
+      const cm = jsEditors[key];
+      const lines =
+        cm && typeof cm.lineCount === 'function' ? cm.lineCount() : tableLines(key).length;
       const n = (state.rawMatches || []).length;
       if (state.query.trim() === '') {
-        $(t.shown).textContent = `${state.rows.length} rows`;
+        $(t.shown).textContent = `${lines} lines`;
       } else if (n === 0) {
-        $(t.shown).textContent = `0/${state.rows.length} — no matches`;
+        $(t.shown).textContent = `0/${lines} — no matches`;
       } else {
         $(t.shown).textContent = `${state.rawIndex + 1}/${n}${state.rawCapped ? '+' : ''} matches`;
       }
@@ -1445,6 +1450,12 @@
   const LIST_HEIGHT_KEY = 'blocktube_list_height';
   const LIST_HEIGHT_MIN = 220;
   const LIST_HEIGHT_MAX = 1600;
+  // Viewport slack for the chrome around a list (sticky header, panel title,
+  // add-row, toolbar, footer, resizer, margins): the auto height below keeps
+  // ~50px clear of a page-level scrollbar. Mirrors the 340px reserve the
+  // `.fixed-view` CSS uses, with extra margin since this is an inline style
+  // that wins over the stylesheet.
+  const LIST_HEIGHT_AUTO_RESERVE = 380;
 
   function getStoredListHeight() {
     try {
@@ -1556,9 +1567,27 @@
     });
   }
 
+  // Decided once per refresh, never continuous: with no stored (dragged)
+  // height, tall viewports grow the lists into free space instead of
+  // leaving the page half empty — but only when that exceeds the CSS
+  // default, so short windows keep the stylesheet's no-double-scrollbar
+  // sizing. A manual drag persists (localStorage LIST_HEIGHT_KEY, UI-only,
+  // never exported) and is applied verbatim: a tall drag is the user's
+  // explicit choice, even if the page then scrolls. For testing, reset a
+  // stored drag via devtools (localStorage.removeItem('blocktube_list_height'))
+  // + refresh, otherwise refreshes keep re-applying it and testing is
+  // confusing. (The window resize listener below only refreshes the
+  // bottom-edge flag; it must never touch heights.)
   function initListHeights() {
     const stored = getStoredListHeight();
-    if (stored !== null) applyListHeight(stored, false);
+    if (stored !== null) {
+      applyListHeight(stored, false);
+    } else if (typeof window.innerHeight === 'number') {
+      const vh = window.innerHeight;
+      const auto = vh - LIST_HEIGHT_AUTO_RESERVE;
+      const cssDefault = Math.min(0.54 * vh, vh - 340);
+      if (auto > cssDefault) applyListHeight(auto, false);
+    }
     Object.keys(TABLE_EDITORS).forEach(wireListResizer);
   }
 
