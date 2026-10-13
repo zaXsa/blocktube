@@ -2,3 +2,7 @@ dist/
 blocktube.zip
 node_modules/
 tmp/
+
+# Local-only opencode tree — never pushed (agents/skills/commands are
+# personal tooling, covered by the pre-commit hook + info/exclude locally).
+.opencode/
