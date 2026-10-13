@@ -106,6 +106,13 @@ Discard, and an `Unsaved changes` flag):
   the context menu: `Allow Channel` on any video in block mode, or, with
   the mode on, removing entries again via `Remove from Whitelist`.
 
+* What does "Disable YouTube's audio loudness normalization" do?  
+  It stops YouTube from normalizing volume across videos
+  (Options page > `General`, off by default).  
+  Warning: enabling it modifies player responses, which may cause YouTube
+  to detect the extension as an ad-blocker. Leave it off if you see
+  ad-block warnings or playback issues.
+
 ## Advanced blocking (custom JavaScript filter)
 
 Options page > `Advanced` panel. Check `Enable advanced blocking`,
