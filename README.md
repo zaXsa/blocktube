@@ -95,7 +95,10 @@ Discard, and an `Unsaved changes` flag):
   allowlisted channels show; title/name/ID/comment filters, duration and
   watch-progress rules, and the custom JavaScript filter do nothing, but
   everything is preserved and applies again when you switch the mode off.
-  Section-level toggles (Shorts / Movies / Mixes / Chips-shelves) still apply.
+  Section-level toggles (Shorts / Movies / Mixes / Chips-shelves) still apply.  
+  Warning: with a small allowlist feeds can look short or sparse — YouTube
+  sends a fixed batch of videos and does not load more replacements for
+  the hidden ones, so you may see only a few videos per page.
 
 * Where is my allowlist?  
   In the dedicated `Whitelist` panel on the options page (visible only while
