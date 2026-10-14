@@ -284,7 +284,7 @@
     const liveAnchor = freshCommentMenuAnchor() || anchorEl;
     // Text blocks need no channel identity — only the comment itself, so
     // they branch off before channel resolution.
-    if (type === 'comment') {
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT) {
       openCommentTextDialog(liveAnchor);
       return;
     }
@@ -302,14 +302,14 @@
       return;
     }
     postCommentBlock(target.channel, target.type);
-    if (target.type === 'whitelist') return;
+    if (target.type === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) return;
     placeholderCommentThread(target.anchorEl, commentPlaceholderMessage(target.type));
   }
 
   // Placeholder note per tap type.
   function commentPlaceholderMessage(type) {
-    if (type === 'unwhitelist') return 'Removed from whitelist';
-    if (type === 'comment') return 'Blocked comment (text blocked)';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return 'Removed from whitelist';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT) return 'Blocked comment (text blocked)';
     return 'Blocked comment (channel blocked)';
   }
 
@@ -429,10 +429,10 @@
   // confirmation.
   function saveCommentTextDialog(back, anchorEl, clean) {
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
-      type: 'comment',
+      type: BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT,
       info: { id: clean, text: clean, via: 'comment' },
     });
-    placeholderCommentThread(anchorEl, commentPlaceholderMessage('comment'));
+    placeholderCommentThread(anchorEl, commentPlaceholderMessage(BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT));
     applyCommentRuleLive(clean);
     closeCommentTextDialog(back);
   }
@@ -451,7 +451,7 @@
     } catch (e) {
       return false;
     }
-    placeholderCommentThread(node, commentPlaceholderMessage('comment'));
+    placeholderCommentThread(node, commentPlaceholderMessage(BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT));
     return true;
   }
 
@@ -785,17 +785,19 @@
   // removal only — visible comments are allowlisted by definition.
   function commentMenuEntries(store) {
     if (isWhitelistMenuMode(store)) {
-      return [{ label: 'Remove from Whitelist', type: 'unwhitelist' }];
+      return [
+        { label: 'Remove from Whitelist', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW },
+      ];
     }
     const entries = [];
     if (showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
-      entries.push({ label: 'Block Channel', type: 'channelId' });
+      entries.push({ label: 'Block Channel', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL });
     }
     if (showMenuEntry(OPT.MENU_BLOCK_COMMENT, store)) {
-      entries.push({ label: 'Block comment text…', type: 'comment' });
+      entries.push({ label: 'Block comment text…', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT });
     }
     if (showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) {
-      entries.push({ label: 'Allow Channel', type: 'whitelist' });
+      entries.push({ label: 'Allow Channel', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW });
     }
     return entries;
   }
@@ -803,8 +805,8 @@
   // Icon per entry type, matching the JSON menus (block NOT_INTERESTED,
   // allow CHECK, remove REMOVE; comment text blocks with the block icon).
   function commentMenuIcon(type) {
-    if (type === 'whitelist') return 'CHECK';
-    if (type === 'unwhitelist') return 'REMOVE';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) return 'CHECK';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return 'REMOVE';
     return 'NOT_INTERESTED';
   }
 
@@ -1281,10 +1283,10 @@
 
   // Row icon per entry type. Missing/unknown stays text-only.
   const BT_ROW_ICON_PATHS = {
-    channelId: BT_BLOCK_ICON_PATH,
-    comment: BT_BLOCK_ICON_PATH,
-    whitelist: null,
-    unwhitelist: null,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL]: BT_BLOCK_ICON_PATH,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT]: BT_BLOCK_ICON_PATH,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW]: null,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW]: null,
   };
 
   // One grid-drawn SVG icon node (no innerHTML — page CSP/Trusted Types).

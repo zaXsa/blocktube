@@ -49,14 +49,21 @@
       MENU_BLOCK_COMMENT: 'menu_block_comment',
       SAVE_SHORTCUT: 'save_shortcut',
     }),
+    BLOCK_TYPES: Object.freeze({
+      CHANNEL: 'channelId',
+      VIDEO: 'videoId',
+      ALLOW: 'whitelist',
+      UNALLOW: 'unwhitelist',
+      COMMENT: 'comment',
+    }),
   });
 
   const CONTEXT_BLOCK_TYPES = Object.freeze([
-    'channelId',
-    'videoId',
-    'whitelist',
-    'unwhitelist',
-    'comment',
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT,
   ]);
 
   globalThis.BLOCKTUBE_CONSTS = BLOCKTUBE_CONSTS;
@@ -3377,16 +3384,16 @@
   function mobileActionToBlockType(menuAction) {
     switch (menuAction) {
       case 'block_channel': {
-        return 'channelId';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL;
       }
       case 'allow_channel': {
-        return 'whitelist';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW;
       }
       case 'unallow_channel': {
-        return 'unwhitelist';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW;
       }
       case 'block_video': {
-        return 'videoId';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO;
       }
       default:
         return undefined;
@@ -3394,14 +3401,23 @@
   }
 
   function confirmSlimVideoTap(type) {
-    if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
-    const noun = type === 'videoId' ? 'Video' : 'Channel';
-    const verb = type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
+    if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW)
+      document.getElementById('movie_player').stopVideo();
+    const noun = type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ? 'Video' : 'Channel';
+    const verb =
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW
+        ? 'Allowed'
+        : type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW
+          ? 'Removed'
+          : 'Blocked';
     alert(`${noun} ${verb}`);
   }
 
   function filterCommentRuntime(type, data) {
-    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
+    if (
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL &&
+      data._btOriginalAttr === 'commentRenderer'
+    ) {
       const comments = document.querySelector('ytm-section-list-renderer');
       storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
       noActiveFilters = computeNoActiveFilters();
@@ -3523,13 +3539,13 @@
   function menuLabelToBlockTarget(menuAction, channelData, videoData) {
     switch (menuAction) {
       case 'Block Channel':
-        return { type: 'channelId', data: channelData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, data: channelData };
       case 'Allow Channel':
-        return { type: 'whitelist', data: channelData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW, data: channelData };
       case 'Remove from Whitelist':
-        return { type: 'unwhitelist', data: channelData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW, data: channelData };
       case 'Block Video':
-        return { type: 'videoId', data: videoData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO, data: videoData };
       default:
         return null;
     }
@@ -3650,7 +3666,11 @@
   ];
 
   function isCardRemovingTap(type) {
-    return type === 'channelId' || type === 'videoId' || type === 'unwhitelist';
+    return (
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL ||
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ||
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW
+    );
   }
 
   function pauseReelPlayer() {
@@ -3717,13 +3737,13 @@
   }
 
   function applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom) {
-    if (type === 'unwhitelist') {
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) {
       if (removeParent) {
         removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
       } else if (stopPlayer) {
         document.getElementById('movie_player').stopVideo();
       }
-    } else if (type !== 'whitelist') {
+    } else if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) {
       if (removeParent) {
         removeParentHelper(isDataFromRightHandSide, parentDom);
       } else if (stopPlayer) {
@@ -3777,7 +3797,7 @@
       } else {
         dismissShortsShelfCard(
           shortsTapVideoId(parentData, type, data),
-          type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
+          type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW ? 'Removed from whitelist' : 'Blocked',
         );
       }
     }
@@ -3788,29 +3808,41 @@
     try {
       pauseReelPlayer();
     } catch (e) {}
-    if (type === 'unwhitelist') return;
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return;
     try {
       const live = currentShortsVideo();
       const stamp = (parentData && parentData.blockTube && parentData.blockTube.metadata) || {};
       const videoId =
-        (type === 'videoId' && data && typeof data.id === 'string' && data.id) ||
+        (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
+          data &&
+          typeof data.id === 'string' &&
+          data.id) ||
         (typeof live.id === 'string' && live.id) ||
         (typeof stamp.videoId === 'string' && stamp.videoId) ||
         undefined;
       if (typeof videoId !== 'string' || videoId.length === 0) return;
       const channelId =
-        (type !== 'videoId' && data && typeof data.id === 'string' && data.id) ||
+        (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
+          data &&
+          typeof data.id === 'string' &&
+          data.id) ||
         (typeof stamp.channelId === 'string' && stamp.channelId) ||
         undefined;
-      const message = type === 'videoId' ? 'Video Blocked' : 'Channel Blocked';
+      const message =
+        type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ? 'Video Blocked' : 'Channel Blocked';
       try {
         showBlockedShortOverlay(
           {
             videoId,
             channelId,
             channelName:
-              (type !== 'videoId' && data && data.text) || stamp.channelName || undefined,
-            title: (type === 'videoId' && data && data.text) || live.text || stamp.videoName,
+              (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && data.text) ||
+              stamp.channelName ||
+              undefined,
+            title:
+              (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && data.text) ||
+              live.text ||
+              stamp.videoName,
           },
           message,
         );
@@ -3824,7 +3856,8 @@
   function shortsTapVideoId(parentData, type, data) {
     const stamped = parentData?.blockTube?.metadata?.videoId;
     if (typeof stamped === 'string' && stamped.length > 0) return stamped;
-    if (type === 'videoId' && data && typeof data.id === 'string') return data.id;
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && typeof data.id === 'string')
+      return data.id;
     try {
       const resolved = channelAndVideoFrom(parentData, 'shortsLockupViewModel');
       if (resolved && typeof resolved.video.id === 'string') return resolved.video.id;
@@ -4620,7 +4653,7 @@
       return;
     }
     const liveAnchor = freshCommentMenuAnchor() || anchorEl;
-    if (type === 'comment') {
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT) {
       openCommentTextDialog(liveAnchor);
       return;
     }
@@ -4637,13 +4670,13 @@
       return;
     }
     postCommentBlock(target.channel, target.type);
-    if (target.type === 'whitelist') return;
+    if (target.type === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) return;
     placeholderCommentThread(target.anchorEl, commentPlaceholderMessage(target.type));
   }
 
   function commentPlaceholderMessage(type) {
-    if (type === 'unwhitelist') return 'Removed from whitelist';
-    if (type === 'comment') return 'Blocked comment (text blocked)';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return 'Removed from whitelist';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT) return 'Blocked comment (text blocked)';
     return 'Blocked comment (channel blocked)';
   }
 
@@ -4732,10 +4765,13 @@
 
   function saveCommentTextDialog(back, anchorEl, clean) {
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
-      type: 'comment',
+      type: BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT,
       info: { id: clean, text: clean, via: 'comment' },
     });
-    placeholderCommentThread(anchorEl, commentPlaceholderMessage('comment'));
+    placeholderCommentThread(
+      anchorEl,
+      commentPlaceholderMessage(BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT),
+    );
     applyCommentRuleLive(clean);
     closeCommentTextDialog(back);
   }
@@ -4750,7 +4786,7 @@
     } catch (e) {
       return false;
     }
-    placeholderCommentThread(node, commentPlaceholderMessage('comment'));
+    placeholderCommentThread(node, commentPlaceholderMessage(BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT));
     return true;
   }
 
@@ -5038,24 +5074,24 @@
 
   function commentMenuEntries(store) {
     if (isWhitelistMenuMode(store)) {
-      return [{ label: 'Remove from Whitelist', type: 'unwhitelist' }];
+      return [{ label: 'Remove from Whitelist', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW }];
     }
     const entries = [];
     if (showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
-      entries.push({ label: 'Block Channel', type: 'channelId' });
+      entries.push({ label: 'Block Channel', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL });
     }
     if (showMenuEntry(OPT.MENU_BLOCK_COMMENT, store)) {
-      entries.push({ label: 'Block comment text…', type: 'comment' });
+      entries.push({ label: 'Block comment text…', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT });
     }
     if (showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) {
-      entries.push({ label: 'Allow Channel', type: 'whitelist' });
+      entries.push({ label: 'Allow Channel', type: BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW });
     }
     return entries;
   }
 
   function commentMenuIcon(type) {
-    if (type === 'whitelist') return 'CHECK';
-    if (type === 'unwhitelist') return 'REMOVE';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) return 'CHECK';
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return 'REMOVE';
     return 'NOT_INTERESTED';
   }
 
@@ -5438,10 +5474,10 @@
     'M12 1C5.925 1 1 5.925 1 12s4.925 11 11 11 11-4.925 11-11S18.075 1 12 1Zm0 2a9 9 0 018.246 12.605L4.755 6.661A8.99 8.99 0 0112 3ZM3.754 8.393l15.491 8.944A9 9 0 013.754 8.393Z';
 
   const BT_ROW_ICON_PATHS = {
-    channelId: BT_BLOCK_ICON_PATH,
-    comment: BT_BLOCK_ICON_PATH,
-    whitelist: null,
-    unwhitelist: null,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL]: BT_BLOCK_ICON_PATH,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT]: BT_BLOCK_ICON_PATH,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW]: null,
+    [BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW]: null,
   };
 
   function btSvgIcon(pathD, sizePx) {
@@ -6095,7 +6131,7 @@
     if (typeof data !== 'object' || data === null) return;
     if (typeof data.filterData !== 'object' || data.filterData === null) return;
     regexProps.forEach((p) => compileRegExpProp(data.filterData, p));
-    compileRegExpProp(data.filterData, 'whitelist');
+    compileRegExpProp(data.filterData, BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW);
   }
 
   function hookEmbedConfig() {

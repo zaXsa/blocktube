@@ -1232,16 +1232,16 @@
   function mobileActionToBlockType(menuAction) {
     switch (menuAction) {
       case 'block_channel': {
-        return 'channelId';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL;
       }
       case 'allow_channel': {
-        return 'whitelist';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW;
       }
       case 'unallow_channel': {
-        return 'unwhitelist';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW;
       }
       case 'block_video': {
-        return 'videoId';
+        return BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO;
       }
       default:
         return undefined;
@@ -1252,16 +1252,25 @@
   // blocks/removals. Allowlists keep playback going.
   function confirmSlimVideoTap(type) {
     // Allowlists keep playback going; blocks and removals stop it.
-    if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
-    const noun = type === 'videoId' ? 'Video' : 'Channel';
-    const verb = type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
+    if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW)
+      document.getElementById('movie_player').stopVideo();
+    const noun = type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ? 'Video' : 'Channel';
+    const verb =
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW
+        ? 'Allowed'
+        : type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW
+          ? 'Removed'
+          : 'Blocked';
     alert(`${noun} ${verb}`);
   }
 
   // Runtime comment filtering mirrors the blacklist path only: allowlist
   // taps must never push the commenter into the channelId blacklist.
   function filterCommentRuntime(type, data) {
-    if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
+    if (
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL &&
+      data._btOriginalAttr === 'commentRenderer'
+    ) {
       const comments = document.querySelector('ytm-section-list-renderer');
       storageData.filterData.channelId.push(RegExp(`^${data._btOriginalData.id}$`));
       noActiveFilters = computeNoActiveFilters();
@@ -1397,13 +1406,13 @@
   function menuLabelToBlockTarget(menuAction, channelData, videoData) {
     switch (menuAction) {
       case 'Block Channel':
-        return { type: 'channelId', data: channelData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, data: channelData };
       case 'Allow Channel':
-        return { type: 'whitelist', data: channelData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW, data: channelData };
       case 'Remove from Whitelist':
-        return { type: 'unwhitelist', data: channelData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW, data: channelData };
       case 'Block Video':
-        return { type: 'videoId', data: videoData };
+        return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO, data: videoData };
       default:
         return null;
     }
@@ -1535,7 +1544,11 @@
   // Menu-tap types that take the card off the page (allow taps keep it so it
   // can be watched right away).
   function isCardRemovingTap(type) {
-    return type === 'channelId' || type === 'videoId' || type === 'unwhitelist';
+    return (
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL ||
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ||
+      type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW
+    );
   }
 
   // No toast on Shorts taps by design: the disappearing card (shelf) and the
@@ -1627,14 +1640,14 @@
     // No confirmation popups by design: allow taps keep the card in place so
     // it can be watched right away, and removals already replace the card
     // itself — the storage write above is the whole visible effect.
-    if (type === 'unwhitelist') {
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) {
       if (removeParent) {
         // Remove correct component based on parentDom
         removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
       } else if (stopPlayer) {
         document.getElementById('movie_player').stopVideo();
       }
-    } else if (type !== 'whitelist') {
+    } else if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) {
       if (removeParent) {
         // Remove correct component based on parentDom
         removeParentHelper(isDataFromRightHandSide, parentDom);
@@ -1703,7 +1716,7 @@
       } else {
         dismissShortsShelfCard(
           shortsTapVideoId(parentData, type, data),
-          type === 'unwhitelist' ? 'Removed from whitelist' : 'Blocked',
+          type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW ? 'Removed from whitelist' : 'Blocked',
         );
       }
     }
@@ -1725,29 +1738,41 @@
     try {
       pauseReelPlayer();
     } catch (e) {}
-    if (type === 'unwhitelist') return;
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return;
     try {
       const live = currentShortsVideo();
       const stamp = (parentData && parentData.blockTube && parentData.blockTube.metadata) || {};
       const videoId =
-        (type === 'videoId' && data && typeof data.id === 'string' && data.id) ||
+        (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
+          data &&
+          typeof data.id === 'string' &&
+          data.id) ||
         (typeof live.id === 'string' && live.id) ||
         (typeof stamp.videoId === 'string' && stamp.videoId) ||
         undefined;
       if (typeof videoId !== 'string' || videoId.length === 0) return;
       const channelId =
-        (type !== 'videoId' && data && typeof data.id === 'string' && data.id) ||
+        (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
+          data &&
+          typeof data.id === 'string' &&
+          data.id) ||
         (typeof stamp.channelId === 'string' && stamp.channelId) ||
         undefined;
-      const message = type === 'videoId' ? 'Video Blocked' : 'Channel Blocked';
+      const message =
+        type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ? 'Video Blocked' : 'Channel Blocked';
       try {
         showBlockedShortOverlay(
           {
             videoId,
             channelId,
             channelName:
-              (type !== 'videoId' && data && data.text) || stamp.channelName || undefined,
-            title: (type === 'videoId' && data && data.text) || live.text || stamp.videoName,
+              (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && data.text) ||
+              stamp.channelName ||
+              undefined,
+            title:
+              (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && data.text) ||
+              live.text ||
+              stamp.videoName,
           },
           message,
         );
@@ -1764,7 +1789,8 @@
   function shortsTapVideoId(parentData, type, data) {
     const stamped = parentData?.blockTube?.metadata?.videoId;
     if (typeof stamped === 'string' && stamped.length > 0) return stamped;
-    if (type === 'videoId' && data && typeof data.id === 'string') return data.id;
+    if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && typeof data.id === 'string')
+      return data.id;
     try {
       const resolved = channelAndVideoFrom(parentData, 'shortsLockupViewModel');
       if (resolved && typeof resolved.video.id === 'string') return resolved.video.id;

@@ -85,7 +85,9 @@ const utils = {
       v = v.trim();
 
       // unique id
-      if (['channelId', 'videoId'].includes(type)) {
+      if (
+        [BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO].includes(type)
+      ) {
         return [`^${v}$`, ''];
       }
 
@@ -318,7 +320,7 @@ function sanitizeCommentEntry(entry) {
 function sanitizeContextBlockEntries(entries, blockType) {
   let comment;
   const safeEntries = [];
-  const isText = blockType === 'comment';
+  const isText = blockType === BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT;
   const cap = isText ? 10 : 100;
   entries.forEach((entry) => {
     if (typeof entry !== 'string' || entry.length === 0) return;
@@ -346,14 +348,17 @@ function sanitizeContextBlockEntries(entries, blockType) {
 // allowlist or comment list on older stored blobs; anything else non-array
 // is corrupt — null.
 function resolveBlockFilterArr(blockType, isRemoval) {
-  const key = isRemoval ? 'whitelist' : blockType;
+  const key = isRemoval ? BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW : blockType;
   const filterArr = storage.filterData[key];
   if (Array.isArray(filterArr)) return filterArr;
   // Pre-whitelist stored blobs lack the allowlist (and very old blobs the
   // comment list): initialize it so menu blocking works without an
   // options-page save first.
   // Anything else non-array is corrupt storage: never throw here.
-  if ((key === 'whitelist' || key === 'comment') && storage.filterData[key] === undefined) {
+  if (
+    (key === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW || key === BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT) &&
+    storage.filterData[key] === undefined
+  ) {
     storage.filterData[key] = [];
     return storage.filterData[key];
   }
@@ -413,7 +418,7 @@ function handleContextBlockMessage(msg, key) {
 
   // `unwhitelist` removes from the allowlist instead of adding to its
   // own list.
-  const isRemoval = blockType === 'unwhitelist';
+  const isRemoval = blockType === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW;
   const filterArr = resolveBlockFilterArr(blockType, isRemoval);
   if (!filterArr) return;
 

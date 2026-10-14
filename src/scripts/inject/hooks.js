@@ -217,7 +217,7 @@
     regexProps.forEach((p) => compileRegExpProp(data.filterData, p));
     // The allowlist is compiled with the exact-ID rule upstream; hydrate it
     // the same way so channelId matching can test against RegExps.
-    compileRegExpProp(data.filterData, 'whitelist');
+    compileRegExpProp(data.filterData, BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW);
   }
 
   // Embed pages: filter the PLAYER_VARS payload at once, or trap yt.config_

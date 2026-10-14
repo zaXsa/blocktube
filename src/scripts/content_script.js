@@ -65,8 +65,8 @@
   // "Allowlisted", removals "Removed from whitelist", blocks "Blocked". Keyed
   // off the routed type (whitelist <=> allowlisting).
   function blockProvenanceVerb(blockType) {
-    if (blockType === 'whitelist') return 'Allowlisted';
-    if (blockType === 'unwhitelist') return 'Removed from whitelist';
+    if (blockType === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) return 'Allowlisted';
+    if (blockType === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return 'Removed from whitelist';
     return 'Blocked';
   }
 

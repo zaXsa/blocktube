@@ -43,6 +43,18 @@
       MENU_BLOCK_COMMENT: 'menu_block_comment',
       SAVE_SHORTCUT: 'save_shortcut',
     }),
+    // Block-list types the CONTEXT_BLOCK path may write (page -> content ->
+    // background). Channel/video are blacklist targets, allow/unallow drive
+    // the allowlist, comment carries free-text comment rules. Single source
+    // for every `type` comparison/return on that path — filterData keys and
+    // YouTube renderer names/paths stay as-is (see STRING_CONSTS_PLAN.md).
+    BLOCK_TYPES: Object.freeze({
+      CHANNEL: 'channelId',
+      VIDEO: 'videoId',
+      ALLOW: 'whitelist',
+      UNALLOW: 'unwhitelist',
+      COMMENT: 'comment',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
@@ -50,12 +62,13 @@
   // `unwhitelist` removes ids from the allowlist instead of adding them.
   // `comment` carries free-text comment rules (sanitized per-type in the
   // background: single line, capped, never a `//` annotation line).
+  // Derived from BLOCKTUBE_CONSTS.BLOCK_TYPES above so the two cannot drift apart.
   const CONTEXT_BLOCK_TYPES = Object.freeze([
-    'channelId',
-    'videoId',
-    'whitelist',
-    'unwhitelist',
-    'comment',
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW,
+    BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT,
   ]);
 
   globalThis.BLOCKTUBE_CONSTS = BLOCKTUBE_CONSTS;
