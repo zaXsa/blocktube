@@ -13,11 +13,9 @@
 
   const BLOCKTUBE_CONSTS = Object.freeze({
     MESSAGES: Object.freeze({
-      // chrome.storage.local keys
       STORAGE_KEY: 'storageData',
       ENABLED_KEY: 'enabled',
 
-      // window.postMessage framing
       FROM_PAGE: 'blockTubePage', // page -> content: postMessage from the inject bundle
       FROM_CONTENT: 'blockTubeContent', // content -> page: sendStorage / sendReload
       STORAGE: 'storageData', // content -> page: compiled storage snapshot
@@ -27,7 +25,6 @@
       CONTEXT_BLOCK: 'contextBlock', // content -> bg (port): {type, entries}
       READY: 'ready', // page -> content: hooks booted, re-send storage
     }),
-    // storage.options keys referenced across realms (bg / options / inject).
     OPTIONS: Object.freeze({
       TRENDING: 'trending',
       MIXES: 'mixes',
@@ -54,11 +51,6 @@
     }),
   });
 
-  // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
-  // content script and the background (page scripts can forge the type field).
-  // `unwhitelist` removes ids from the allowlist instead of adding them.
-  // `comment` carries free-text comment rules (sanitized per-type in the
-  // background: single line, capped, never a `//` annotation line).
   const CONTEXT_BLOCK_TYPES = Object.freeze([
     'channelId',
     'videoId',
@@ -72,9 +64,7 @@
 
   // ================== src/scripts/inject/rules.js ==================
 
-  // Short alias for option keys; keep in sync with BLOCKTUBE_CONSTS.OPTIONS.
   const OPT = BLOCKTUBE_CONSTS.OPTIONS;
-  // add context menu to following objects
   const contextMenuObjects = [
     'backstagePostRenderer',
     'postRenderer',
@@ -89,29 +79,18 @@
     'playlistVideoRenderer',
     'lockupViewModel',
     'shortsLockupViewModel',
-    // Shorts watch-page overlay: menu entries only (blocking the playing
-    // video is handled through the player response). No filter rule on purpose
-    // — matching it would delete the reel overlay out from under the player.
     'reelPlayerOverlayRenderer',
-    // Shorts reel topbar: the visible `...` sheet lives in the trailing-buttons
-    // MORE_VERT buttonViewModel's inline showSheetCommand, not in
-    // overlay.menu (a decoy copy). Live swipe responses carry `topbar` (and
-    // `overlay`) at the top level; the embedded prefetch wraps the same
-    // fields in `reelItemWatchResponse`. Menu entries only, same as above.
     'topbar',
     'reelItemWatchResponse',
     'videoCardRenderer',
     'endScreenVideoRenderer',
     'endScreenPlaylistRenderer',
-    // Mobile
     'reelItemRenderer',
     'slimVideoMetadataSectionRenderer',
     'videoWithContextRenderer',
   ];
   const contextMenuObjectsSet = new Set(contextMenuObjects);
 
-  // Wrapper renderers that are safe to delete as a whole when every one of
-  // their children was filtered out (they contribute no layout of their own).
   const collapseableContainers = [
     'richItemRenderer',
     'content',
@@ -130,15 +109,9 @@
   ];
   const collapseableContainersSet = new Set(collapseableContainers);
 
-  // those filter properties require RegExp checking
   const regexProps = ['videoId', 'channelId', 'channelName', 'title', 'comment'];
   const regexPropsSet = new Set(regexProps);
 
-  // Every renderer entry maps to a normalized
-  //   { properties: { <filter-prop> -> path(s) }, customFunc?, related? }
-  // object, so the matcher never has to sniff which shape a rule uses. The
-  // builder below trims the wrapper noise for the two common cases. 'related'
-  // names a wrapper renderer (e.g. 'shelfRenderer') to delete alongside.
   // !! Filter Rules definitions
   const paths = (properties, customFunc = undefined, related = undefined) => ({
     properties,
@@ -146,9 +119,6 @@
     related,
   });
 
-  // Search-result collaborator channels (YouTube Collaborations): a video with
-  // several creators exposes the extra channels behind a byline dialog, not
-  // the usual byline browseEndpoint. Based on upstream PR #674 by Sonicegorsan.
   const collabBylinePaths = ['shortBylineText', 'longBylineText', 'ownerText', 'bylineText'];
   const collabDialogPath =
     'runs.navigationEndpoint.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
@@ -203,22 +173,16 @@
     BADGE_MEMBERS_ONLY: 'members',
   };
 
-  // lockupViewModel (new grid) deep path fragments. The channelId rule falls
-  // back across avatar -> first metadata row -> avatar stack; these prefixes
-  // keep that intent readable in the big rule below.
   const lockupAvatarMedia = 'metadata.lockupMetadataViewModel.image';
   const lockupMetadataContent =
     'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
 
-  // lockupViewModel tags YouTube-generated collections ('MIX', 'COURSE') with
-  // a badge icon. Only collection lockups nest it, so the path discriminates.
   const LOCKUP_BADGE_ICON_PATH =
     'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
   const LOCKUP_GENERATED_BADGE_ICONS = new Set(['MIX', 'COURSE']);
 
   const filterRules = {
     main: {
-      // Feed and watch-page video cards
       compactMovieRenderer: paths({
         videoId: 'videoId',
         title: ['title'],
@@ -247,7 +211,6 @@
       endScreenPlaylistRenderer: paths(baseRules),
       gridPlaylistRenderer: paths(baseRules),
 
-      // Community posts
       postRenderer: paths({
         channelId: 'authorEndpoint.browseEndpoint.browseId',
         channelName: ['authorText'],
@@ -257,7 +220,6 @@
         channelName: ['authorText'],
       }),
 
-      // Watch page right rail
       watchCardCompactVideoRenderer: paths({
         title: 'title',
         channelId: 'subtitles.runs.navigationEndpoint.browseEndpoint.browseId',
@@ -273,10 +235,8 @@
         title: 'title',
       }),
 
-      // channel page header
       channelRenderer: paths({ ...baseRules, title: undefined }, undefined, 'shelfRenderer'),
 
-      // watch page playlist panel
       playlistPanelVideoRenderer: paths(baseRules, blockPlaylistVid),
 
       videoPrimaryInfoRenderer: paths(
@@ -294,7 +254,6 @@
         redirectToNext,
       ),
 
-      // channel page header
       channelMetadataRenderer: paths(
         {
           channelId: 'externalId',
@@ -303,7 +262,6 @@
         redirectToIndex,
       ),
 
-      // related channels
       gridChannelRenderer: paths({
         channelId: 'channelId',
         channelName: 'title',
@@ -314,7 +272,6 @@
         channelName: 'title',
       }),
 
-      // sidemenu subscribed channels
       guideEntryRenderer: paths({
         channelId: 'navigationEndpoint.browseEndpoint.browseId',
         channelName: ['title', 'formattedTitle'],
@@ -352,7 +309,6 @@
         markAutoplay,
       ),
 
-      // Shorts
       reelItemRenderer: paths({
         videoId: 'videoId',
         channelId:
@@ -369,10 +325,6 @@
           'onTap.innertubeCommand.reelWatchEndpoint.videoId',
           'inlinePlayerData.onVisible.innertubeCommand.watchEndpoint.videoId',
         ],
-        // Function path: the shelf card carries no byline/avatar link, so the
-        // channel id is decoded from reelWatchEndpoint.params (see
-        // shortsLockupChannelId in paths.js). No channel name exists on the
-        // card — overlayMetadata is title + view count only.
         channelId: (renderer) => shortsLockupChannelId(renderer),
         title: 'overlayMetadata.primaryText.content',
         viewCount: 'overlayMetadata.secondaryText.content',
@@ -403,10 +355,6 @@
       lockupViewModel: paths({
         videoId: 'contentId',
         title: 'metadata.lockupMetadataViewModel.title.content',
-        // Function path: a static dotted path misreads the view count as the
-        // channel on channel-less cards (channel tabs, channel shelves) — see
-        // lockupChannelName in paths.js. Evaluated lazily, so the later
-        // fragment is always loaded by call time.
         channelName: (renderer) => lockupChannelName(renderer),
         badges: `${lockupMetadataContent}[1].badges`,
         vidLength:
@@ -417,9 +365,6 @@
           `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
-          // Fan-out across every stack entry so a third-or-later collaborator
-          // still matches via getFlattenByPathAll (the indexed paths above
-          // only cover the first two for the single-value reader).
           `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
         ],
         percentWatched:
@@ -438,12 +383,10 @@
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
       }),
 
-      // Mobile top chips
       chipCloudChipRenderer: paths({
         channelId: 'icon.iconType',
       }),
 
-      // Mobile Video page data
       slimVideoMetadataSectionRenderer: paths(
         {
           videoId: 'videoId',
@@ -458,14 +401,10 @@
         channelId: 'endpoint.commandMetadata.webCommandMetadata.url',
       }),
 
-      // Empty for blocking short headers
       gridShelfViewModel: paths({}),
 
       richSectionRenderer: paths({}),
 
-      // Wholesale-blocked when the chips_shelves option is enabled
-      // (see isExtendedMatched); these entries only make the renderer keys
-      // recognizable during matching.
       chipsShelfWithVideoShelfRenderer: paths({}),
       brandVideoSingletonRenderer: paths({}),
       brandVideoShelfRenderer: paths({}),
@@ -510,12 +449,10 @@
       ),
     },
     guide: {
-      // sidemenu subscribed channels
       guideEntryRenderer: paths({
         channelId: ['navigationEndpoint.browseEndpoint.browseId', 'icon.iconType'],
         channelName: ['title', 'formattedTitle'],
       }),
-      // Mobile buttom navigation bar
       pivotBarItemRenderer: paths({
         channelId: 'icon.iconType',
       }),
@@ -538,15 +475,11 @@
         channelName: ['authorName'],
         comment: 'message',
       }),
-      // New-member/gift announcements carry no `message`; their text lives
-      // in `headerSubtext` ("Welcome to ...!"). Same author fields as above.
       liveChatMembershipItemRenderer: paths({
         channelId: 'authorExternalChannelId',
         channelName: ['authorName'],
         comment: 'headerSubtext',
       }),
-      // Super Chats (paid messages) share the text-message author/message
-      // shape plus purchase/color decoration, which needs no mapping.
       liveChatPaidMessageRenderer: paths({
         channelId: 'authorExternalChannelId',
         channelName: ['authorName'],
@@ -578,10 +511,6 @@
 
   function getFlattenByPath(obj, filterPath) {
     if (filterPath === undefined) return;
-    // Function-valued rule paths (e.g. lockupViewModel.channelName): called
-    // with the renderer, flattened the same way so runs-shaped text still
-    // joins. Lets a rule express "the part that looks like X" where no static
-    // dotted path can (see lockupChannelName).
     if (typeof filterPath === 'function') {
       return flattenRuns(filterPath(obj));
     }
@@ -593,8 +522,6 @@
     }
   }
 
-  // Plain token fan-out: every array element owning the key contributes its
-  // value; a plain object contributes its own-key value. Misses add nothing.
   function collectPlainKey(cur, key, next) {
     if (cur instanceof Array) {
       for (let k = 0; k < cur.length; k += 1) {
@@ -606,8 +533,6 @@
     }
   }
 
-  // Walk one numeric index across every candidate array, collecting hits.
-  // Out-of-range/non-array candidates contribute nothing.
   function collectIndexStep(arr, idx) {
     const collected = [];
     for (let a = 0; a < arr.length; a += 1) {
@@ -617,8 +542,6 @@
     return collected;
   }
 
-  // Indexed token fan-out: own-key lookup on the token (when present), then
-  // indices in order. An empty intermediate set is a miss (adds nothing).
   function collectIndexedKey(cur, seg, next) {
     let base = cur;
     if (seg.key !== undefined) {
@@ -633,8 +556,6 @@
     for (let a = 0; a < arr.length; a += 1) next.push(arr[a]);
   }
 
-  // One compiled-segment step: fan every current value out into `next`
-  // through the plain or indexed collector above.
   function stepPathValues(values, seg) {
     const next = [];
     for (let v = 0; v < values.length; v += 1) {
@@ -646,12 +567,6 @@
     return next;
   }
 
-  // Collect EVERY value at a dotted path, not just the first. getObjectByPath
-  // resolves an ARRAY node to its first element owning the key, so a second
-  // collaborator id in a byline/dialog list is invisible to it. This walker
-  // fans out across all array elements instead (numeric [idx] segments still
-  // select one element). Used by getFlattenByPathAll for channelId/channelName,
-  // where ANY listed channel may match (see upstream PR #674).
   function getAllByPath(obj, path) {
     const compiled = compiledPath(path);
     let values = [obj];
@@ -662,8 +577,6 @@
     return values;
   }
 
-  // Like getFlattenByPath, but returns every flattened value across every
-  // path in the array — so a blocked collaborator listed second still matches.
   function getFlattenByPathAll(obj, filterPath) {
     if (filterPath === undefined) return [];
     if (typeof filterPath === 'function') {
@@ -681,15 +594,9 @@
     }
     return out;
   }
-  // Avatar-stack dialog holding every collaborator on a lockupViewModel
-  // collab card (same listItemViewModel shape as the search-result byline
-  // dialogs in rules.js).
   const LOCKUP_COLLAB_LIST_ITEMS_PATH =
     'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
 
-  // Collect every collaborator channel id from a lockupViewModel avatar stack.
-  // Collab videos render one card per creator, and getFlattenByPath only
-  // returns the first channelId it resolves.
   function getCollaboratorChannelIds(obj) {
     const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
     const ids = [];
@@ -705,11 +612,6 @@
     return ids;
   }
 
-  // Collect every collaborator channel NAME from a lockupViewModel avatar
-  // stack. The channelName rule is a single-name function
-  // (lockupChannelName), so without this a blocked name listed second never
-  // matches — the channelName half of the collab gap (channelId is covered
-  // by getCollaboratorChannelIds above).
   function getCollaboratorChannelNames(obj) {
     const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
     const names = [];
@@ -761,19 +663,8 @@
     return compiled;
   }
 
-  // THE canonical dotted-path walker for this codebase (options.js `get` is a
-  // mirror for the options page — it cannot import this bundle — and MUST stay
-  // in sync). Plain tokens do an own-key lookup (at an ARRAY node: the FIRST
-  // element owning the key); token[idx..] does the lookup then numeric indices
-  // in order. Any miss returns `def`, so typos/shape changes fail silently.
-  // String paths are compiled once and cached (see compiledPath/pathCache).
-  // Miss sentinel: payload values come from JSON and can never be this
-  // reference, so an explicit `undefined` value still reads as a hit.
   const PATH_MISS = {};
 
-  // Plain token (no brackets): own-key lookup, or first array element owning
-  // the key. Returns PATH_MISS on a miss, the value (possibly undefined) on
-  // a hit.
   function readPlainKey(node, key) {
     if (node instanceof Array) {
       const found = node.find((o) => o !== null && o !== undefined && has.call(o, key));
@@ -784,8 +675,6 @@
     return node[key];
   }
 
-  // Token with numeric indices: own-key lookup on the token (when present),
-  // then indices in order. Out-of-range/negative/non-array reads are misses.
   function readIndexedKey(node, key, indices) {
     let base = node;
     if (key !== undefined) {
@@ -815,15 +704,8 @@
   }
 
   const BROWSE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-  // Shared Shorts identity: the /shorts/<id> URL owns the id on every Shorts
-  // surface (player responses, reel menus, overlay lifecycle). One regex and
-  // two helpers here so custom-filters.js, context-menu.js and
-  // shorts-overlay.js cannot drift apart. Defined early (paths.js loads
-  // before all three) — later fragments must reuse these, not redeclare.
   const SHORTS_ID_RE = /^\/shorts\/([A-Za-z0-9_-]{11})/;
 
-  // The short on screen, from the /shorts/<id> URL. Undefined off-shorts.
-  // Never throws (exotic realms, missing location).
   function currentShortsId() {
     try {
       const match = document.location.pathname.match(SHORTS_ID_RE);
@@ -833,8 +715,6 @@
     }
   }
 
-  // The playing Short: id from the URL above, name from the document title
-  // ("<title> - YouTube"). Both missing off-shorts. Fail-open throughout.
   function currentShortsVideo() {
     let id;
     let text;
@@ -853,8 +733,6 @@
   const PART_LINK_PATH = 'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId';
   const LOCKUP_TITLE_PATH = 'metadata.lockupMetadataViewModel.title';
 
-  // A metadata text node -> channel name, or undefined. Prefers `content`,
-  // falls back to runs-joined text (flattenRuns also covers simpleText).
   function channelTextOf(text) {
     if (!text || typeof text !== 'object') return undefined;
     if (typeof text.content === 'string' && text.content.length > 0) return text.content;
@@ -863,20 +741,15 @@
     return undefined;
   }
 
-  // Precise channel signal: the part links to the channel (same browseId path
-  // the channelId rule reads), so it survives accessibilityLabel changes.
   function partHasChannelLink(part) {
     const linkId = getObjectByPath(part, PART_LINK_PATH);
     return typeof linkId === 'string' && BROWSE_ID_RE.test(linkId);
   }
 
-  // Legacy heuristic: a part with neither accessibilityLabel nor leadingIcon.
   function isBarePart(part) {
     return part.accessibilityLabel === undefined && part.leadingIcon === undefined;
   }
 
-  // Shared metadataRows walker: first part (in row order) matching `isMatch`
-  // that yields text wins.
   function findPartName(rows, isMatch) {
     for (let i = 0; i < rows.length; i += 1) {
       const parts = rows[i] && rows[i].metadataParts;
@@ -891,16 +764,10 @@
     return undefined;
   }
 
-  // Pass 1: the linked channel part (see partHasChannelLink).
   function lockupLinkedChannelName(rows) {
     return findPartName(rows, partHasChannelLink);
   }
 
-  // Pass 1b: link-less channel rows (home-feed/continuation lockups omit the
-  // browseEndpoint link). Like NewPipe, read index-first: with 2+ rows the
-  // first row's first part is the channel by position. Single-row cards stay
-  // undefined — on a channel's own tabs that row is only views/date, and
-  // returning it would misread the view count as the channel.
   function lockupFirstRowChannelName(rows) {
     const partRows = [];
     for (let i = 0; i < rows.length; i += 1) {
@@ -913,15 +780,11 @@
     return channelTextOf(first.text);
   }
 
-  // Pass 2: legacy bare-label heuristic (see isBarePart), gated on >= 2 rows
-  // so single-row cards can never misread the view count.
   function lockupBareChannelName(rows) {
     if (rows.length < 2) return undefined;
     return findPartName(rows, isBarePart);
   }
 
-  // Pass 3: channel-type lockups (LOCKUP_CONTENT_TYPE_CHANNEL) have no channel
-  // row at all — the channel name IS the card title.
   function lockupTitleChannelName(renderer) {
     const contentType = getObjectByPath(renderer, 'contentType');
     if (typeof contentType !== 'string' || !contentType.includes('CHANNEL')) return undefined;
@@ -930,16 +793,6 @@
     return channelTextOf(title);
   }
 
-  // The channel a lockupViewModel card attributes itself to, or undefined.
-  // No static dotted path expresses this: channel-less cards (a channel's own
-  // /videos tab, "From <channel>" shelves) drop the channel row, so a naive
-  // metadataRows path silently resolves to the VIEW COUNT instead — the wrong
-  // annotation and false channelName-filter hits. Tries linked -> positional
-  // -> bare-label -> avatar-stack -> channel-type title, in that order. The
-  // stack pass is explicit attribution (not a positional guess), so it cannot
-  // misread a view count; without it link-less collab rows resolve to
-  // undefined and the channelName field is skipped entirely, letting every
-  // collaborator through.
   function lockupChannelName(renderer) {
     const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
     if (Array.isArray(rows)) {
@@ -955,16 +808,6 @@
     return lockupTitleChannelName(renderer);
   }
 
-  // The channel a shortsLockupViewModel card attributes itself to, or
-  // undefined. Shorts shelf cards carry no byline/avatar link — the only
-  // channel signal is the protobuf baked into
-  // onTap.innertubeCommand.reelWatchEndpoint.params (URL-encoded base64
-  // whose decoded bytes embed the UC-prefixed channel id). Decoded as
-  // latin1 and scanned for the UC-prefixed id, so protobuf framing changes
-  // outside the id bytes cannot break the read. No channel name exists on
-  // the card (overlayMetadata is title + view count only).
-  // Minimal base64 -> latin1 decoder (no atob/Buffer: the inject realm and
-  // the unit sandbox do not share either). Returns undefined on bad input.
   function base64ToLatin1(input) {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const clean = String(input).replace(/[^A-Za-z0-9+/=]/g, '');
@@ -998,13 +841,6 @@
     return match ? match[0] : undefined;
   }
 
-  // The channel that owns the current page (channel pages only), remembered
-  // from the last payload that carried page metadata. Video cards on a
-  // channel's own tabs omit per-card attribution (no avatar, no channel row),
-  // so without this neither filtering nor the context menu can tell they
-  // belong to the page's channel. Continuation payloads carry no metadata
-  // themselves, hence the cache; it is cleared on navigation (see hooks.js
-  // yt-navigate-start) and only ever set from a real channelMetadataRenderer.
   let pageChannel = null;
 
   function rememberPageChannel(root) {
@@ -1019,11 +855,6 @@
     };
   }
 
-  // parseTime() sentinel values:
-  //   -1 = time string could not be parsed (matchFilterProperties treats any
-  //        vidLen <= 0 as "no duration constraint", so -1 just never matches)
-  //   -2 = the literal 'SHORTS' marker YouTube uses as duration text; a Short
-  //        has no real time, so the shorts option decides on its own
   const INVALID_TIME = -1;
   const SHORTS_TIME = -2;
 
@@ -1050,43 +881,30 @@
     }
   }
 
-  /**
-   * Parses a view count string (e.g., "1.5M views", "No views", "100K", "2 million views") into an integer.
-   * @param {string} s - The input string to parse.
-   * @returns {number|undefined} The exact view count as a number, or undefined if invalid.
-   */
   function parseViewCount(s) {
     if (typeof s !== 'string') return undefined;
 
-    // Normalize spaces (including &nbsp;) and convert to lowercase
     const clean = s
       .replace(/\u00a0/g, ' ')
       .trim()
       .toLowerCase();
     if (clean === '') return undefined;
 
-    // 1. Handle zero views case ("No views", "No view", any spacing/casing)
     if (/^no\s+views?$/.test(clean)) {
       return 0;
     }
 
-    // 2. Match patterns like "1.5 million views", "100K views", or just "100K"
-    // Group 1: The numeric part (digits, dots, commas)
-    // Group 2: The multiplier suffix (thousand/million/billion or k/m/b)
     const match = clean.match(/^([\d,.]+)\s*(thousand|million|billion|[kmb])?(?:\s+views?)?$/);
     if (!match) return undefined;
 
     const numStr = match[1];
     const multiplierStr = match[2];
 
-    // Reject malformed numbers ("1.2.3") that parseFloat would silently truncate
     if ((numStr.match(/\./g) || []).length > 1) return undefined;
 
-    // Convert string to float (remove thousands-separator commas)
     const num = parseFloat(numStr.replace(/,/g, ''));
     if (Number.isNaN(num)) return undefined;
 
-    // Map suffixes to their corresponding numeric multipliers (kept column-aligned below).
     // prettier-ignore
     const multipliers = {
     k: 1e3, thousand: 1e3,
@@ -1108,12 +926,8 @@
       return new ObjectFilter(object, ruleConfig, postActions, contextMenus);
 
     this.object = object;
-    // Channel pages stamp their id on the payload root (see rememberPageChannel
-    // in paths.js); continuation payloads do not, they ride the cache.
     rememberPageChannel(object);
     this.filterRules = ruleConfig;
-    // Precomputed rule-name table so matchFilterRule can scan the object's
-    // own (few) keys instead of iterating every rule key per visited node.
     this.ruleNamesSet = new Set(Object.keys(ruleConfig));
     this.contextMenus = contextMenus;
     this.blockedComments = [];
@@ -1135,20 +949,9 @@
     return this;
   }
 
-  // Cache: matchFilterRule can bail out entirely when no user option or filter
-  // is active. storageData + jsFilterEnabled only change between (or at)
-  // storageReceived, so this is only recomputed there (and when a runtime
-  // context-menu block pushes a new entry into filterData).
   let noActiveFilters = false;
 
-  // True when every rule is dormant: no extended-option renderers (shorts,
-  // movies, mixes, chips shelves), no watched-percent threshold, no vidLength
-  // range and no regex entries or custom function. Each check below maps to one
-  // of those user option groups.
   function computeNoActiveFilters() {
-    // Whitelist mode always filters — even an empty allowlist blocks
-    // everything carrying a channel id — so never take the early-out that
-    // would silently disable the mode.
     if (storageData.options[OPT.WHITELIST_MODE]) return false;
     if (
       storageData.options[OPT.SHORTS] ||
@@ -1159,8 +962,6 @@
       return false;
     if (!isNaN(storageData.options[OPT.PERCENT_WATCHED_HIDE])) return false;
 
-    // Array guards: a forged STORAGE message (FROM_CONTENT is spoofable) can
-    // leave these non-arrays; .[0]/.length on undefined would throw here.
     const vidLength = storageData.filterData.vidLength;
     if (Array.isArray(vidLength) && (!isNaN(vidLength[0]) || !isNaN(vidLength[1]))) return false;
 
@@ -1172,8 +973,6 @@
     return !jsFilterEnabled;
   }
 
-  // Hide videos we already watched past the threshold (percent_watched_hide).
-  // playlist rows and history/library/playlist pages are exempt.
   function isPercentWatchedBlocked(fieldName, value, rendererKey) {
     const opts = storageData.options;
     const threshold = opts[OPT.PERCENT_WATCHED_HIDE];
@@ -1186,28 +985,17 @@
     );
   }
 
-  // Test one compiled filter entry against one value. Resets lastIndex first:
-  // a user-supplied /g flag makes RegExp.test stateful, and testing the same
-  // entry against several candidate values would otherwise alternate hits.
   function testFilterEntry(entry, value) {
     if (!entry) return false;
     entry.lastIndex = 0;
     return entry.test(value);
   }
 
-  // True when any entry matches any candidate value (search-result collab
-  // videos list several channels; the first one must not decide alone).
   function entriesMatchAnyValue(entries, values) {
     if (!Array.isArray(entries)) return false;
     return entries.some((entry) => entry && values.some((v) => testFilterEntry(entry, v)));
   }
 
-  // Render one compiled filter entry the way the user wrote it, so the
-  // watch-page block message names the actual filter. Plain keywords compile
-  // to a boundary-wrapped wrapper `(^|BOUNDARY)(kw)(BOUNDARY|$)` that reads
-  // like random regex; unwrap the middle group and unescape it back to the
-  // keyword. Exact ids compile to `^id$`; strip the anchors. Raw `/re/flags`
-  // entries have no wrapper, so String(entry) already matches the input.
   function displayFilterEntry(entry) {
     try {
       if (!entry || typeof entry.source !== 'string') return undefined;
@@ -1234,8 +1022,6 @@
     }
   }
 
-  // Find the first entry that tests positive against a candidate, so the
-  // block message can name the actual filter (not just the matched value).
   function findMatchingEntry(filterEntries, candidate) {
     if (!Array.isArray(filterEntries)) return undefined;
     for (let i = 0; i < filterEntries.length; i += 1) {
@@ -1245,11 +1031,6 @@
     return undefined;
   }
 
-  // Collab videos (avatar stack): a blocked collaborator other than the first
-  // creator isn't caught by the single channelId/channelName above, so test
-  // every collaborator in the stack as well. ANY match blocks, and the
-  // returned descriptor names the filter that fired plus the collaborator
-  // value it matched.
   function matchCollabChannel(fieldName, rendererKey, filterEntries, obj) {
     if (rendererKey !== 'lockupViewModel') return null;
     if (!Array.isArray(filterEntries) || filterEntries.length === 0) return null;
@@ -1286,9 +1067,6 @@
     return null;
   }
 
-  // Whitelist mode (generous, fail-open): a card is allowed when ANY
-  // collaborator id in the avatar stack matches the allowlist, even if the
-  // primary channel id does not.
   function isCollabChannelAllowlisted(obj) {
     const allowlist = storageData.filterData.whitelist || [];
     if (allowlist.length === 0) return false;
@@ -1296,9 +1074,6 @@
     return collabIds.some((id) => allowlist.some((entry) => entry && testFilterEntry(entry, id)));
   }
 
-  // vidLength is a mandatory [min, max] duration range in seconds; a duration
-  // on the range means "block" (default) while the flips of the range mean
-  // "block everything outside it" (vidLength_type !== 'block').
   function matchesDurationRange(vidLen, filterEntries) {
     const opts = storageData.options;
     if (vidLen === SHORTS_TIME && opts[OPT.SHORTS]) {
@@ -1322,8 +1097,6 @@
     return false;
   }
 
-  // Normalize badge renderers (legacy metadataBadgeRenderer or new
-  // badgeViewModel) to the BADGE_MAP style token for the custom-function API.
   function extractBadgeList(value) {
     const badges = [];
     if (Array.isArray(value)) {
@@ -1336,9 +1109,6 @@
     return badges;
   }
 
-  // Whitelist-mode branch of matchField: only channelId is evaluated (every
-  // other field is bypassed), against the allowlist first, then the collab
-  // stack, then the fail-open ID-charset gate for structural renderers.
   function matchFieldWhitelist(fieldName, value, obj, rendererKey, allValues) {
     if (fieldName !== 'channelId') return { match: null, value };
     const allowlist = storageData.filterData.whitelist || [];
@@ -1347,13 +1117,6 @@
     if (rendererKey === 'lockupViewModel' && isCollabChannelAllowlisted(obj)) {
       return { match: null, value };
     }
-    // Fail-open on non-attribution values: structural renderers carry URLs
-    // (tabRenderer), icon types (chips) or other non-IDs in the channelId
-    // slot. Those can never match an exact-ID allowlist entry, so blocking
-    // them deletes page chrome instead of content — channel tabs vanish and
-    // the channel page looks like it never loads. Real channel ids and the
-    // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
-    // the check below via the shared ID charset.
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
       return { match: null, value };
     }
@@ -1363,14 +1126,7 @@
     };
   }
 
-  // Regex-props branch of matchField: channelId/channelName may carry several
-  // channels (search-result collab dialogs); a blocked one listed second must
-  // still match. Records BOTH the user-readable filter that fired (unwrapped
-  // from the compiled pattern) and the value it matched, so the player block
-  // message can say e.g. `title filter "puppy" matched "Girl Wakes Up..."`.
   function matchFieldRegex(fieldName, value, filterEntries, allValues) {
-    // channelId/channelName can list several channels (collab dialogs);
-    // collect them all so a non-first match still blocks/allows.
     const candidates = allValues && allValues.length > 0 ? allValues : [value];
     for (let i = 0; i < candidates.length; i += 1) {
       const candidate = candidates[i];
@@ -1387,8 +1143,6 @@
     return null;
   }
 
-  // VidLength branch of matchField: parses the duration and tests the
-  // mandatory [min, max] range. Returns match descriptor + numeric value.
   function matchFieldDuration(fieldName, value, filterEntries) {
     const vidLen = parseTime(value);
     const match = matchesDurationRange(vidLen, filterEntries)
@@ -1397,13 +1151,7 @@
     return { match, value: vidLen };
   }
 
-  // The blocking rules for one field, in priority order. Returns `match` - the
-  // descriptor for matchedFilterField, or null - plus `value`, the form of the
-  // value the custom JS filter should receive.
   function matchField(fieldName, value, filterEntries, obj, rendererKey, allValues) {
-    // Whitelist mode inverts channelId: block iff NO allowlist entry tests
-    // positive. Every other field is bypassed here (the caller additionally
-    // skips their value extraction, so only channelId costs a read).
     if (storageData.options[OPT.WHITELIST_MODE]) {
       return matchFieldWhitelist(fieldName, value, obj, rendererKey, allValues);
     }
@@ -1429,17 +1177,12 @@
     return { match: null, value };
   }
 
-  // Coerce the two fields whose raw JSON is not what a filter author expects.
   function normalizeForJsFilter(fieldName, value) {
     if (fieldName === 'viewCount') return parseViewCount(value);
     if (fieldName === 'channelBadges' || fieldName === 'badges') return extractBadgeList(value);
     return value;
   }
 
-  // Per-video cards that may omit their channel on a channel's own page (no
-  // avatar, no channel row — see lockupChannelName). Everywhere else the
-  // fail-open rule stands: unattributed structural renderers (tabs, chips,
-  // shelves) must survive, so the page-channel fallback never applies to them.
   const pageChannelFallbackRenderers = new Set([
     'lockupViewModel',
     'gridVideoRenderer',
@@ -1447,13 +1190,8 @@
     'compactVideoRenderer',
   ]);
 
-  // Skip fields with nothing to test: undefined paths, non-channelId fields
-  // in whitelist mode, and regex props with no entries and no JS filter.
   function shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode) {
     if (filterPath === undefined) return true;
-    // Whitelist mode evaluates channelId against the allowlist even when
-    // the blacklist is empty (empty allowlist = block, not skip); every
-    // other field is bypassed without value extraction.
     if (whitelistMode && fieldName !== 'channelId') return true;
     return (
       !whitelistMode &&
@@ -1462,17 +1200,9 @@
     );
   }
 
-  // Resolve one field's value, falling back to the page channel for
-  // unattributed per-video cards on a channel's own page (see
-  // pageChannelFallbackRenderers). Returns undefined when there is nothing.
   function resolveFieldValue(obj, filterPath, fieldName, rendererKey) {
     const value = getFlattenByPath(obj, filterPath);
     if (value !== undefined) return value;
-    // On a channel's own page its video cards carry no channel id; without
-    // the page fallback they can neither be blacklisted nor (in whitelist
-    // mode) hidden for being non-allowlisted — the page looks unblockable.
-    // Structural renderers keep the fail-open rule (see
-    // pageChannelFallbackRenderers): only per-video cards inherit the page.
     if (
       fieldName === 'channelId' &&
       pageChannel !== null &&
@@ -1483,8 +1213,6 @@
     return undefined;
   }
 
-  // Evaluate one field against its filter entries. Sets matchedFilterField and
-  // returns true on a block; otherwise records the JS-filter value and false.
   function evaluateOneField(fieldName, value, filterEntries, obj, rendererKey, allValues) {
     const { match, value: jsValue } = matchField(
       fieldName,
@@ -1501,11 +1229,8 @@
     return { blocked: false, jsValue };
   }
 
-  // Run the user JS filter over the friendly object. Forces the return into
-  // boolean and records the jsFilter match descriptor on a block.
   function applyJsFilter(friendlyVideoObj, rendererKey) {
     let doBlock = false;
-    // force return value into boolean just in case someone tries returning something else
     try {
       doBlock = !!jsFilter(friendlyVideoObj, rendererKey);
     } catch (e) {
@@ -1524,18 +1249,12 @@
     return doBlock;
   }
 
-  // Collect multi-channel candidates for collab dialogs so a non-first
-  // match still blocks/allows; every other field needs no extra lookup.
   function collabCandidates(obj, filterPath, fieldName) {
-    // channelId/channelName can list several channels (collab dialogs);
-    // collect them all so a non-first match still blocks/allows.
     return fieldName === 'channelId' || fieldName === 'channelName'
       ? getFlattenByPathAll(obj, filterPath)
       : undefined;
   }
 
-  // Scan every field in filterPaths: resolve, evaluate, record JS values.
-  // Returns the block flag; matchedFilterField is set on a property match.
   function scanFilterFields(filterPaths, obj, rendererKey, fd, whitelistMode, friendlyVideoObj) {
     for (const fieldName of Object.keys(filterPaths)) {
       const filterPath = filterPaths[fieldName];
@@ -1563,8 +1282,6 @@
   ObjectFilter.prototype.matchFilterProperties = function (filterPaths, obj, rendererKey) {
     const friendlyVideoObj = {};
     matchedFilterField = null;
-    // Comment menu taps join the pressed comment against the authors seen
-    // here (comment-dom.js). The try covers realms lacking that fragment.
     try {
       if (rendererKey === 'commentEntityPayload') rememberCommentAuthor(obj);
     } catch (e) {}
@@ -1593,10 +1310,6 @@
     return doBlock;
   };
 
-  // Search results and the home grid deliver Shorts as plain videoRenderers,
-  // with a textless time overlay, so the vidLength rule never sees them. Match
-  // the overlay style instead. `overlayStyle` is a guess from the DOM
-  // attribute; only `style` is confirmed. See the knowledge base.
   function hasShortsTimeOverlay(obj) {
     const style = 'SHORTS';
     const paths = [
@@ -1609,8 +1322,6 @@
     return false;
   }
 
-  // A movie: its own renderer, or a video card wearing a movie's byline+badges
-  // (which is how a movie appears inside search/grid results).
   function matchesMovie(obj, rendererKey) {
     if (rendererKey === 'movieRenderer' || rendererKey === 'compactMovieRenderer') return true;
     return (
@@ -1621,8 +1332,6 @@
     );
   }
 
-  // A Short ships in four shapes: the three dedicated renderers, a lockup
-  // flagged by contentType, and a plain video card with a SHORTS overlay.
   function matchesShort(obj, rendererKey) {
     if (
       rendererKey === 'shortsLockupViewModel' ||
@@ -1635,8 +1344,6 @@
       getObjectByPath(obj, 'contentType') === 'LOCKUP_CONTENT_TYPE_SHORT'
     )
       return true;
-    // No rendererKey guard: the overlay marks a Short whatever shape it
-    // arrives as. Only legacy video cards nest thumbnailOverlays.
     return hasShortsTimeOverlay(obj);
   }
 
@@ -1648,11 +1355,6 @@
     'statementBannerRenderer',
   ]);
 
-  // Search "People also search for" shelves arrive as plain shelfRenderer
-  // (title = entity, subtitle = "People also search for", no endpoint), so
-  // the wholesale Set above never catches them. Match on the subtitle text
-  // (simpleText or runs) instead of wholesale-blocking shelfRenderer, which
-  // also hosts legitimate channel shelves.
   function isPeopleAlsoSearchForShelf(obj) {
     const subtitle = flattenRuns(getObjectByPath(obj, 'subtitle'));
     return (
@@ -1666,8 +1368,6 @@
     return false;
   }
 
-  // A YouTube-generated playlist: the radio renderers, or a collection lockup
-  // badged MIX/COURSE.
   function matchesGeneratedPlaylist(obj, rendererKey) {
     if (rendererKey === 'radioRenderer' || rendererKey === 'compactRadioRenderer') return true;
     if (rendererKey !== 'lockupViewModel') return false;
@@ -1675,9 +1375,6 @@
     return imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName);
   }
 
-  // One entry per option, so adding a block type is a line here, not another
-  // branch in the middle of a 70-line function. Order is irrelevant: every
-  // matcher is an independent predicate.
   const OPTION_MATCHERS = [
     [OPT.MOVIES, matchesMovie],
     [OPT.SHORTS, matchesShort],
@@ -1689,8 +1386,6 @@
     for (let idx = 0; idx < OPTION_MATCHERS.length; idx += 1) {
       const [optionKey, matcher] = OPTION_MATCHERS[idx];
       if (storageData.options[optionKey] && matcher(filteredObject, rendererKey)) {
-        // Record the option so the watch-page message names it instead of
-        // staying generic (or worse, reusing a stale field from an earlier video).
         matchedFilterField = { name: 'option', filter: optionKey };
         return true;
       }
@@ -1698,10 +1393,6 @@
     return this.isBlockedComment(filteredObject, rendererKey);
   };
 
-  // Comments are blocked by id, not by option. The two renderer shapes bury
-  // the id at different depths. Records the attribution like every other
-  // matcher: without this, a comment hit would leave whatever an earlier
-  // renderer set behind (stale-filter log lines).
   ObjectFilter.prototype.isBlockedComment = function (filteredObject, rendererKey) {
     let commentId;
     if (rendererKey === 'commentThreadRenderer') {
@@ -1738,10 +1429,6 @@
         this.isExtendedMatched(filteredObject, rendererKey) ||
         this.matchFilterProperties(filterPaths, filteredObject, rendererKey);
       if (isMatch) {
-        // Snapshot this rule's attribution: the global still holds the LAST
-        // match in this node when several keys match, so a customFunc (and
-        // its log line) would otherwise report a sibling renderer's filter.
-        // Each descriptor is a fresh object per match, so a reference is safe.
         res.push({
           name: rendererKey,
           customFunc,
@@ -1753,15 +1440,10 @@
     return res;
   };
 
-  // (b) after the recursion, empty leftover containers are pruned: (a) arrays
-  // that got emptied by filtering, and special "collapseable" containers whose
-  // rule requires them gone once their only child is gone.
   function collapseEmptyContainers(obj, childKey, childDel) {
-    // if next child is an empty array that we filtered, mark parent for removal.
     if (childDel && obj[childKey] instanceof Array && obj[childKey].length === 0) {
       return true;
     }
-    // special childs that needs removing if they're empty
     if (childDel && collapseableContainersSet.has(childKey)) {
       delete obj[childKey];
       return true;
@@ -1769,13 +1451,9 @@
     return false;
   }
 
-  // Run one matched rule's customFunc (if any) and delete the renderer on
-  // success. Returns the rule's related flag (or true) when deleted.
   function applyMatchedRule(filterCtx, obj, rule) {
     let customRet = true;
     if (rule.customFunc !== undefined) {
-      // Restore this rule's snapshot (see matchFilterRule): sibling matches
-      // in the same node must not leak their attribution into this call.
       if (rule.match !== undefined) {
         try {
           matchedFilterField = rule.match;
@@ -1796,13 +1474,9 @@
     return false;
   }
 
-  // Match this node's renderers against the rule table and delete hits.
-  // Returns the deletePrev flag for the pruned parent, or false for arrays
-  // (numerically keyed: they can never match a rule name — skipped here).
   function matchAndDeleteRules(filterCtx, obj, keys) {
     let deletePrev = false;
     if (keys === undefined) return deletePrev;
-    // object filtering
     let matchedRules = [];
     try {
       matchedRules = filterCtx.matchFilterRule(obj, keys);
@@ -1817,9 +1491,6 @@
     return deletePrev;
   }
 
-  // Filter one child subtree, returning its delete flag (or undefined for
-  // primitives, which can never match a renderer). Child throws leave the
-  // subtree in place.
   function filterOneChild(filterCtx, child) {
     if (typeof child !== 'object' || child === null) return undefined;
     try {
@@ -1831,35 +1502,26 @@
     }
   }
 
-  // Splice a deleted array child (plus its related sibling when the flag is
-  // a key name — the missing-data hack). No-op for object children.
   function spliceDeletedChild(obj, idx, childDel, keys) {
     if (!childDel || keys !== undefined) return;
     obj.splice(idx, 1);
-    // Hack for deleting related objects with missing data
     if (typeof childDel === 'string' && obj.length > 0 && obj[idx] && obj[idx][childDel]) {
       obj.splice(idx, 1);
     }
   }
 
-  // Walk children backwards (easier splice), filtering each subtree and
-  // pruning emptied containers. Returns true when a child was deleted.
   function filterChildren(filterCtx, obj, keys, len) {
     let deleted = false;
-    // loop backwards for easier splice
     for (let i = len - 1; i >= 0; i -= 1) {
       const idx = keys ? keys[i] : i;
       if (obj[idx] === undefined) continue;
 
-      // filter next child (skip primitives: they can never match a renderer)
-      // also if current object is an array, splice child
       const childDel = filterOneChild(filterCtx, obj[idx]);
       if (childDel && keys === undefined) {
         deleted = true;
         spliceDeletedChild(obj, idx, childDel, keys);
       }
 
-      // if next child is an empty array that we filtered, mark parent for removal.
       if (collapseEmptyContainers(obj, idx, childDel)) {
         deleted = true;
       }
@@ -1867,8 +1529,6 @@
     return deleted;
   }
 
-  // Attach context-menu entries to this node when the filter runs with menus
-  // enabled. Menu throws never break filtering — they are logged only.
   function maybeAddContextMenus(filterCtx, obj, keys) {
     if (!filterCtx.contextMenus) return;
     try {
@@ -1882,7 +1542,6 @@
   ObjectFilter.prototype.filter = function (obj = this.object) {
     let deletePrev = false;
 
-    // we reached the end of the object
     if (typeof obj !== 'object' || obj === null) {
       return deletePrev;
     }
@@ -1890,8 +1549,6 @@
     let len = 0;
     let keys;
 
-    // If object is an array len is the number of it's members; arrays are
-    // numerically keyed so they can never match a rule name -> skip matching.
     if (obj instanceof Array) {
       len = obj.length;
     } else {
@@ -1911,8 +1568,6 @@
 
   // !! Custom filtering functions
 
-  // Which field matched, filled in by matchFilterProperties so the error panel
-  // can say what actually triggered the block.
   let matchedFilterField = null;
 
   function getMatchedFilterText() {
@@ -1920,16 +1575,9 @@
     const name = matchedFilterField.name;
     const filter = matchedFilterField.filter;
     const value = matchedFilterField.value;
-    // Name the actual filter that fired plus the value it matched, so a
-    // title block reads e.g. `title filter "puppy" matched "Girl Wakes..."`.
-    // Showing only the value looks like the user added a filter for that
-    // exact title; showing only the compiled pattern reads like random regex.
     if (filter !== undefined && value !== undefined) {
       const f = String(filter).slice(0, 40);
       const v = String(value).slice(0, 40);
-      // Exact-id filters (channelId/videoId `^id$`) match only themselves,
-      // so naming both reads as a stutter: (channelId filter "UC..." matched
-      // "UC..."). Collapse those to a single attribution.
       if (f === v) return `${name}: "${f}"`;
       return `${name} filter "${f}" matched "${v}"`;
     }
@@ -1942,15 +1590,12 @@
     return name;
   }
 
-  // Keep the native error panel informative even when block_message is empty.
   function getBlockMessage() {
     const rule = getMatchedFilterText();
     const message = storageData.options[OPT.BLOCK_MESSAGE] || 'Video blocked by BlockTube filter';
     return rule ? `${message} (${rule})` : message;
   }
 
-  // Mark the player response as errored so YouTube shows a reason on screen
-  // instead of a blank/black player.
   function setPlayerBlocked(ytData) {
     const message = getBlockMessage();
     try {
@@ -1984,8 +1629,6 @@
       return false;
     }
 
-    // disablePlayer deletes every prop below; resolve the attribution first
-    // (the skip sweep and the overlay key on it — one sweep per video).
     const blockedAttribution = blockedPlayerAttribution(ytData);
     for (const prop of Object.getOwnPropertyNames(ytData)) {
       try {
@@ -2000,11 +1643,6 @@
     playerHasBeenBlocked = true;
   }
 
-  // Video id of a blocked player response, across the ytPlayer rule shapes
-  // (player response root, embed/player-config args). Shared helper:
-  // shorts-overlay.js blockedPlayerAttribution() reuses this — keep the name
-  // and signature stable. Load order (tools/build-inject.js) guarantees this
-  // fragment evaluates before shorts-overlay.js.
   function blockedPlayerVideoId(ytData) {
     const candidates = [
       'videoDetails.videoId',
@@ -2019,35 +1657,14 @@
     return undefined;
   }
 
-  // Skip state for blocked Shorts (see skipBlockedShort): consecutive
-  // auto-advance counter (reset on manual navigation), the video id a sweep
-  // is armed for (one sweep per video — a player response flows through
-  // several ytPlayer rules), whether the last navigation was ours, and when
-  // this video's advance was first triggered (a trigger is async — the
-  // navigation lands later — so the sweep watches for it instead of
-  // assuming).
   let shortsConsecutiveSkips = 0;
   let shortsSkipArmedFor = null;
   let shortsSkipJustFired = false;
   let shortsSkipTriggeredAt = 0;
-  // Videos already auto-advanced past once: going back to one (browser back,
-  // swipe-back, reel loop) must show the reason panel and stay — force-skip
-  // again would make the block reason unreadable. Bounded (insertion-ordered
-  // eviction) so a long session cannot grow it without limit.
   let shortsSkipFiredIds = new Set();
   const SHORTS_SKIP_FIRED_CAP = 100;
-  // Give up auto-advancing after this many consecutive blocked shorts so a
-  // wall of blocked content (e.g. a fully-blocked channel's reel) can never
-  // machine-gun the player; the ERROR status above still stops playback.
   const SHORTS_SKIP_CAP = 15;
 
-  // Navigation started: consume the skip accounting for the previous short.
-  // A navigation we triggered keeps the consecutive counter; a manual one
-  // (new swipe, new page) resets it and disarms any pending sweep. When the
-  // navigation is our own auto-advance past a blocked short, its reason
-  // panel is dropped now instead of riding into the next short — the black
-  // covers underneath keep the departing frame hidden until the landing
-  // verdict. Returns true when the panel was dropped. Never throws.
   function shortsSkipNavigationStarted() {
     let ours = false;
     try {
@@ -2070,13 +1687,6 @@
     return ours;
   }
 
-  // Blocked Shorts are removed, never messaged: advance the reel to the next
-  // short while the reason-only overlay (shorts-overlay.js, anchored to the
-  // reel item) covers the blocked one. Runs as a short fail-open
-  // sweep; when it cannot advance, the overlay reason plus the ERROR status
-  // above is the whole effect (the short stays covered instead of playing). Prefetched (not yet watched)
-  // shorts stay silent until swiped to; non-Shorts pages keep the native
-  // error screen. Exotic realms without timers never schedule the sweep.
   function skipBlockedShort(videoId) {
     if (typeof videoId !== 'string' || videoId.length === 0) return;
     try {
@@ -2084,12 +1694,6 @@
     } catch (e) {
       return;
     }
-    // Prefetches (not yet watched) arm nothing: their sweep would instantly
-    // complete ("not on screen" reads as "navigated away" in the tick below)
-    // and burn the one sweep per video, so a blocked short landed on later —
-    // whose player response may come from cache with nothing re-triggering
-    // this path — would never advance. The landing hook (hooks.js
-    // yt-navigate-finish) arms the sweep when actually watched instead.
     try {
       if (currentShortsId() !== videoId) return;
     } catch (e) {
@@ -2124,14 +1728,6 @@
     }, 250);
   }
 
-  // One sweep tick: still on the blocked short? Actuate at most ONCE per
-  // video and then only watch for the navigation. Two races make anything
-  // more dangerous than that: a manual swipe can land while the URL still
-  // shows the armed video (a tick in that window would swipe the user off an
-  // innocent short), and a retry after a keys trigger can double-advance past
-  // an unblocked short. So: wait out the first ticks for the URL to settle,
-  // fire a single trigger, then watch (or time out). True when navigated
-  // away or when no navigation followed the trigger within a few seconds.
   function skipBlockedShortTick(videoId, tries) {
     try {
       if (document.location.pathname !== `/shorts/${videoId}`) return true;
@@ -2159,10 +1755,6 @@
     return false;
   }
 
-  // Click YouTube's own Next button. True when clicked (navigation lands
-  // async — the tick watches for it). Scoped to the reel containers first so
-  // a page with many buttons does not pay a full-document scan per tick; the
-  // document-wide fallback keeps working if YouTube renames the container.
   function clickReelNextButton() {
     try {
       const scoped = document.querySelectorAll(
@@ -2189,9 +1781,6 @@
     return false;
   }
 
-  // Send the ArrowDown swipe shortcut, never into text entry (that would
-  // type, not swipe). True when dispatched (delivery is not confirmable —
-  // the tick watches for the navigation instead).
   function sendReelSwipeKeys() {
     const active = document.activeElement;
     const tag = active && active.tagName;
@@ -2215,10 +1804,6 @@
     return true;
   }
 
-  // Advance the reel via YouTube's own affordances. Next button first (a
-  // semantic advance regardless of focus); the ArrowDown swipe shortcut as
-  // fallback. True when an advance was triggered (its navigation lands
-  // async).
   function advanceReelToNext() {
     try {
       if (clickReelNextButton()) return true;
@@ -2253,17 +1838,6 @@
     delete vid.thumbnailOverlays;
   }
 
-  // Filter one reel sequence response: the fetch reel endpoints (network.js)
-  // and the initial ytInitialReelWatchSequenceResponse (hooks.js). Embedded
-  // prefetched player responses carry full videoDetails — verified against a
-  // real capture: exactly one videoDetails per sequence, no args/PLAYER_VARS
-  // shapes, so the ytPlayer table can only match genuine players. The ytPlayer
-  // pass blocks prefetches whose channel matches (wiping their stream and
-  // remembering the id for the landing panel + skip sweep, exactly like a
-  // /player block); the scrub then neutralizes every preloaded frame,
-  // unconditionally (Shorts only — these payloads never leave Shorts).
-  // playerHasBeenBlocked is preserved: a prefetch verdict must never leak
-  // into the page-level flow that reads the flag after us. Fail-open.
   function filterReelSequenceResponse(resp) {
     if (!resp || typeof resp !== 'object') return;
     const wasBlocked = playerHasBeenBlocked;
@@ -2277,15 +1851,6 @@
       scrubReelThumbnails.call({ object: resp });
     } catch (e) {}
   }
-  // Blanket video-thumbnail scrub for the reel responses (reel_item_watch,
-  // reel_watch_sequence — Shorts pages only): every video frame/poster URL in
-  // the payload is replaced with a neutral placeholder, unconditionally. Reel
-  // entries carry no channel linkage, and the point is precisely that no
-  // preloaded frame ever paints: blocked or not, the video itself still loads
-  // and plays, so allowed shorts are unaffected beyond their preload image.
-  // Only i.ytimg.com frame/poster URLs are touched — channel avatars (yt3)
-  // and menu icons stay intact, and player responses ride a different
-  // endpoint branch (streams must survive for playback). Fail-open throughout.
   function scrubReelThumbnailUrls(node) {
     try {
       if (!node || typeof node !== 'object' || node instanceof Array) return;
@@ -2306,7 +1871,6 @@
     } catch (e) {}
   }
 
-  // One node of the reel-response walk below. Fail-open throughout.
   function visitReelThumbNode(node) {
     try {
       if (!node || typeof node !== 'object') return;
@@ -2367,8 +1931,6 @@
     });
   }
 
-  // Mobile watch-next feed section: the itemSectionRenderer whose target is
-  // the watch-next feed, or undefined when the feed has no such section.
   function findWatchNextSection(nextResults) {
     for (const [, v] of nextResults.entries()) {
       if (
@@ -2381,8 +1943,6 @@
     return undefined;
   }
 
-  // Copy the next-video renderer fields onto the mobile autoplay overlay so
-  // playback continues from the right video after the block.
   function applyNextVideoToOverlay(playerOverlay, nextVideoRenderer) {
     playerOverlay.videoTitle = nextVideoRenderer.headline;
     playerOverlay.byline = nextVideoRenderer.shortBylineText;
@@ -2394,7 +1954,6 @@
     playerOverlay.shortViewCountText = nextVideoRenderer.shortViewCountText;
   }
 
-  // Point the mobile autoplay set at the next video's endpoints.
   function applyNextVideoToAutoplaySet(autoplaySet, nextVideoRenderer) {
     autoplaySet.commandMetadata = nextVideoRenderer.navigationEndpoint.commandMetadata;
     autoplaySet.watchEndpoint = nextVideoRenderer.navigationEndpoint.watchEndpoint;
@@ -2428,8 +1987,6 @@
     applyNextVideoToAutoplaySet(autoplaySet, nextVideoRenderer);
   }
 
-  // Mobile next-video redirect: navigate to the feed's next video and drop
-  // the blocked contents. No-op on playlists (they provide the next row).
   function redirectMobileToNextVideo(nextSection) {
     const nextAutoPlayObj = getObjectByPath(nextSection, 'contents.videoWithContextRenderer');
     if (!nextAutoPlayObj) return;
@@ -2463,8 +2020,6 @@
     redirectMobileToNextVideo.call(this, nextSection);
   }
 
-  // Break out of the playlist context check / navigation decision: playlists
-  // provide the next row themselves, so we must NOT redirect to a plain video.
   function shouldRedirectToNextVideo() {
     return !new URL(document.location).searchParams.has('list');
   }
@@ -2510,7 +2065,6 @@
     secondary.secondaryResults = undefined;
   }
 
-  // "You there?" confirm dialogs that interrupt playback on idle.
   function removeYouThereMessages(playerResponse) {
     const playerMessages = getObjectByPath(playerResponse, 'messages', []);
     for (let i = playerMessages.length - 1; i >= 0; i -= 1) {
@@ -2520,7 +2074,6 @@
     }
   }
 
-  // Strip loudness metadata so YouTube stops normalizing volume across videos.
   function disableLoudnessNormalization(playerResponse) {
     const audioConfig = getObjectByPath(playerResponse, 'playerConfig.audioConfig');
     if (audioConfig !== undefined) {
@@ -2577,14 +2130,6 @@
         url.pathname,
       )
     ) {
-      // Swiping between Shorts loads each reel (overlay, channel bar and the
-      // `...` menu the Block entries live in) through these endpoints, shaped
-      // like a watch-next response. The sequence filter first blocks embedded
-      // prefetched players whose channel matches and neutralizes every
-      // preloaded frame (those entries carry no channel linkage, and no
-      // preloaded frame may ever paint); then the usual pass filters what
-      // matches and stamps the Block menu entries (no autoplay fixups here —
-      // there are no two-column results).
       filterReelSequenceResponse(resp);
       ObjectFilter(resp, mergedFilterRules, [], true);
     } else if (url.pathname === '/youtubei/v1/guide') {
@@ -2592,17 +2137,12 @@
     } else if (url.pathname === '/youtubei/v1/player') {
       playerHasBeenBlocked = false;
       ObjectFilter(resp, filterRules.ytPlayer, [playerMiscFilters]);
-      // A clean verdict for the short on screen lifts the seed.js first-frame
-      // guard (blocked shorts stay hidden under the reason panel).
       maybeRevealShortsPrehide(resp);
     } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       ObjectFilter(resp, filterRules.comments, [], true);
     }
   }
 
-  // One SPF part carrying an embedded player: hydrate the raw response and
-  // run the player filter. Guards the JSON parse — a malformed payload passes
-  // through unfiltered.
   function filterSpfPlayer(obj) {
     try {
       const player_resp = getObjectByPath(obj.player, 'args.player_response');
@@ -2612,15 +2152,11 @@
     ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
   }
 
-  // One SPF part carrying a top-level playerResponse: filter it directly.
   function filterSpfPlayerResponse(obj) {
     playerHasBeenBlocked = false;
     ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
   }
 
-  // Resolve the rule set + post actions for an SPF response/data part from
-  // the request pathname. Watch pages reuse the main rules with autoplay
-  // fixups; unknown paths fall through to main as well.
   function spfRulesFor(pathname) {
     let rules;
     let postActions = [];
@@ -2635,7 +2171,6 @@
       case '/watch':
         postActions = [fixAutoplay];
         if (playerHasBeenBlocked) postActions.push(redirectToNext);
-      // the watch page uses the same catch-all rule set below
       // falls through
       default:
         rules = filterRules.main;
@@ -2643,14 +2178,11 @@
     return { rules, postActions };
   }
 
-  // One SPF part carrying response/data: filter it with the pathname's rules.
   function filterSpfPayload(obj, pathname) {
     const { rules, postActions } = spfRulesFor(pathname);
     ObjectFilter(obj.response || obj.data, rules, postActions, true);
   }
 
-  // Filter one SPF part: player, playerResponse, and response/data shapes
-  // each get their own helper above.
   function filterSpfPart(obj, pathname) {
     if (has.call(obj, 'player')) {
       filterSpfPlayer(obj);
@@ -2691,7 +2223,6 @@
 
     data.filterData.channelId.push(/^FEtrending$/);
     data.filterData.channelId.push(/^FEexplore$/);
-    // Mobile Explore tab
     data.filterData.channelId.push(/^EXPLORE_DESTINATION$/);
   }
 
@@ -2707,8 +2238,6 @@
     data.filterData.channelId.push(/^.+\/shorts$/);
   }
 
-  // The autoplay region is present and its overlay renderer is missing (it was
-  // filtered out) → the overlay needs rebuilding from the next video row.
   function autoplayOverlayPresent(object) {
     if (getObjectByPath(object, 'playerOverlays.playerOverlayRenderer.autoplay') === undefined) {
       return false;
@@ -2721,8 +2250,6 @@
     );
   }
 
-  // The autoplay "sets" array from the right-hand column; the overlay is
-  // rebuilt from its video. Undefined when the response lacks a next row.
   function nextVideoSet(object) {
     let autoPlay = getObjectByPath(
       object,
@@ -2757,9 +2284,6 @@
     }
   }
 
-  // Resolve the video id of the "up next" row from a watchNextResponse.
-  // Returns null when no next-video renderer is present, so it can also serve
-  // as a "is there a next video?" check.
   function findNextVideo(object) {
     let secondaryResults = getObjectByPath(
       object,
@@ -2790,24 +2314,16 @@
 
   // ================== src/scripts/inject/context-menu.js ==================
 
-  // Whitelist mode (WHITELIST_PLAN.md Phase 3): the menu offers allowlisting
-  // instead of blocking — channel items post type `whitelist`, video items
-  // are hidden (videos can't be allowlisted). Never both at once.
   function isWhitelistMenuMode(store) {
     const opts = (store || storageData)?.options;
     return !!opts?.[OPT.WHITELIST_MODE];
   }
 
-  // Per-entry menu visibility (General toggles, default shown): a missing key
-  // (stored blobs predate the toggles) reads as visible — the same fail-open
-  // direction as the rest of the menu.
   function showMenuEntry(key, store) {
     const opts = (store || storageData)?.options;
     return opts?.[key] !== false;
   }
 
-  // The toast notification item shown after a mobile block tap ("Channel
-  // blocked" rendered in place by YouTube).
   function buildToastNotificationItem(toastText) {
     return {
       notificationMultiActionRenderer: {
@@ -2823,8 +2339,6 @@
     };
   }
 
-  // The feedback endpoint for a mobile block entry: optionally hides the
-  // enclosing card and shows the toast notification above.
   function buildBlockFeedbackEndpoint(toastText, hideContainer) {
     return {
       uiActions: {
@@ -2840,8 +2354,6 @@
     };
   }
 
-  // The service endpoint stub mobile block entries carry (a no-op data URL —
-  // the real work happens in menuOnTapMobile via the _bt* fields).
   function buildBlockServiceEndpoint(hideContainer, toastText) {
     return {
       commandMetadata: {
@@ -2854,11 +2366,6 @@
     };
   }
 
-  // Mobile "up next" cards carry no block actions, so we inject full
-  // menuServiceItemRenderer entries ourselves; YT renders the toast text
-  // ("Channel blocked") in place after the tap.
-  // Allow entries must NOT hide the card (the item stays visible, only the
-  // toast confirms), so they pass hideContainer=false; removals keep it true.
   function buildBlockActionMenuItem(
     attr,
     menuAction,
@@ -2881,9 +2388,6 @@
     };
   }
 
-  // The first live renderer key that is both a registered context-menu target
-  // and still owned by obj. `keys` is a snapshot taken before rule deletion, so
-  // an entry may have been deleted from obj since it was captured.
   function resolveContextMenuAttr(obj, keys) {
     if (keys === undefined) return undefined;
     for (let i = 0; i < keys.length; i += 1) {
@@ -2894,10 +2398,6 @@
     return undefined;
   }
 
-  // Dedupe a candidate list, dropping undefined/empty values. Returns a
-  // single value when exactly one remains (existing callers store a plain
-  // string), an array when several collaborators are present, or undefined
-  // when nothing resolved.
   function singleOrAll(values) {
     const seen = [];
     const known = new Set();
@@ -2912,11 +2412,6 @@
     return seen;
   }
 
-  // The channel and video a renderer describes, resolved through its filter
-  // rule paths. Both block entries ("Block Channel" / "Block Video") carry
-  // this pair as _btOriginalData for menuOnTap to consume later. Collab
-  // cards list several channels: collect ALL of them so one "Block Channel"
-  // tap blocks every collaborator instead of only the first.
   function channelAndVideoFrom(parentData, attrKey) {
     if (attrKey === 'lockupViewModel') {
       return { channel: lockupChannelFrom(parentData), video: lockupVideoFrom(parentData) };
@@ -2934,14 +2429,6 @@
     };
   }
 
-  // Lockup cards resolve through the same rule paths, plus the channel-page
-  // fallback: cards on a channel's own tabs carry no attribution (no avatar,
-  // no channel row), so without the page channel the menu tap posts an
-  // undefined id that the content script drops — the tap silently does
-  // nothing — and the annotation falls back to the view count. lockupChannelName
-  // (a function rule path) already refuses the view count; the page channel
-  // fills the rest. Collab stacks contribute every entry, so the tap blocks
-  // all collaborators at once.
   function lockupChannelFrom(renderer) {
     const searchIn = mergedFilterRules.lockupViewModel?.properties;
     const ids = getFlattenByPathAll(renderer, searchIn?.channelId).concat(
@@ -2964,8 +2451,6 @@
     };
   }
 
-  // Mobile renderers whose cards ship no block actions (see
-  // buildBlockActionMenuItem): the menu entries are built from scratch.
   const MOBILE_UP_NEXT_ATTRS = [
     'videoWithContextRenderer',
     'compactVideoRenderer',
@@ -2976,8 +2461,6 @@
     'commentRenderer',
   ];
 
-  // Resolve the mutable menu-items array for a mobile up-next card, creating
-  // the actionMenu for comments. Undefined when the card has no menu at all.
   function resolveMobileUpNextItems(obj, attr) {
     let items;
     if (has.call(obj[attr], 'menu')) {
@@ -2992,8 +2475,6 @@
     return items;
   }
 
-  // Whitelist mode: the visible cards are already allowlisted, so an
-  // "Allow Channel" entry would be pointless — offer removal instead.
   function pushMobileRemovalEntry(items, attr, channelData) {
     if (channelData.id)
       items.push(
@@ -3009,8 +2490,6 @@
       );
   }
 
-  // Block mode additionally offers allowlisting, so the allowlist can be
-  // built while browsing normally.
   function pushMobileBlockEntries(items, attr, channelData, videoData) {
     if (channelData.id && showMenuEntry(OPT.MENU_BLOCK_CHANNEL))
       items.push(
@@ -3040,9 +2519,6 @@
       );
   }
 
-  // Mobile Up Next videos: same menuServiceItemRenderer type the desktop
-  // overflow menu uses, but these cards ship no block actions, so we build
-  // the full entries ourselves (see buildBlockActionMenuItem).
   function addMobileUpNextMenus(obj, attr, channelData, videoData) {
     const items = resolveMobileUpNextItems(obj, attr);
     if (!items) return;
@@ -3053,9 +2529,6 @@
     pushMobileBlockEntries(items, attr, channelData, videoData);
   }
 
-  // Channel-button definitions for the mobile video-page action bar. In
-  // whitelist mode only removal is offered; in block mode the entries honor
-  // their General-toggle visibility (see showMenuEntry).
   function slimChannelButtonDefs(allowMode) {
     if (allowMode) {
       return [{ action: 'unallow_channel', label: 'Remove from Whitelist' }];
@@ -3066,9 +2539,6 @@
     ].filter(({ option }) => option === undefined || showMenuEntry(option));
   }
 
-  // One slim action-bar buttonRenderer bound to BlockTube data: shared body
-  // for the video and channel buttons (they differ only in data/action/label
-  // and the navigation endpoint kind).
   function buildSlimButtonRenderer(data, action, label, navigationEndpoint) {
     return {
       _btOriginalData: data,
@@ -3096,7 +2566,6 @@
     };
   }
 
-  // The "Block Video" button for the mobile video-page action bar.
   function buildSlimVideoButton(videoData) {
     return {
       slimMetadataButtonRenderer: {
@@ -3107,8 +2576,6 @@
     };
   }
 
-  // Render one channel-button definition into a slimMetadataButtonRenderer
-  // entry bound to the video's channel (see addMobileSlimMenus).
   function renderSlimChannelButton({ action, label }, channelData) {
     return {
       slimMetadataButtonRenderer: {
@@ -3122,16 +2589,10 @@
     };
   }
 
-  // The mobile action-bar wrapper holding the video + channel buttons, with
-  // a static "More" overflow label.
   function buildMobileVideoMenu(videoButton, channelButtonsRendered, includeVideo) {
     return {
       slimVideoActionBarRenderer: {
-        buttons: [
-          // Videos can't be allowlisted: no video button in whitelist mode.
-          ...(includeVideo ? [videoButton] : []),
-          ...channelButtonsRendered,
-        ],
+        buttons: [...(includeVideo ? [videoButton] : []), ...channelButtonsRendered],
         overflowMenuText: {
           runs: [
             {
@@ -3146,8 +2607,6 @@
     };
   }
 
-  // Mobile Video page: the action bar under the video uses a different
-  // renderer (slimMetadataButtonRenderer) than the menu-entry type above.
   function addMobileSlimMenus(obj, attr, channelData, videoData) {
     const items = obj[attr].contents;
     if (!items) return;
@@ -3175,15 +2634,10 @@
     }
   }
 
-  // Lockup branch of extractMenuItems: resolve the sheet items, then mark
-  // channel/video presence unless the card is a generated collection (Mixes,
-  // Courses — neither a real video nor a real channel). Null when no sheet.
   function extractLockupMenuFlags(obj, attr) {
     const items = extractFromLockupViewModel(obj[attr]);
     if (!items) return null;
     const imgName = getObjectByPath(obj[attr], LOCKUP_BADGE_ICON_PATH);
-    // YouTube-generated collections (Mixes, Courses): neither a real video nor
-    // a real channel, so there is nothing meaningful to add to the filters.
     const isCollection = imgName !== undefined && LOCKUP_GENERATED_BADGE_ICONS.has(imgName);
     return {
       items,
@@ -3193,11 +2647,6 @@
     };
   }
 
-  // Renderers without their own channel link (movies, reels) never attribute
-  // a channel; the rest do when a byline path resolves to a browse endpoint.
-  // Shorts shelf cards are NOT excluded here: they carry no byline, but their
-  // channel resolves from reelWatchEndpoint.params via the channelId rule
-  // (see shortsLockupChannelId) through the dedicated branch below.
   function genericRendererHasChannel(renderer, attr) {
     if (
       attr === 'movieRenderer' ||
@@ -3218,8 +2667,6 @@
     );
   }
 
-  // Generic branch of extractMenuItems: items always exist (created on
-  // demand), video actions always apply, channel depends on the byline link.
   function extractGenericMenuFlags(obj, attr) {
     return {
       items: extractFromGenericRenderer(obj[attr]),
@@ -3229,8 +2676,6 @@
     };
   }
 
-  // Comment branch of extractMenuItems: comments ship no menu, so an empty
-  // actionMenu is created for the block entries.
   function extractCommentMenuFlags(obj, attr) {
     obj[attr].actionMenu = { menuRenderer: { items: [] } };
     return {
@@ -3276,7 +2721,6 @@
     return extractGenericMenuFlags(obj, attr);
   }
 
-  // Specific extractor for lockupViewModel
   function extractFromLockupViewModel(renderer) {
     const path =
       'metadata.lockupMetadataViewModel.menuButton.buttonViewModel.onTap.innertubeCommand.showSheetCommand.panelLoadingStrategy.inlineContent.sheetViewModel';
@@ -3313,13 +2757,6 @@
     return items;
   }
 
-  // Shorts-shelf branch of extractMenuItems: the sheet lives under menuOnTap
-  // (not under metadata.menuButton like lockupViewModel). The channel id
-  // decodes from reelWatchEndpoint.params (see shortsLockupChannelId) — there
-  // is no channel name on the card — so the channel entry is offered only
-  // when an id resolved. The blockTube metadata stamp mirrors lockupViewModel
-  // so right-hand taps resolve through the same stamped path. Null when no
-  // sheet.
   function extractShortsLockupMenuFlags(obj, attr) {
     const items = extractFromShortsLockupViewModel(obj[attr]);
     if (!items) return null;
@@ -3332,7 +2769,6 @@
     };
   }
 
-  // Specific extractor for shortsLockupViewModel
   function extractFromShortsLockupViewModel(renderer) {
     const path =
       'menuOnTap.innertubeCommand.showSheetCommand.panelLoadingStrategy.inlineContent.sheetViewModel';
@@ -3351,10 +2787,6 @@
         videoId: video.id,
         videoName: video.text,
         removeObject: true,
-        // Marks taps from a Shorts shelf card: their sheet has no native
-        // hide affordance, so menuOnTap dismisses the card from the DOM
-        // directly (see dismissShortsShelfCard) instead of relying on the
-        // cloned feedback command the way lockup cards do.
         isShorts: true,
       },
     };
@@ -3369,13 +2801,6 @@
     return items;
   }
 
-  // Watch-page branch of extractMenuItems: the reel `...` menu holds
-  // listItemViewModel entries ("Description", "Save to playlist", ...), so the
-  // lockup-style entries below render alongside natively. The channel resolves
-  // from the reel channel bar (avatar/browse link + handle text); the video id
-  // is the /shorts/<id> URL and the name is the document title. The stamp
-  // carries isWatch so taps pause the reel instead of hunting a shelf card.
-  // Null when the overlay has no menu (e.g. embeds).
   function extractReelOverlayMenuFlags(obj, attr) {
     const items = extractFromReelOverlay(obj[attr]);
     if (!items) return null;
@@ -3390,10 +2815,6 @@
     };
   }
 
-  // Menu items array of the reel overlay `...` menu. The blockTube stamp goes
-  // on the overlay itself: right-hand taps read the symbol-keyed component
-  // data wrapping it (see getRecommendedParentData), mirroring the sheet
-  // stamp of the lockup branches.
   function extractFromReelOverlay(renderer) {
     const items = getObjectByPath(renderer, 'menu.menuRenderer.items');
     if (!Array.isArray(items)) return null;
@@ -3421,18 +2842,6 @@
     return items;
   }
 
-  // Watch-page topbar branch of extractMenuItems: the VISIBLE `...` sheet
-  // lives in the reel topbar's trailing-buttons MORE_VERT buttonViewModel
-  // (showSheetCommand → inlineContent → sheetViewModel → listViewModel →
-  // listItems), not in overlay.menu (a decoy copy nothing renders). `attr`
-  // is the matched key: live swipe responses carry `topbar` (and `overlay`)
-  // at the top level, while the embedded prefetch wraps the same fields in
-  // `reelItemWatchResponse` — normalize to the inner object first. Channel
-  // resolves from the same response's overlay channel bar (correct per reel
-  // even for prefetches); the video resolves live at tap time (see
-  // stampedMenuBlockData), so prefetch staleness cannot misattribute a tap.
-  // Null when the response carries no such button (shape drift) — the
-  // overlay-menu branch above stays as the fallback.
   function extractReelTopbarMenuFlags(obj, attr) {
     const root = attr === 'reelItemWatchResponse' ? obj[attr] : obj;
     const found = findReelTopbarSheet(root);
@@ -3466,9 +2875,6 @@
     };
   }
 
-  // The MORE_VERT trailing button of a reel response topbar, or null. Slots
-  // are {topBarConditionalButtonViewModel:{button:{buttonViewModel}}} (a
-  // direct {button:{buttonViewModel}} slot is accepted as fallback).
   function findReelTopbarButton(response) {
     let slots = null;
     try {
@@ -3497,8 +2903,6 @@
     }
   }
 
-  // Inline sheet + row list of a MORE_VERT button, or null when the button
-  // carries no inline sheet (deferred shapes we do not handle).
   function findReelTopbarSheet(response) {
     const button = findReelTopbarButton(response);
     if (!button) return null;
@@ -3512,9 +2916,6 @@
     return { sheet, listItems };
   }
 
-  // Channel bar paths, avatar link first, handle command-runs second. The
-  // metadataItems hop is an array; the dotted-path walker reads the first
-  // element owning the key, which is the single channel bar.
   const REEL_CHANNEL_ID_PATHS = [
     'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.decoratedAvatarViewModel.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
     'playerOverlay.reelPlayerOverlayViewModel.metapanel.reelMetapanelViewModel.metadataItems.reelChannelBarViewModel.channelName.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
@@ -3530,11 +2931,6 @@
     };
   }
 
-  // The playing Short: shared helper in paths.js (id from the /shorts/<id>
-  // URL, name from the document title). Used here for menu stamps and tap
-  // resolution — do not redeclare locally.
-
-  // Generic fallback for renderers with menu.menuRenderer.items
   function extractFromGenericRenderer(renderer) {
     let items = getObjectByPath(renderer, 'menu.menuRenderer.items');
     const topLevel = getObjectByPath(renderer, 'menu.menuRenderer.topLevelButtons');
@@ -3581,23 +2977,6 @@
     injectStandardMenuButtons(items, hasChannel, hasVideo, store);
   }
 
-  // Watch-page reel entries: clone a native row and retitle it. The popup's
-  // listItem transformer drops rows whose onTap command it cannot render,
-  // which is what the first synthesized no-op command did — hence injected
-  // entries in data but never on screen. Cloning a native row keeps the
-  // renderable shape, but the borrowed native command must then be
-  // neutralized: tapping a Block row must NOT execute someone else's action
-  // (Description/Save/... opening on a Block tap). The replacement is the
-  // same feedback-only no-op the lockup sheets use (see
-  // overwriteOnTapCommand): silent, no hide — menuOnTap's own block post +
-  // overlay/skip are the whole effect (no toast by design). Skipping
-  // forwardMenuTap alone is not enough, because the row's native handler
-  // fires on its own via the framework click binding. Params stay unique per entry (rows sharing a
-  // command verbatim collapse into the native row under param dedupe), and
-  // each clone is stamped so a cached response filtered twice never
-  // duplicates entries. Icon swapped to the BlockTube action; the blockTube
-  // stamp stays on the sheet (extractReelTopbarMenuFlags) / overlay renderer
-  // (extractFromReelOverlay), not per item.
   function isOurReelEntry(item) {
     try {
       return !!(
@@ -3622,10 +3001,6 @@
     } catch (e) {}
     try {
       const context = vm.rendererContext;
-      // Neutralize the borrowed native command in place: the clone keeps the
-      // renderable row shape, but a Block tap must never run Description /
-      // Save / ... — not via forwardMenuTap and not via the framework's own
-      // click binding either.
       if (context) {
         if (!context.commandContext || typeof context.commandContext !== 'object') {
           context.commandContext = {};
@@ -3657,8 +3032,6 @@
 
     const fresh = [];
     if (isWhitelistMenuMode(store)) {
-      // Whitelist mode: the visible short is already allowlisted, so offer
-      // removal instead of a pointless re-allow.
       if (hasChannel)
         fresh.push(cloneReelMenuItem(template, 'Remove from Whitelist', 'REMOVE', 'unallow'));
     } else {
@@ -3669,7 +3042,6 @@
       if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store))
         fresh.push(cloneReelMenuItem(template, 'Allow Channel', 'CHECK', 'allow'));
     }
-    // Appended to the bottom, after the native rows.
     for (let i = 0; i < fresh.length; i += 1) items.push(fresh[i]);
   }
 
@@ -3683,8 +3055,6 @@
     const blockVideoItem = createLockupButtonItem('Block Video', cleanVideoContext);
 
     if (isWhitelistMenuMode(store)) {
-      // Whitelist mode: the visible cards are already allowlisted, so offer
-      // removal instead of a pointless re-allow.
       const removeChannelItem = createLockupButtonItem(
         'Remove from Whitelist',
         createCleanContext(items, store, true, currentObj, true, true),
@@ -3694,9 +3064,6 @@
       return;
     }
 
-    // Block mode additionally offers allowlisting, so the allowlist can be
-    // built while browsing normally (an empty allowlist hides everything, so
-    // there would be nothing left to allowlist from).
     const allowChannelItem = createLockupButtonItem(
       'Allow Channel',
       createCleanContext(items, store, true, currentObj, true),
@@ -3707,10 +3074,6 @@
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
   }
 
-  // Native-command fast path for real block entries: reuse YouTube's own
-  // feedback item (by leading icon) when block_feedback is on. Allow/remove
-  // entries must never reuse it (it hides the card). Returns the item, or
-  // undefined when no feedback icon matches.
   function findNativeFeedbackItem(items, isChannel) {
     const targetIcons = isChannel ? ['REMOVE', 'DELETE'] : ['NOT_INTERESTED', 'DELETE'];
     for (const icon of targetIcons) {
@@ -3726,8 +3089,6 @@
     return undefined;
   }
 
-  // Toast text for a cloned lockup context: videos always "Video Blocked",
-  // channels depend on allow/remove/whitelist mode.
   function lockupToastMessage(isChannel, forAllow, forRemove, store) {
     if (!isChannel) return 'Video Blocked';
     if (forRemove) return 'Removed from whitelist';
@@ -3735,8 +3096,6 @@
     return 'Channel Blocked';
   }
 
-  // The toast action shown after a cloned block tap (allow/remove entries
-  // execute silently — the hide flag is their only native effect).
   function lockupToastAction(msg) {
     return {
       clickTrackingParams: '',
@@ -3760,9 +3119,6 @@
     };
   }
 
-  // Overwrite a cloned context's onTap with a no-op command carrying only
-  // our feedback (toast + hide flag). Allow entries keep the card in place;
-  // removals and blocks hide it.
   function overwriteOnTapCommand(cleanContext, msg, contentId, forAllow, forRemove) {
     if (cleanContext.commandContext?.onTap) {
       const onTap = cleanContext.commandContext?.onTap;
@@ -3777,13 +3133,8 @@
         feedbackEndpoint: {
           feedbackToken: '',
           uiActions: {
-            // Allow entries keep the card in place; removals and blocks
-            // hide it.
             hideEnclosingContainer: !forAllow || forRemove,
           },
-          // No confirmation popups: allow/remove entries execute silently
-          // (their hide flag above is the only native effect). Real block
-          // entries keep the toast.
           actions: forAllow || forRemove ? [] : [lockupToastAction(msg)],
           contentId,
         },
@@ -3791,10 +3142,6 @@
     }
   }
 
-  // Resolve the card id YouTube's hide-enclosing-container feedback needs.
-  // Regular lockups carry contentId; shorts shelf cards do not (they key on
-  // entityId / the reelWatch videoId instead), so without this fallback the
-  // feedback carries contentId: undefined and the blocked Short stays put.
   function lockupFeedbackContentId(currentObj) {
     if (currentObj && currentObj.contentId !== undefined) return currentObj.contentId;
     if (currentObj && typeof currentObj.entityId === 'string') return currentObj.entityId;
@@ -3812,11 +3159,6 @@
     forAllow = false,
     forRemove = false,
   ) {
-    // Allow/remove entries must never reuse YouTube's native command: it
-    // hides the card (the home-grid removal reported for Allow taps). They
-    // always get a clone with the matching toast and hide flag, regardless
-    // of the block_feedback option. Real block entries keep the identity
-    // fast-path so YouTube's own feedback flow keeps working.
     if (!forAllow && !forRemove && store.options[OPT.BLOCK_FEEDBACK] && items.length > 0) {
       const item = findNativeFeedbackItem(items, isChannel);
       if (item) {
@@ -3876,23 +3218,15 @@
     }
 
     if (allowMode) {
-      // Whitelist mode: the visible cards are already allowlisted, so offer
-      // removal instead of a pointless re-allow (videos can't be allowlisted).
       if (hasChannel) items.push(removeChannelItem);
       return;
     }
 
-    // Block mode additionally offers allowlisting, so the allowlist can be
-    // built while browsing normally (an empty allowlist hides everything, so
-    // there would be nothing left to allowlist from).
     if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
   }
 
-  // Desktop overflow menu: a minimal menuServiceItemRenderer entry appended to
-  // the video's existing overflow menu (endpoint cloned from a feedback item
-  // when block_feedback is on, see injectStandardMenuButtons).
   function createStandardBlockItem(text, iconType = 'NOT_INTERESTED') {
     return {
       menuServiceItemRenderer: {
@@ -3903,7 +3237,6 @@
   }
 
   function deepClone(obj) {
-    // Simple deep clone (for plain objects, no functions/cycles)
     return JSON.parse(JSON.stringify(obj));
   }
 
@@ -3924,13 +3257,6 @@
       isReelOverlay,
     );
 
-    // Reactive renderers re-render on property assignment, not on in-place
-    // array mutation: if the reel popup bound the items array before our push
-    // (eager pre-render), a plain push stays invisible while the data looks
-    // right. Replacing the array reference notifies Polymer (property change)
-    // and Lit-style renderers (property set) alike; lazy readers see the same
-    // contents either way. Shelf sheets render lazily on open, so only the
-    // reel surfaces need this.
     if (attr === 'reelPlayerOverlayRenderer') {
       const menu = getObjectByPath(obj[attr], 'menu.menuRenderer');
       if (menu && Array.isArray(menu.items)) menu.items = menu.items.slice();
@@ -3940,22 +3266,13 @@
       if (list && Array.isArray(list.listItems)) list.listItems = list.listItems.slice();
     }
 
-    // Attach metadata only if needed
     if (hasChannel || hasVideo) {
       obj[attr]._btOriginalAttr = attr;
     }
   }
 
-  // Our own toast layer. The legacy yt-action dispatch below no longer
-  // surfaces a visible toast on current YouTube, so taps that relied on it
-  // confirmed with no feedback at all (the "Channel Allowed" seen on some
-  // surfaces comes from the executed menu command itself — a different
-  // system). This fixed-position div is styled property-by-property through
-  // CSSOM only (no <style>, no innerHTML), so page CSP and Trusted Types
-  // stay out of the way; pointer-events:none so it can never swallow clicks.
   let toastTimer = 0;
 
-  // Create the toast div (see constraints above).
   function createToastElement() {
     const el = document.createElement('div');
     el.id = 'blocktube-toast';
@@ -3979,8 +3296,6 @@
     return el;
   }
 
-  // Resolve the toast div, creating it on first use. Null when the DOM
-  // offers no way to look it up or build it.
   function resolveToastElement() {
     if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
       return null;
@@ -3992,8 +3307,6 @@
     return createToastElement();
   }
 
-  // Show the message, then hide it after `duration`. Timer handles are
-  // guarded: exotic page realms may lack them.
   function displayToastMessage(el, msg, duration) {
     el.textContent = msg;
     el.style.display = 'block';
@@ -4012,8 +3325,6 @@
   }
 
   function openToast(msg, duration) {
-    // Guaranteed feedback first; the legacy dispatch below is a harmless
-    // no-op wherever YouTube no longer listens for it.
     try {
       showDomToast(msg, duration);
     } catch (e) {}
@@ -4022,8 +3333,6 @@
     } catch (e) {}
   }
 
-  // The openPopupAction payload for a legacy toast: duration + message text
-  // rendered as a notificationActionRenderer popup.
   function buildToastPopupAction(msg, duration) {
     return {
       openPopupAction: {
@@ -4044,9 +3353,6 @@
     };
   }
 
-  // The yt-open-popup-action TOAST event payload for a message, dispatched
-  // on the ytd-app element (a harmless no-op where YouTube no longer
-  // listens — see showDomToast for the guaranteed feedback path).
   function buildLegacyToastEvent(msg, duration, ytdApp) {
     return new CustomEvent('yt-action', {
       bubbles: true,
@@ -4068,8 +3374,6 @@
     ytdApp.dispatchEvent(buildLegacyToastEvent(msg, duration, ytdApp));
   }
 
-  // Map a mobile menu action to its block-list type. Undefined for unknown
-  // actions (the tap is ignored).
   function mobileActionToBlockType(menuAction) {
     switch (menuAction) {
       case 'block_channel': {
@@ -4089,18 +3393,13 @@
     }
   }
 
-  // Mobile video-page taps confirm with an alert and stop playback for
-  // blocks/removals. Allowlists keep playback going.
   function confirmSlimVideoTap(type) {
-    // Allowlists keep playback going; blocks and removals stop it.
     if (type !== 'whitelist') document.getElementById('movie_player').stopVideo();
     const noun = type === 'videoId' ? 'Video' : 'Channel';
     const verb = type === 'whitelist' ? 'Allowed' : type === 'unwhitelist' ? 'Removed' : 'Blocked';
     alert(`${noun} ${verb}`);
   }
 
-  // Runtime comment filtering mirrors the blacklist path only: allowlist
-  // taps must never push the commenter into the channelId blacklist.
   function filterCommentRuntime(type, data) {
     if (type === 'channelId' && data._btOriginalAttr === 'commentRenderer') {
       const comments = document.querySelector('ytm-section-list-renderer');
@@ -4152,11 +3451,8 @@
     return { isDataFromRightHandSide, menuAction };
   }
 
-  // Video-player tags whose menu blocks the now-playing video + channel.
   const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
 
-  // Resolve channel/video from the now-playing player + owner renderers. The
-  // owner id joins the player id when they disagree (collab/featured cases).
   function playerMenuBlockData() {
     const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
     const playerData = pageManager.data || pageManager.getCurrentData();
@@ -4189,16 +3485,8 @@
     };
   }
 
-  // Resolve channel/video from the blockTube metadata stamped on lockup menus
-  // (right-hand/recommended context carries no _btOriginalAttr).
   function stampedMenuBlockData(parentData) {
     const isWatch = parentData.blockTube?.metadata?.isWatch === true;
-    // Watch taps resolve the video live from the URL: the stamp is written at
-    // inject time, when a prefetched reel's response arrives while the URL
-    // still shows the previous short — reading it then would block the wrong
-    // video. The open sheet always belongs to the on-screen short, so the
-    // live read is exact. The channel still comes from the stamp (the channel
-    // bar is correct per reel even in prefetches).
     let videoData = {
       id: parentData.blockTube?.metadata?.videoId,
       text: parentData.blockTube?.metadata?.videoName,
@@ -4220,7 +3508,6 @@
     };
   }
 
-  // Resolve channel/video through the rule paths for the menu's renderer.
   function ruleMenuBlockData(parentData) {
     const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
     return {
@@ -4233,8 +3520,6 @@
     };
   }
 
-  // Map a desktop menu label to its block-list type + payload. Null for
-  // unknown labels (the tap is ignored).
   function menuLabelToBlockTarget(menuAction, channelData, videoData) {
     switch (menuAction) {
       case 'Block Channel':
@@ -4251,7 +3536,6 @@
   }
 
   function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
-    // Video player context menu
     let resolved;
     if (PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
       resolved = playerMenuBlockData();
@@ -4273,10 +3557,7 @@
     };
   }
 
-  // Right-hand (recommended) context: traverse 4 levels up, then read the
-  // symbol-keyed component data. Empty object when any hop is missing.
   function getRecommendedParentData(element) {
-    // Traverse 4 levels up to find the parent DOM
     const parentDom = element?.parentElement?.parentElement?.parentElement?.parentElement;
 
     if (!parentDom) {
@@ -4299,10 +3580,7 @@
     return { parentDom, parentData: parentDomData[parentDomSymbols[0]]?.value };
   }
 
-  // Standard context: find the eventSink across the known Polymer/dataHost
-  // paths, then resolve the parent component. Empty object when missing.
   function findEventSink(element) {
-    // Try to find eventSink in multiple paths without using intermediate variable
     return (
       getObjectByPath(
         element.parentElement?.parentElement,
@@ -4314,8 +3592,6 @@
     );
   }
 
-  // Standard context parent from the eventSink: component, host element, or
-  // grandparent — whichever resolves first. Empty object when data is missing.
   function getEventSinkParentData(element) {
     const eventSink = findEventSink(element);
     if (!eventSink) {
@@ -4343,9 +3619,6 @@
     return getEventSinkParentData(element);
   }
 
-  // `message` is the inline placeholder left where the card was: "Blocked"
-  // for blocks, "Removed from whitelist" for removals. Allow entries never
-  // reach this helper — the card stays in place and only a toast confirms.
   function removeParentHelper(isDataFromRightHandSide, parentDom, message = 'Blocked') {
     if (['YTD-BACKSTAGE-POST-RENDERER', 'YTD-POST-RENDERER'].includes(parentDom.tagName)) {
       parentDom.parentNode.remove();
@@ -4369,8 +3642,6 @@
     }
   }
 
-  // Desktop menu labels that carry a block/allow action. Anything else is a
-  // native entry — prevent the tap-through and ignore it.
   const MENU_TAP_ACTIONS = [
     'Block Channel',
     'Block Video',
@@ -4378,18 +3649,10 @@
     'Remove from Whitelist',
   ];
 
-  // Menu-tap types that take the card off the page (allow taps keep it so it
-  // can be watched right away).
   function isCardRemovingTap(type) {
     return type === 'channelId' || type === 'videoId' || type === 'unwhitelist';
   }
 
-  // No toast on Shorts taps by design: the disappearing card (shelf) and the
-  // reason panel + auto-advance (watch) are the whole feedback.
-
-  // Best-effort pause of the reel player after blocking the playing Short
-  // (the watch-page equivalent of stopVideo on regular watch pages). The
-  // first <video> on /shorts/ is the reel itself.
   function pauseReelPlayer() {
     try {
       if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
@@ -4400,15 +3663,6 @@
     } catch (e) {}
   }
 
-  // Shorts shelf cards have no native hide affordance — their sheet holds
-  // only items like "Add to queue" / "Send feedback", so the cloned feedback
-  // command that dismisses lockup cards leaves a Shorts card in place.
-  // Dismiss it from the DOM instead: the card links to /shorts/<videoId>, so
-  // the grid item wrapping that link gets the same "Blocked" placeholder the
-  // other surfaces show, plus display:none so the card is gone even where the
-  // placeholder mechanism does not render. Fail-open throughout: any miss
-  // leaves the card for the next data load, which the just-added filter entry
-  // already covers.
   const SHORTS_CARD_SELECTORS = [
     'ytd-rich-item-renderer',
     'yt-lockup-view-model',
@@ -4423,8 +3677,6 @@
     }
     let links = null;
     try {
-      // Video ids are [A-Za-z0-9_-]-only, so interpolation cannot break out
-      // of the attribute selector.
       links = document.querySelectorAll(`a[href*="/shorts/${videoId}"]`);
     } catch (e) {
       return;
@@ -4442,11 +3694,6 @@
     }
   }
 
-  // Inline "Blocked" placeholder for a Shorts card, mirroring what regular
-  // video cards show (removeParentHelper's dismissedRenderer): the card keeps
-  // its grid slot with a muted box instead of vanishing silently. The box is
-  // built node-by-node through CSSOM (no innerHTML), so page CSP and Trusted
-  // Types stay out of the way — the same constraint as the toast layer above.
   function leaveShortsBlockedPlaceholder(card, message) {
     let height = 0;
     try {
@@ -4469,23 +3716,15 @@
     if (card.style) card.style.display = '';
   }
 
-  // Apply the visible effect of a desktop menu tap: removals replace the card
-  // with a placeholder, blocks do the same, allow taps keep the card in place
-  // so it can be watched right away (the storage write is the whole effect).
   function applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom) {
-    // No confirmation popups by design: allow taps keep the card in place so
-    // it can be watched right away, and removals already replace the card
-    // itself — the storage write above is the whole visible effect.
     if (type === 'unwhitelist') {
       if (removeParent) {
-        // Remove correct component based on parentDom
         removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
       } else if (stopPlayer) {
         document.getElementById('movie_player').stopVideo();
       }
     } else if (type !== 'whitelist') {
       if (removeParent) {
-        // Remove correct component based on parentDom
         removeParentHelper(isDataFromRightHandSide, parentDom);
       } else if (stopPlayer) {
         document.getElementById('movie_player').stopVideo();
@@ -4493,8 +3732,6 @@
     }
   }
 
-  // Forward the tap to YouTube's own handler when the menu entry carries a
-  // service endpoint (native feedback flow).
   function forwardMenuTap(event) {
     if (this.data.serviceEndpoint) {
       if (this.onTap) this.onTap(event);
@@ -4520,10 +3757,8 @@
       return;
     }
 
-    // Get the parent dom and data from this
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
-    // Get the data and type which is used for blocking the video
     const { type, data, removeParent, stopPlayer, isShorts, isWatch } = getBlockData(
       parentDom,
       parentData,
@@ -4531,19 +3766,10 @@
       menuAction,
     );
 
-    // Notify system what data should be added to the block list. Shorts taps
-    // carry their provenance along: the options-page entry then reads
-    // "Blocked by short context menu" instead of "context menu", so the
-    // surface a block came from stays visible.
     const blockInfo = isShorts || isWatch ? { ...data, via: 'shorts' } : data;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
-    // Shorts taps can resolve through the stamped sheet path (isShorts) or,
-    // when the tapped item renders a single formatted string, the generic rule
-    // path via _btOriginalAttr — both must confirm and dismiss. The id lands
-    // in the block list either way, which is why a tap can "work" yet leave
-    // the card up with no feedback when only the stamp is checked.
     const isShortsTap = isShorts || parentData?._btOriginalAttr === 'shortsLockupViewModel';
     if (isShortsTap && isCardRemovingTap(type)) {
       if (isWatch) {
@@ -4555,23 +3781,9 @@
         );
       }
     }
-    // Forward the tap to YouTube's own handler, except on the Shorts watch
-    // page: reel entries clone a native row purely so the popup renders them,
-    // and their command is neutralized at clone time — but never execute
-    // anything borrowed here, so a Block tap can never open
-    // Description/Save/... .
     if (!isWatch) forwardMenuTap.call(this, event);
   }
 
-  // Visible effect of blocking the playing Short: the menu tap lands after
-  // the player response already played, so the filter path (disablePlayer →
-  // overlay + skip) never runs for it. Reproduce it here: pause first (audio
-  // stops at once), paint the reason panel over the player root, then arm
-  // the same auto-advance sweep a filtered response would. When skip is off
-  // or capped, the pause + panel are the whole effect — the short stays put
-  // but covered and silent instead of playing on. Fail-open throughout.
-  // Called only for card-removing taps (channelId/videoId/unwhitelist — see
-  // isCardRemovingTap above), so allow taps never reach here.
   function applyWatchBlockEffect(type, data, parentData) {
     try {
       pauseReelPlayer();
@@ -4609,9 +3821,6 @@
     } catch (e) {}
   }
 
-  // Video id of a shelf Shorts tap for the dismissal lookup: stamped metadata
-  // first; on the rule branch re-resolve through the Shorts rule (a Block
-  // Video tap already carries it as its payload).
   function shortsTapVideoId(parentData, type, data) {
     const stamped = parentData?.blockTube?.metadata?.videoId;
     if (typeof stamped === 'string' && stamped.length > 0) return stamped;
@@ -4625,53 +3834,13 @@
 
   // ================== src/scripts/inject/shorts-overlay.js ==================
 
-  // Blocked-Shorts overlay: one full-size reason panel anchored to the Shorts
-  // media host (reel renderer preferred, `#shorts-player` fallback).
-  // Earlier versions anchored to the <video> rect (v1: first-paint offset and
-  // z-fighting with YouTube's own error layers) or with an overscan margin
-  // (v2: bled over the masthead/search bar); this version uses no rect math,
-  // no scroll/resize sync — an inset-0 child of the host tracks it. Anchor
-  // one level above the Shorts player root: the main reel renderer
-  // (`ytd-reel-video-renderer#reel-video-renderer`), else the reel the player
-  // sits in, else `#shorts-player` itself
-  // (the WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_SHORTS rootElementId). YouTube
-  // keeps the player root in a separate subtree from the reel and lays the
-  // video layer out of sync with it on some layouts, so an inset-0 child of
-  // the player root alone inherits that offset gap; the reel spans the whole
-  // shorts column (player area included), so the same inset-0 panel covers
-  // the gap. No rect math, no scroll/resize sync, nothing above the reel
-  // ever covered. (The reel carries no is-active attribute — match by id.)
-  //
-  // Paint is retried briefly when the host is not in the DOM yet (player
-  // responses and SPA landings can precede the element upgrade), so a missed
-  // first attempt shows the panel ~150ms later instead of never.
-  //
-  // Deliberately reason-only: no Block/Next buttons on the panel (a blocked
-  // video needs no affordances — the skip sweep autoplays next, and
-  // Block Channel / Block Video belong in the reel `...` menu). The
-  // panel shows what filter blocked the short (getBlockMessage, rule
-  // included) until the sweep navigates away.
-  //
-  // Exotic realms without DOM/timers never paint. Fail-open throughout.
-
-  // Last blocked Short, captured in disablePlayer before it wipes the player
-  // response (the overlay paint below keys on it).
   let lastShortsBlock = null;
-  // Every blocked Short by videoId (reason line), so swiping away and back
-  // repaints the panel even though lastShortsBlock above now holds a
-  // prefetched id. Bounded (insertion-ordered eviction) like
-  // shortsSkipFiredIds, so a long session cannot grow it without limit.
   let shortsBlockedOverlays = new Map();
   const SHORTS_BLOCKED_MAP_CAP = 100;
   let shortsOverlayEl = null;
   let shortsOverlaySyncTimer = 0;
-  // Pending-paint retry while the host is not in the DOM yet (see
-  // shortsOverlaySchedulePaintRetry). Cleared on paint, teardown, or expiry.
   let shortsOverlayPendingTimer = 0;
-  // Pending-retry ticks before the paint may fall back to the player root
-  // (~150ms each: ~0.9s of waiting for the reel to upgrade first).
 
-  // Remember one blocked Short's reason. Never throws.
   function rememberShortsBlock(videoId, message) {
     try {
       if (typeof videoId !== 'string' || videoId.length === 0) return;
@@ -4683,9 +3852,6 @@
     } catch (e) {}
   }
 
-  // Attribution of a blocked player response, across the ytPlayer rule shapes
-  // (player response root, embed/player-config args). The video id drives the
-  // overlay lifecycle; the message carries the reason line.
   function blockedPlayerAttribution(ytData) {
     const videoId = blockedPlayerVideoId(ytData);
     const channelId =
@@ -4700,10 +3866,6 @@
     return { videoId, channelId, channelName, title };
   }
 
-  // Walk from a node up to its enclosing `ytd-reel-video-renderer`, if any.
-  // closest() alone is not enough: it stops at shadow-root boundaries, and
-  // the player may sit inside one — so also step out through getRootNode()
-  // hosts (bounded). Null when unreachable. Never throws.
   function shortsOverlayReelFrom(node) {
     try {
       if (node && typeof node.closest === 'function') {
@@ -4735,14 +3897,6 @@
     return null;
   }
 
-  // Reel-only host lookup (no player-root fallback): the reel the player
-  // itself sits in (authoritative where the layouts nest it), then the main
-  // reel renderer by id (the player lives in a separate subtree and the reel
-  // carries no is-active attribute, so neither closest nor [is-active]
-  // reaches it), then any reel renderer. Null until the reel upgrades into
-  // the DOM. First paint waits for this (see shortsOverlayPaintCurrent) so
-  // the panel appears once at full size instead of flashing small on the
-  // player root and jumping a tick later.
   function shortsOverlayReelHost() {
     try {
       if (typeof document === 'undefined') return null;
@@ -4772,9 +3926,6 @@
     }
   }
 
-  // The player root fallback, for layouts where no reel ever appears. Paint
-  // reaches it only after the reel grace period below — never first — so the
-  // common case stays a single full-size paint.
   function shortsOverlayPlayerHost() {
     try {
       if (typeof document === 'undefined') return null;
@@ -4787,9 +3938,6 @@
     }
   }
 
-  // Full host chain for the sweep tick (reel preferred, player fallback).
-  // First paint resolves the reel itself — see shortsOverlayPaintCurrent.
-  // Null when the DOM offers no lookup.
   function shortsOverlayHost() {
     try {
       return shortsOverlayReelHost() || shortsOverlayPlayerHost();
@@ -4798,8 +3946,6 @@
     }
   }
 
-  // Still on the blocked Short? The overlay lives only there; any navigation
-  // (skip-fired or manual) tears it down.
   function shortsOverlayStillCurrent() {
     try {
       if (!lastShortsBlock || typeof lastShortsBlock.videoId !== 'string') return false;
@@ -4809,12 +3955,6 @@
     }
   }
 
-  // The short on screen: shared currentShortsId() in paths.js (single
-  // SHORTS_ID_RE for all fragments) — do not redeclare locally.
-
-  // Style a node property-by-property through CSSOM only (no <style>, no
-  // innerHTML), so page CSP and Trusted Types stay out of the way — the same
-  // constraint as the toast layer in context-menu.js.
   function shortsOverlayStyle(el, props) {
     try {
       const style = el.style;
@@ -4822,9 +3962,6 @@
     } catch (e) {}
   }
 
-  // The player root must establish a positioning context for the absolute
-  // inset-0 panel. It already is positioned on stock YouTube; only touch it
-  // when it provably is not, and never throw.
   function shortsOverlayEnsureHostPositioned(host) {
     try {
       let position = null;
@@ -4837,9 +3974,6 @@
     } catch (e) {}
   }
 
-  // Collect DOM nodes for a selector as a plain array. Shared by the
-  // video/sequence-thumb lookups below (same fail-open traversal).
-  // Fail-open throughout; exotic realms without DOM do nothing.
   function shortsOverlayQueryNodes(selector) {
     try {
       if (typeof document === 'undefined') return [];
@@ -4856,11 +3990,6 @@
     }
   }
 
-  // Every <video> YouTube may already have decoding the blocked Short. The
-  // player response ships playable streams with status OK (ytInitialPlayer
-  // Response carries streamingData + thumbnails), and the reel host upgrades
-  // after the response, so the reason panel alone leaves the first frame
-  // visible. Hiding the element shows the black container behind it instead.
   function shortsOverlayVideoNodes() {
     try {
       return shortsOverlayQueryNodes('video');
@@ -4869,10 +3998,6 @@
     }
   }
 
-  // The upcoming-short strip renders each preload as a plain div with the
-  // frame baked in as a CSS background-image
-  // (.reel-video-in-sequence-thumbnail): no video, no img, invisible to the
-  // video hide above. Same hide-until-verdict protocol.
   function shortsOverlaySequenceThumbNodes() {
     try {
       return shortsOverlayQueryNodes('.reel-video-in-sequence-thumbnail');
@@ -4881,9 +4006,6 @@
     }
   }
 
-  // Hide the current Short's frame at once (pause stops audio too), plus the
-  // preloaded strip thumbnails (they may already show a blocked next short).
-  // Runs before/with the panel paint, which may wait for the reel to upgrade.
   function shortsOverlayBlankVideo() {
     const nodes = shortsOverlayVideoNodes();
     for (let i = 0; i < nodes.length; i += 1) {
@@ -4902,8 +4024,6 @@
     }
   }
 
-  // Reveal again on teardown (navigation away, unblocked landing). Never
-  // autoplays — just restores the stylesheet default.
   function shortsOverlayUnblankVideo() {
     const nodes = shortsOverlayVideoNodes().concat(shortsOverlaySequenceThumbNodes());
     for (let i = 0; i < nodes.length; i += 1) {
@@ -4913,14 +4033,6 @@
     }
   }
 
-  // First-frame hiding protocol (shared with the seed.js guard, which carries
-  // its own copy: seed.js runs before this bundle exists, so it cannot call
-  // these — keep the two in sync: attr names, cover z-index below the reason
-  // panel's 2147483647, and the verdict shape on window.__blockTubeShortsVerdict).
-  // Every Shorts media host gets a black cover div on appearance; covers lift
-  // on a clean verdict and stay under the reason panel on a blocked one.
-  // data-bt-cover: a black cover div planted on a Shorts media host.
-  // data-bt-revealed: the host's short earned a clean verdict; never re-cover.
   function shortsOverlayCoverHost(host) {
     try {
       if (!host || typeof host.querySelector !== 'function') return;
@@ -4950,8 +4062,6 @@
     } catch (e) {}
   }
 
-  // Every Shorts media host currently in the DOM (prefetched neighbours
-  // included — the same host set the seed.js guard covers).
   function shortsOverlayAllHosts() {
     const hosts = [];
     try {
@@ -4967,9 +4077,6 @@
     return hosts;
   }
 
-  // Shorts media hosts holding the short on screen: the reel (preferred, the
-  // same host the reason panel anchors to) plus the player root. Cover lifts
-  // are scoped to these so prefetched neighbours stay covered until swiped to.
   function shortsOverlayCurrentHosts() {
     const hosts = [];
     try {
@@ -4983,8 +4090,6 @@
     return hosts;
   }
 
-  // Record this short's verdict for the seed.js guard (which skips covering
-  // hosts of a short with a clean verdict) and for the no-verdict fail-safe.
   function shortsOverlayRecordVerdict(videoId, clean) {
     try {
       if (typeof videoId === 'string' && videoId.length > 0) {
@@ -4993,9 +4098,6 @@
     } catch (e) {}
   }
 
-  // Drop the black covers from the current hosts and mark them revealed so
-  // the still-connected guard never re-covers them (neighbour reels keep
-  // theirs until their own verdict or landing). Never throws.
   function shortsOverlayRevealPrehide() {
     const hosts = shortsOverlayCurrentHosts();
     for (let i = 0; i < hosts.length; i += 1) {
@@ -5020,10 +4122,6 @@
     shortsOverlayUnblankVideo();
   }
 
-  // Swipe-start counterpart to the reveal above: re-cover every unrevealed
-  // host now, so the landing decision (keep for blocked, lift for clean)
-  // never races a paint. Needed for pre-rendered neighbours that already
-  // exist — the seed observer only covers hosts on insertion.
   function shortsOverlayEnsureCovers() {
     const hosts = shortsOverlayAllHosts();
     for (let i = 0; i < hosts.length; i += 1) {
@@ -5033,10 +4131,6 @@
     }
   }
 
-  // New short, undecided again: drop the old verdict, re-cover, and re-blank
-  // (pausing the departing short). Only on Shorts pages — pausing videos
-  // anywhere else would brick playback with no Shorts verdict coming to
-  // restore it. Never throws.
   function shortsOverlayNavigateStart() {
     try {
       window.__blockTubeShortsVerdict = null;
@@ -5054,10 +4148,6 @@
     } catch (e) {}
   }
 
-  // A landing with no blocked paint target is a clean short: lift its covers
-  // (its verdict may have arrived as a prefetch whose paint was correctly
-  // skipped). Blocked landings keep their covers under the repainted panel.
-  // True when revealed. Never throws.
   function shortsOverlayLandingReveal() {
     try {
       if (shortsOverlayHasPaintTarget()) return false;
@@ -5070,9 +4160,6 @@
     }
   }
 
-  // Lift the covers when this player response is a clean verdict for the
-  // short on screen. One-line call for the filter paths (initial response,
-  // /player); blocked and off-screen verdicts no-op. Never throws.
   function maybeRevealShortsPrehide(ytData) {
     try {
       if (shortsOverlayVerdictIsCleanCurrent(ytData)) {
@@ -5082,9 +4169,6 @@
     } catch (e) {}
   }
 
-  // True when the player response is a clean verdict for the short on screen.
-  // Strict on identity: a clean prefetch for another short must not reveal
-  // the current one. Fail-open otherwise.
   function shortsOverlayVerdictIsCleanCurrent(ytData) {
     try {
       if (playerHasBeenBlocked) return false;
@@ -5096,8 +4180,6 @@
     }
   }
 
-  // Build the reason-only overlay node for the current lastShortsBlock. Null
-  // when the DOM offers no way to build it.
   function shortsOverlayBuild() {
     const block = lastShortsBlock;
     if (!block) return null;
@@ -5123,8 +4205,6 @@
     });
 
     const panel = document.createElement('div');
-    // Fixed width (not shrink-to-fit): a menu tap ("Channel Blocked") and a
-    // filter block (long rule-carrying reason) must render the same panel.
     shortsOverlayStyle(panel, {
       width: '80%',
       maxWidth: '80%',
@@ -5157,9 +4237,6 @@
     return root;
   }
 
-  // Tear the overlay down: landing reconcile (yt-navigate-finish), an
-  // unblocked landing found by the sweep tick, or a new block replacing it.
-  // Also drops the pending-paint retry (it belongs to the old video).
   function removeShortsOverlay() {
     try {
       if (shortsOverlaySyncTimer && typeof clearInterval === 'function') {
@@ -5177,10 +4254,6 @@
     shortsOverlayUnblankVideo();
   }
 
-  // Sweep tick: gone elsewhere → teardown (true). Host changed or panel
-  // dropped from the host (late upgrade, YouTube re-render) → move it to the
-  // current host. Otherwise nothing to do — inset 0 tracks the reel without
-  // any rect sync.
   function shortsOverlayTick() {
     if (!shortsOverlayStillCurrent()) {
       removeShortsOverlay();
@@ -5190,8 +4263,6 @@
     try {
       const host = shortsOverlayHost();
       if (host && shortsOverlayEl.parentNode !== host) {
-        // Safety net for the player-root fallback (or a YouTube re-render
-        // dropping the panel): migrate it up once the reel arrives.
         shortsOverlayEnsureHostPositioned(host);
         host.appendChild(shortsOverlayEl);
       }
@@ -5199,7 +4270,6 @@
     return false;
   }
 
-  // Drop the pending-paint retry timer. Never throws.
   function shortsOverlayClearPending() {
     try {
       if (shortsOverlayPendingTimer && typeof clearInterval === 'function') {
@@ -5211,10 +4281,6 @@
 
   const SHORTS_REEL_GRACE_TRIES = 6;
 
-  // True when the short on screen has a panel to show: it is the last
-  // blocked Short, or a remembered blocked one (swipe away and back). The
-  // pending-paint retry keys on this so it does not give up on a remembered
-  // short just because the last attribution belongs to a prefetch.
   function shortsOverlayHasPaintTarget() {
     try {
       if (shortsOverlayStillCurrent()) return true;
@@ -5225,11 +4291,6 @@
     }
   }
 
-  // The paint call sites (player response, SPA landing) can run before the
-  // reel container upgrades into the DOM; a single-shot lookup then misses
-  // and nothing retries, so the panel shows late or never. Retry briefly:
-  // every 150ms for ~3s, stopping on paint, navigation away, or expiry.
-  // Fail-open throughout; at most one pending timer at a time.
   function shortsOverlaySchedulePaintRetry() {
     if (shortsOverlayPendingTimer) return;
     if (typeof setInterval !== 'function') return;
@@ -5242,8 +4303,6 @@
         painted = shortsOverlayEl !== null;
         stale = !shortsOverlayHasPaintTarget();
         if (!painted && !stale) {
-          // Past the reel grace period the paint may use the player-root
-          // fallback, so layouts without a reel still end up covered.
           shortsOverlayPaintCurrent(tries >= SHORTS_REEL_GRACE_TRIES);
           painted = shortsOverlayEl !== null;
         }
@@ -5254,17 +4313,6 @@
     }, 150);
   }
 
-  // Paint the stored block when it is the short on screen and no panel is
-  // up. No-op otherwise (wrong video, off-shorts, no host, already painted).
-  // Entry point for both the player-response path below and the
-  // yt-navigate-finish hook: prefetched shorts store their attribution
-  // before the swipe lands, and the landing paints them. A swipe away and
-  // back also repaints: the last attribution may belong to a prefetched id
-  // by then, so fall back to the remembered per-video map.
-  // `allowFallback` permits the player-root host: direct call sites omit it
-  // (reel only — a small-first paint that migrates up a tick later is the
-  // two-step flicker this avoids), while the pending retry passes true past
-  // the grace period so reel-less layouts still get covered.
   function shortsOverlayPaintCurrent(allowFallback) {
     if (shortsOverlayEl) {
       shortsOverlayClearPending();
@@ -5286,8 +4334,6 @@
       }
       lastShortsBlock = remembered;
     }
-    // The panel may wait for the reel to upgrade (retry below); the video
-    // element exists already, so hide its frame now rather than with the paint.
     shortsOverlayBlankVideo();
     let host = null;
     try {
@@ -5303,8 +4349,6 @@
       }
     }
     if (!host) {
-      // Reel not upgraded yet (or exotic realm): retry briefly rather
-      // than dropping the paint — the skip sweep still advances meanwhile.
       shortsOverlaySchedulePaintRetry();
       return;
     }
@@ -5342,11 +4386,6 @@
     }, 250);
   }
 
-  // Store a blocked Short's attribution + reason, painting only when it is
-  // the short on screen. Player responses also arrive for prefetched (not yet
-  // watched) shorts: painting those immediately would cover the wrong video
-  // and get torn down on swipe with nothing repainting the landed short, so
-  // they store only — the navigate-finish hook paints on landing.
   function showBlockedShortOverlay(attribution, message) {
     if (
       !attribution ||
@@ -5367,14 +4406,8 @@
       videoName: attribution.title,
       message,
     };
-    // Remember every blocked Short (not just the current one) so a swipe
-    // away and back still repaints the panel — see shortsOverlayPaintCurrent.
     rememberShortsBlock(attribution.videoId, message);
-    // A prefetch for another short must not disturb the current panel.
     if (currentShortsId() !== attribution.videoId) return;
-    // Decided for the short on screen: blocked. Record it for the seed.js
-    // guard (covers stay) and the no-verdict fail-safe, then paint (which
-    // blanks the video frame itself, including on the deferred-retry path).
     shortsOverlayRecordVerdict(attribution.videoId, false);
     removeShortsOverlay();
     shortsOverlayPaintCurrent();
@@ -5382,42 +4415,9 @@
 
   // ================== src/scripts/inject/comment-dom.js ==================
 
-  // Comment `...` menu entries (DOM layer).
-  //
-  // Why this exists: YouTube's new comments architecture splits comment data
-  // across a ViewModel (reference key only) and frameworkUpdates mutations
-  // (the actual commentEntityPayload). The `...` popup for those comments is
-  // built client-side, so there is no intercepted JSON menu to inject a
-  // "Block Channel" entry into — the native popup only offers Report. The
-  // legacy commentRenderer JSON injection in context-menu.js stays for old
-  // renderers; this DOM layer covers the new UI regardless of renderer.
-  //
-  // What it does: remembers which comment's `...` was pressed, then when
-  // YouTube's popup menu opens, builds BlockTube entries right after the
-  // native Report entry (Block Channel / Allow Channel, or Remove from
-  // Whitelist in whitelist mode). Entries are real navigation-item elements
-  // with text/icon bound through `data`, so they render exactly like the
-  // native one, with no <style> and no innerHTML — page CSP and Trusted
-  // Types stay out of the way. Tapping an entry posts the same
-  // CONTEXT_BLOCK_DATA the JSON menus post and leaves a placeholder note
-  // where the thread was (no toast).
-  //
-  // Identity: the filter pass sees every commentEntityPayload before it
-  // renders (author.channelId + properties.commentId), so it records a
-  // commentId -> channel map (see rememberCommentAuthor, called from
-  // object-filter.js). Menu taps join the pressed comment's commentId /
-  // commentKey against that map, falling back to component data and the
-  // rendered author link.
-
-  // commentId -> { id, text }. Populated while filtering (pre-render), read
-  // when a menu entry is tapped. Reset past a few thousand entries so long
-  // comment sessions cannot grow it without bound.
   let commentAuthorById = {};
   let commentAuthorCount = 0;
 
-  // Record one entity payload's author for later menu taps. Called from
-  // matchFilterProperties (the caller wraps it in try/catch, so realms
-  // without this fragment keep working). Never throws.
   function rememberCommentAuthor(payload) {
     try {
       if (!payload || typeof payload !== 'object') return;
@@ -5438,10 +4438,6 @@
     } catch (e) {}
   }
 
-  // Author identity out of a comment element's component data. Tries the
-  // legacy renderer shape first, then the entity-payload shape the new UI
-  // resolves into component props, then a bare commentId for callers that
-  // join it against the filter-time map. Never throws.
   function resolveCommentChannelFromData(data) {
     if (!data || typeof data !== 'object') return {};
     const out = {};
@@ -5462,9 +4458,6 @@
     return out;
   }
 
-  // Component data off a rendered element: Polymer nodes expose `data`
-  // directly, some views only via getCurrentData(), others stash it on the
-  // __dataHost chain. First hit wins; anything else is an empty object.
   function commentElementData(el) {
     if (!el || typeof el !== 'object') return {};
     if (el.data && typeof el.data === 'object') return el.data;
@@ -5479,10 +4472,6 @@
     return {};
   }
 
-  // Last-resort identity from the rendered author link. A /channel/UC… href
-  // carries the id directly; a /@handle href only names the author (the
-  // tap then reports that it cannot resolve the id instead of blocking
-  // the wrong channel).
   function commentChannelFromLink(el) {
     if (!el || typeof el.querySelector !== 'function') return {};
     let anchor = null;
@@ -5504,9 +4493,6 @@
     return {};
   }
 
-  // Candidate lookup ids for the filter-time map: rendered commentId
-  // fields plus commentKey forms (older clients key entities as
-  // `comment_entity_<id>`, so the stripped key joins directly).
   function commentLookupIds(el, data) {
     const ids = [];
     const push = (v) => {
@@ -5533,8 +4519,6 @@
     return ids;
   }
 
-  // Full identity resolution for one comment element: component data
-  // first, the filter-time map second, the rendered author link last.
   function resolveCommentChannel(el) {
     const data = commentElementData(el);
     const fromData = resolveCommentChannelFromData(data);
@@ -5554,9 +4538,6 @@
     return fromData;
   }
 
-  // The thread root owning a comment node: blocking removes the whole
-  // thread (replies with it), mirroring removeParentHelper's
-  // YTD-COMMENT-THREAD-RENDERER branch.
   function commentThreadRoot(el) {
     if (!el) return null;
     try {
@@ -5568,11 +4549,6 @@
     return el;
   }
 
-  // Live comment text color for the placeholder note, sampled BEFORE the
-  // thread is wiped. Sampling #content-text (else the comment node itself)
-  // matches the surrounding comments by construction, in any theme and
-  // under recolor extensions; the yt-spec token is the fallback. Never
-  // throws (empty string on any failure — the caller falls back).
   function btSampleCommentTextColor(commentEl) {
     try {
       let ref = commentEl;
@@ -5589,12 +4565,6 @@
     return '';
   }
 
-  // Drop the thread owning a comment node, leaving a placeholder note in
-  // its place (mirrors blocked videos keeping a "Blocked" card instead of
-  // vanishing). The note is pinned to the sampled text color: it sets no
-  // color of its own, so it inherited whatever the emptied root computed —
-  // black in the field report's dark-theme context. Falls back to plain
-  // removal when the placeholder cannot be built.
   function placeholderCommentThread(commentEl, message) {
     const root = commentThreadRoot(commentEl);
     if (!root) return;
@@ -5617,24 +4587,15 @@
     }
   }
 
-  // The comment whose `...` was last pressed, with a timestamp. Opened
-  // popups are matched to it by freshness (see the TTL below) and by
-  // on-screen proximity to the anchor.
   let lastCommentMenuAnchor = null;
   const COMMENT_MENU_ANCHOR_TTL_MS = 5000;
 
-  // One tap's block routing: the menu entry type plus the resolved
-  // channel. A null channel toasts instead of posting — the content
-  // script drops id-less blocks, so posting would be a silent no-op.
   function commentMenuTapTarget(anchorEl, type) {
     const channel = resolveCommentChannel(anchorEl);
     if (!channel.id) return { anchorEl, channel: null, type };
     return { anchorEl, channel, type };
   }
 
-  // Forward one comment tap to the background. The `via` flag makes the
-  // content script annotate it as a comment-menu block with a clean
-  // (@-stripped) name — the comment text itself is never stored.
   function postCommentBlock(channel, type) {
     const name = channel.text || channel.id;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
@@ -5643,13 +4604,6 @@
     });
   }
 
-  // Tap handler for one injected menu entry. The comment is resolved
-  // against the freshest `...` anchor at tap time (falling back to the
-  // injection-time one): YouTube reuses popup containers and entries
-  // across openings, so a captured anchor would block the previous
-  // comment again. The thread stays in place with a placeholder note
-  // (like blocked videos keep a "Blocked" card): allow taps keep the
-  // comment itself, blocks and removals replace it.
   function handleCommentMenuTap(event, anchorEl, type) {
     try {
       if (event) {
@@ -5666,8 +4620,6 @@
       return;
     }
     const liveAnchor = freshCommentMenuAnchor() || anchorEl;
-    // Text blocks need no channel identity — only the comment itself, so
-    // they branch off before channel resolution.
     if (type === 'comment') {
       openCommentTextDialog(liveAnchor);
       return;
@@ -5675,7 +4627,6 @@
     finishCommentMenuTap(liveAnchor, type);
   }
 
-  // Resolve, post and placeholder one channel/allow tap.
   function finishCommentMenuTap(anchorEl, type) {
     const target = commentMenuTapTarget(anchorEl, type);
     if (!target.channel) {
@@ -5690,16 +4641,12 @@
     placeholderCommentThread(target.anchorEl, commentPlaceholderMessage(target.type));
   }
 
-  // Placeholder note per tap type.
   function commentPlaceholderMessage(type) {
     if (type === 'unwhitelist') return 'Removed from whitelist';
     if (type === 'comment') return 'Blocked comment (text blocked)';
     return 'Blocked comment (channel blocked)';
   }
 
-  // Full comment text for the editor popup: entity-payload content first,
-  // rendered text second. Whitespace-collapsed and capped well above the
-  // 200-char rule budget, so trimming happens in the editor, not here.
   function commentFullText(el) {
     let text;
     try {
@@ -5714,18 +4661,11 @@
     return text.replace(/\s+/g, ' ').trim().slice(0, 500);
   }
 
-  // Collapse editor input exactly like the background sanitizer does
-  // (background.js sanitizeCommentEntry), so what the popup posts is what
-  // gets stored.
   function collapseCommentText(text) {
     const raw = text === null || text === undefined ? '' : text;
     return String(raw).replace(/\s+/g, ' ').trim().slice(0, 200);
   }
 
-  // Validate one collapsed editor entry. Null when valid, otherwise the
-  // error to show. Mirrors the options page: a plain line is a keyword,
-  // only a /pattern/flags shape is compiled as regex (and an invalid one
-  // blocks saving here instead of lingering in the list).
   function validateCommentEntry(clean) {
     if (clean.length === 0) return 'Enter some text to block.';
     if (clean.startsWith('//')) return 'Entries starting with // are annotations, not rules.';
@@ -5739,24 +4679,16 @@
     return null;
   }
 
-  // Tap handler factory for one injected menu entry.
   function onCommentMenuTap(anchorEl, type) {
     return (event) => handleCommentMenuTap(event, anchorEl, type);
   }
 
-  // Unicode word-boundary class, mirrored from background.js compileRegex:
-  // plain keywords only match beside these separators (or string ends).
   const COMMENT_KEYWORD_BOUNDARY = '[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:\'",\\.\\/<>\\?`~:]+';
 
-  // Escape one plain keyword exactly like background.js compileRegex.
   function escapeCommentKeyword(keyword) {
     return keyword.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&');
   }
 
-  // Compile one collapsed editor entry to a live RegExp, mirroring
-  // background.js compileRegex for the comment list: /pattern/flags is raw
-  // regex, anything else a boundary-wrapped case-insensitive keyword.
-  // Undefined when the entry cannot compile — never throws.
   function compileCommentRuleLive(clean) {
     const text = typeof clean === 'string' ? clean : '';
     if (text.length === 0 || text.startsWith('//')) return undefined;
@@ -5775,8 +4707,6 @@
     }
   }
 
-  // Style one dialog node through CSSOM only (no <style>, no innerHTML),
-  // so page CSP and Trusted Types stay out of the way.
   function styleDialogNode(node, styles) {
     try {
       const keys = Object.keys(styles);
@@ -5785,20 +4715,14 @@
     return node;
   }
 
-  // One labeled row for the editor dialog: a div carrying text, or a
-  // button/textarea/checkbox built by the caller. Keeps the builder below
-  // readable without a generic element factory.
   function dialogText(text, styles) {
     const node = document.createElement('div');
     node.textContent = text;
     return styleDialogNode(node, styles || {});
   }
 
-  // The currently open editor dialog, if any. Opening a new one closes
-  // the old first, so dialogs can never stack or strand an older Save.
   let openCommentTextBack = null;
 
-  // Close and drop the editor dialog.
   function closeCommentTextDialog(back) {
     try {
       if (back && typeof back.remove === 'function') back.remove();
@@ -5806,10 +4730,6 @@
     if (openCommentTextBack === back) openCommentTextBack = null;
   }
 
-  // Save one validated editor entry: post it as a comment rule, replace
-  // the thread with a placeholder, live-block every other visible match
-  // (no reload), and close. No toast — the placeholders are the
-  // confirmation.
   function saveCommentTextDialog(back, anchorEl, clean) {
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
       type: 'comment',
@@ -5820,12 +4740,8 @@
     closeCommentTextDialog(back);
   }
 
-  // Comment-level nodes for the live sweep: top-level and reply renderers
-  // in both the legacy and the new view-model UI.
   const LIVE_COMMENT_SELECTORS = 'ytd-comment-renderer, ytd-comment-view-model';
 
-  // Placeholder one rendered comment when the live rule matches its text.
-  // Detached nodes (an already-placeholdered thread) are skipped.
   function liveBlockCommentNode(node, rule) {
     try {
       if (!node || node.nodeType !== 1 || node.isConnected === false) return false;
@@ -5838,10 +4754,6 @@
     return true;
   }
 
-  // Apply one freshly saved comment rule to the comments already on the
-  // page — no reload. The tapped thread is gone by now (placeholdered
-  // above); every other visible match goes the same way. Returns the
-  // blocked count.
   function applyCommentRuleLive(clean) {
     const rule = compileCommentRuleLive(clean);
     if (!rule || typeof document === 'undefined' || !document.querySelectorAll) return 0;
@@ -5858,8 +4770,6 @@
     return blocked;
   }
 
-  // Revalidate the editor against the current field state. Returns the
-  // collapsed entry (valid or not) for the save handler.
   function revalidateCommentTextDialog(field, error, save) {
     const clean = collapseCommentText(field.value);
     const problem = validateCommentEntry(clean);
@@ -5872,13 +4782,8 @@
     return clean;
   }
 
-  // BlockTube options-page look, through CSSOM only (no <style>, no
-  // innerHTML): dark panel, bordered field and buttons (style.css theme).
   const COMMENT_DIALOG_FONT = '"Overpass", "Open Sans", Helvetica, Arial, sans-serif';
 
-  // Panel for the editor dialog: BlockTube options-page look, through
-  // CSSOM only. Flex column so the field grows into extra space; the
-  // resize handle lives on the panel itself (width and height together).
   function commentDialogPanel() {
     return styleDialogNode(document.createElement('div'), {
       backgroundColor: '#161b22',
@@ -5901,7 +4806,6 @@
     });
   }
 
-  // Backdrop + panel shell for the editor dialog.
   function commentDialogShell() {
     const back = styleDialogNode(document.createElement('div'), {
       position: 'fixed',
@@ -5922,8 +4826,6 @@
     return { back, panel };
   }
 
-  // Title + hint header of the editor dialog. Returns the title node:
-  // it doubles as the drag handle for moving the popup.
   function commentDialogHeader(panel) {
     const title = dialogText('Block comment text', {
       fontWeight: '600',
@@ -5946,10 +4848,6 @@
     return title;
   }
 
-  // Editable field of the editor dialog, prefilled with the comment.
-  // Focus highlights the border (GitHub-dark accent); blur restores it.
-  // Sizing follows the panel (which carries the resize handle): the field
-  // grows into extra panel space instead of having its own handle.
   function commentDialogField(panel, initial) {
     const field = document.createElement('textarea');
     field.value = initial;
@@ -5981,7 +4879,6 @@
     return field;
   }
 
-  // Shared BlockTube-styled dialog button shape (style.css theme).
   const COMMENT_DIALOG_BUTTON = {
     fontFamily: COMMENT_DIALOG_FONT,
     fontWeight: '600',
@@ -5995,7 +4892,6 @@
     cursor: 'pointer',
   };
 
-  // One BlockTube-styled dialog button, with a hover lift while enabled.
   function commentDialogButton(label, extraStyles) {
     const button = document.createElement('button');
     button.textContent = label;
@@ -6011,9 +4907,6 @@
     return button;
   }
 
-  // Clamp one dragged panel position so the popup always stays
-  // grabbable: at least 80px of width visible, top edge never above the
-  // viewport top.
   function clampDialogPos(left, top, boxW) {
     const vw = window.innerWidth || 800;
     return {
@@ -6022,7 +4915,6 @@
     };
   }
 
-  // Track one active drag until mouse release, clamped to the viewport.
   function trackCommentDialogDrag(panel, origin) {
     const onMove = (move) => {
       try {
@@ -6047,9 +4939,6 @@
     } catch (e) {}
   }
 
-  // Begin one title-bar drag: lift the panel out of the centering flow at
-  // its current spot and track the pointer until release. Primary button
-  // only, so right/middle clicks still pass through to the page.
   function startCommentDialogDrag(panel, event) {
     if (!event || (event.button !== undefined && event.button !== 0)) return;
     let origin = null;
@@ -6067,16 +4956,12 @@
     trackCommentDialogDrag(panel, origin);
   }
 
-  // Movable popup: press-drag the title bar to move the panel, release to
-  // drop it. Mouse-only: the DOM comment menus this dialog hangs off are
-  // desktop-only by construction.
   function makeCommentDialogMovable(panel, handle) {
     try {
       handle.addEventListener('mousedown', (event) => startCommentDialogDrag(panel, event));
     } catch (e) {}
   }
 
-  // Error line + Cancel/Save row of the editor dialog.
   function commentDialogFooter(panel) {
     const error = dialogText('', { color: '#EF4F43', fontSize: '12px', minHeight: '18px' });
     panel.appendChild(error);
@@ -6093,7 +4978,6 @@
     return { error, cancel, save };
   }
 
-  // Keyboard flow for the editor: Escape closes, Ctrl/Cmd+Enter saves.
   function onCommentDialogKey(event, ctx) {
     try {
       if (event) event.stopPropagation();
@@ -6103,11 +4987,6 @@
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) ctx.trySave();
   }
 
-  // Wire editor events: live validation, backdrop-click/Escape close,
-  // Ctrl/Cmd+Enter save, Cancel/Save buttons. Returns revalidate for the
-  // initial pass. Backdrop clicks in the first blink after opening are
-  // ignored, so the tap (or a fast double-tap) that opened the popup can
-  // never instantly dismiss it again.
   function wireCommentTextDialog(back, field, footer, anchorEl) {
     const close = () => closeCommentTextDialog(back);
     const openedAt = Date.now();
@@ -6119,10 +4998,6 @@
       }
     };
     field.addEventListener('input', revalidate);
-    // A text-selection drag that starts in the field and releases outside
-    // fires `click` on the common ancestor (the backdrop) — that must not
-    // count as click-outside. Only a press that started on the backdrop
-    // itself dismisses the dialog.
     let downOnBack = false;
     back.addEventListener('mousedown', (event) => {
       downOnBack = !!event && event.target === back;
@@ -6136,11 +5011,6 @@
     return revalidate;
   }
 
-  // The editable "Block comment text" popup: prefilled with the comment and
-  // saved exactly like the Comment content list on the options page, with
-  // live validation mirroring the background sanitizer. Resizable (drag the
-  // corner), movable (drag the title), dismissed by Save/Cancel/Escape or a
-  // click outside the panel.
   function openCommentTextDialog(anchorEl) {
     const initial = commentFullText(anchorEl);
     if (initial.length === 0) {
@@ -6166,9 +5036,6 @@
     } catch (e) {}
   }
 
-  // Entries to offer in one comment popup, honoring the General toggles
-  // the JSON menus honor (see showMenuEntry). Whitelist mode offers
-  // removal only — visible comments are allowlisted by definition.
   function commentMenuEntries(store) {
     if (isWhitelistMenuMode(store)) {
       return [{ label: 'Remove from Whitelist', type: 'unwhitelist' }];
@@ -6186,21 +5053,12 @@
     return entries;
   }
 
-  // Icon per entry type, matching the JSON menus (block NOT_INTERESTED,
-  // allow CHECK, remove REMOVE; comment text blocks with the block icon).
   function commentMenuIcon(type) {
     if (type === 'whitelist') return 'CHECK';
     if (type === 'unwhitelist') return 'REMOVE';
     return 'NOT_INTERESTED';
   }
 
-  // Build one BlockTube popup entry as a real navigation-item element with
-  // its text/icon bound through `data` — the way YouTube renders the
-  // native Report entry. (Cloning the Report node and retitling its text
-  // does not render: the visible text comes from the bound model, which a
-  // clone does not carry.) Icon-rendering attributes are copied from the
-  // native sibling so the same block icon shows. seed.js never hooks this
-  // tag, so only our own click handler runs on it.
   function buildCommentMenuEntry(template, anchorEl, label, type) {
     const item = document.createElement('ytd-menu-navigation-item-renderer');
     try {
@@ -6225,14 +5083,6 @@
     return item;
   }
 
-  // The native entry of one popup scope to build after, if present and
-  // BlockTube has not injected there yet. Matched by Report text; on
-  // non-English YouTube that text differs, so a popup with exactly one
-  // entry falls back to it (comment popups carry only Report, while video
-  // menus carry many entries — a single-item popup is unambiguous).
-  // Duplicate protection is the injected entries themselves
-  // (`data-bt-comment-menu`): YouTube reuses popup containers across
-  // openings, so a marker on the scope would suppress every later menu.
   function commentPopupReport(scope) {
     if (!scope) return null;
     if (typeof scope.querySelectorAll !== 'function') return null;
@@ -6241,9 +5091,6 @@
       if (typeof scope.matches === 'function' && scope.matches('[data-bt-comment-menu]')) {
         return null;
       }
-      // Comment popups render ytd-menu-navigation-item-renderer (the
-      // Report entry); the other two cover video/card popups sharing the
-      // same popup renderer, so a wrong-anchor popup never matches empty.
       const found = scope.querySelectorAll(
         'ytd-menu-navigation-item-renderer, ytd-menu-service-item-renderer, yt-list-item-view-model',
       );
@@ -6261,14 +5108,9 @@
     return null;
   }
 
-  // Build the BlockTube entries right after the Report entry of one popup
-  // scope. Returns the number of entries added.
   function injectCommentMenuEntries(scope, anchorEl, store) {
     const report = commentPopupReport(scope);
     if (!report || !report.parentNode) return 0;
-    // A real native popup is open: sample its theme and row-icon size for
-    // the fallback menu (measurement, not a guess — see
-    // btSampleNativeMenuTheme / btSampleNativeRowIcon).
     try {
       btSampleNativeMenuTheme(report);
     } catch (e) {}
@@ -6292,10 +5134,6 @@
     return added;
   }
 
-  // True when the popup visibly belongs to the anchor: popups render next
-  // to their `...` button, so a Report popup far from the pressed comment
-  // belongs to something else (video menus carry Report too). A popup
-  // that is not laid out yet passes — the anchor TTL still guards it.
   function popupNearAnchor(popup, anchorEl) {
     try {
       const pr = popup.getBoundingClientRect();
@@ -6309,8 +5147,6 @@
     }
   }
 
-  // A still-fresh anchor element, or null. Stale anchors are dropped so a
-  // later unrelated popup can never inherit them.
   function freshCommentMenuAnchor() {
     if (!lastCommentMenuAnchor) return null;
     try {
@@ -6324,8 +5160,6 @@
     return lastCommentMenuAnchor.el;
   }
 
-  // Scan one added node (plus its closest containers) for a comment popup
-  // menu carrying a Report entry.
   function maybeInjectCommentMenu(node) {
     if (!node || node.nodeType !== 1) return 0;
     const anchorEl = freshCommentMenuAnchor();
@@ -6349,11 +5183,6 @@
     return injected;
   }
 
-  // Event-path-aware comment lookup for a `...` press. `...` buttons live
-  // behind shadow roots, so e.target is retargeted to the host — but
-  // composedPath() still carries the inner button (with its aria-label)
-  // and the comment host. The path runs inside-out, so the menu button
-  // must appear before the comment ancestor.
   function commentFromEventPath(path) {
     let sawMenuButton = false;
     for (let i = 0; i < path.length; i += 1) {
@@ -6375,8 +5204,6 @@
     return null;
   }
 
-  // True when a press path runs through a menu/`...` button (same
-  // match as commentFromEventPath above).
   function pathHasMenuButton(path) {
     for (let i = 0; i < path.length; i += 1) {
       const node = path[i];
@@ -6386,11 +5213,6 @@
     return false;
   }
 
-  // Capture-phase click tracker: remembers which comment's `...` opened
-  // the popup that is about to appear. A `...` press outside any comment
-  // (video menus, etc.) drops the anchor instead, so a stale comment can
-  // never inherit that popup — video menus sit close enough to the
-  // comments that proximity alone cannot tell them apart.
   function trackCommentMenuAnchor(event) {
     try {
       const path =
@@ -6407,18 +5229,6 @@
     } catch (e) {}
   }
 
-  // Fallback when the native `...` is missing/hidden (seen in some regions
-  // while logged out / incognito: no Report, sometimes no menu button at
-  // all, so the popup path above never fires). We inject our own trigger
-  // per rendered comment and show our own menu from it.
-  // True when the native `...` menu exists and is visibly laid out (the
-  // popup path owns it). Must ONLY match menu candidates: matching any
-  // visible button (Like/Dislike/author avatar) wrongly skips every
-  // comment. A menu candidate is a menu host with size, or a button whose
-  // aria-label looks like a menu (`...` buttons carry "More actions"-style
-  // labels — the same /more|action|menu/i match trackCommentMenuAnchor
-  // uses). Visibility is by rect (offsetParent is unreliable inside
-  // flex/YouTube layouts).
   function btHasNativeMenu(commentEl) {
     try {
       const hosts = commentEl.querySelectorAll('ytd-menu-renderer, #menu, #action-menu');
@@ -6446,8 +5256,6 @@
     return false;
   }
 
-  // Currently open fallback menu + its cleanup (outside-click / Escape /
-  // scroll dismiss). Only one open at a time.
   let btFallbackMenuEl = null;
   let btFallbackCleanup = null;
 
@@ -6467,21 +5275,9 @@
     btFallbackMenuEl = null;
   }
 
-  // Fallback pixel-match helpers: measure YouTube's own nodes instead of
-  // guessing, so the trigger + menu render like the native `...` / Report
-  // popup in both themes. Trigger metrics come from a visible native icon
-  // button (resolved once per page; a miss retries every 25th call, so
-  // per-comment sweeps never scan the whole document per comment) and the
-  // icon is the static official SVG above. Menu colors are sampled from a
-  // real native popup whenever one opens (see btSampleNativeMenuTheme).
   let btNativeTemplateCache = null;
   let btNativeTemplateCalls = 0;
 
-  // First visible native `...`-style button on the page. Video/header menus
-  // still render one even where comments have none — that is the template.
-  // Skips our own fallback nodes. Must contain a <yt-icon>: the previous
-  // version matched a 40x40 "Show more"-style text button (aria containing
-  // "more", no icon), which produced the oversized icon-less trigger.
   function btFindVisibleMenuButton() {
     try {
       if (typeof document === 'undefined' || !document.querySelectorAll) return null;
@@ -6512,23 +5308,9 @@
     return null;
   }
 
-  // Official `...` icon, copied dot-for-dot from the native comment menu
-  // button's own HTML (field capture: <button id="button"
-  // class="style-scope yt-icon-button" aria-label="Action menu"> wrapping a
-  // 24x24 svg of three filled circles with fill=currentcolor; icon box
-  // --yt-icon-button-icon-width/height: 24px on a 40px host). Built via DOM
-  // + SVG namespace (no innerHTML — page CSP and Trusted Types). This
-  // replaces the earlier `⋮` text glyph, which rendered visibly thinner
-  // than the official filled dots, and the arbitrary-button <yt-icon>
-  // clone, which risked copying the wrong icon. 24px box; the 40px
-  // trigger's flex layout centers it, exactly like the native host.
   const BT_OFFICIAL_MENU_PATH =
     'M12 4a2 2 0 100 4 2 2 0 000-4Zm0 6a2 2 0 100 4 2 2 0 000-4Zm0 6a2 2 0 100 4 2 2 0 000-4Z';
 
-  // One <svg> element with a single path, via the SVG namespace (no
-  // innerHTML — page CSP and Trusted Types). Null when SVG DOM is
-  // unavailable or any step throws. Shared by the trigger icon and the
-  // menu row icons.
   function btSvgWithPath(pathD, sizePx) {
     try {
       const svgNS = 'http://www.w3.org/2000/svg';
@@ -6547,9 +5329,6 @@
     return null;
   }
 
-  // 24px box + positioning span around a trigger svg, mirroring the
-  // native yt-icon host structure (span.yt-icon-shape > fill div > svg).
-  // Null when the wrapper cannot be built.
   function btWrapTriggerIcon(svg) {
     try {
       const box = document.createElement('div');
@@ -6588,12 +5367,6 @@
     return null;
   }
 
-  // Measured template { w, h, color } or null. w/h are measured px and
-  // color is the resolved rgb() so the copy matches even in the comment
-  // subtree where `inherit`/vars resolve differently (the dark-theme black
-  // icon came from exactly that). Metrics only — the icon itself is always
-  // the static official SVG above, and the trigger carries no YouTube
-  // classes (a copied host class once pulled in a foreign border rule).
   function btNativeTriggerTemplate() {
     try {
       if (btNativeTemplateCache) return btNativeTemplateCache;
@@ -6623,8 +5396,6 @@
     return null;
   }
 
-  // Dark-theme check for the fallback menu: YouTube marks <html dark>
-  // in dark mode; matchMedia covers the rest. Plain boolean, never throws.
   function btFallbackIsDark() {
     try {
       if (typeof document !== 'undefined' && document.documentElement) {
@@ -6641,19 +5412,8 @@
     return false;
   }
 
-  // Menu colors sampled from a real native comment popup
-  // ({ bg, color, border, boxShadow }), when one has opened on this page.
-  // Null until the first sample: the fallback menu then uses the hardcoded
-  // dark/light defaults below. Never guessed per-theme values — the sample
-  // is the native renderer's own computed style, so theme changes and
-  // per-account variations carry over automatically.
   let btNativeMenuTheme = null;
 
-  // Sample one native popup's theme from its container. Called with the
-  // Report entry of an opened native comment menu (see
-  // injectCommentMenuEntries): the closest ytd-menu-popup-renderer carries
-  // the background/border/shadow, its computed color the row text color.
-  // Never throws.
   function btSampleNativeMenuTheme(report) {
     try {
       if (!report || typeof report.closest !== 'function') return;
@@ -6674,14 +5434,9 @@
     } catch (e) {}
   }
 
-  // Block icon path, captured from a live native menu ([BT-ICONS] field
-  // capture): the NOT_INTERESTED glyph YouTube renders for block entries,
-  // on its native 24 grid. CHECK/REMOVE paths (allow / unwhitelist rows)
-  // are still pending a capture — those rows stay text-only until then.
   const BT_BLOCK_ICON_PATH =
     'M12 1C5.925 1 1 5.925 1 12s4.925 11 11 11 11-4.925 11-11S18.075 1 12 1Zm0 2a9 9 0 018.246 12.605L4.755 6.661A8.99 8.99 0 0112 3ZM3.754 8.393l15.491 8.944A9 9 0 013.754 8.393Z';
 
-  // Row icon per entry type. Missing/unknown stays text-only.
   const BT_ROW_ICON_PATHS = {
     channelId: BT_BLOCK_ICON_PATH,
     comment: BT_BLOCK_ICON_PATH,
@@ -6689,9 +5444,6 @@
     unwhitelist: null,
   };
 
-  // One grid-drawn SVG icon node (no innerHTML — page CSP/Trusted Types).
-  // fill=currentcolor so it tracks the row text color. 24 renders the
-  // native 24 grid 1:1; anything else scales uniformly.
   function btSvgIcon(pathD, sizePx) {
     try {
       const size = sizePx > 0 ? sizePx : 24;
@@ -6723,14 +5475,8 @@
     return null;
   }
 
-  // Sampled native row-icon size (px, 0 until sampled). Measured off a
-  // Report row's yt-icon whenever a native popup opens (see
-  // btSampleNativeRowIcon); the 24 default renders the captured grid 1:1.
   let btNativeRowIconPx = 0;
 
-  // Measure one native menu row's yt-icon box (light DOM or shadow root).
-  // Called with the Report entry of an opened native comment menu.
-  // Implausible sizes are ignored so a mis-hit can never distort the rows.
   function btSampleNativeRowIcon(report) {
     try {
       if (!report) return;
@@ -6747,8 +5493,6 @@
       }
     } catch (e) {}
   }
-  // Bare fallback-menu row button: attrs + flex styling, no content yet.
-  // Null when the button cannot be built (callers skip null rows).
   function btMakeFallbackRowButton(label, type, colors) {
     try {
       const item = document.createElement('button');
@@ -6777,10 +5521,6 @@
     return null;
   }
 
-  // Row content: captured native icon where one is known for the type
-  // (text-only otherwise — allow/unwhitelist paths still pending a
-  // capture), then the label. A failed label span falls back to plain
-  // button text so the row never renders empty.
   function btFillFallbackRow(item, label, type) {
     try {
       const path = BT_ROW_ICON_PATHS[type];
@@ -6800,10 +5540,6 @@
     }
   }
 
-  // Row behavior: hover highlight plus the tap path (same path as popup
-  // entries, anchored on commentEl directly — no fresh `...` anchor exists
-  // in this scenario). The tap listener is added before the dismiss one so
-  // it runs first (stopPropagation, not stopImmediatePropagation).
   function btWireFallbackRow(item, commentEl, type, colors) {
     try {
       item.addEventListener('mouseenter', () => {
@@ -6819,9 +5555,6 @@
     } catch (e) {}
   }
 
-  // One plain-HTML row for the fallback menu: a real <button> with
-  // guaranteed layout (no YouTube custom-element upgrade needed), icon +
-  // label in a flex row like the native rows. Null when unbuildable.
   function btBuildFallbackRow(label, type, commentEl, colors) {
     const item = btMakeFallbackRowButton(label, type, colors);
     if (!item) return null;
@@ -6830,8 +5563,6 @@
     return item;
   }
 
-  // Menu entries for one fallback opening, honoring the General toggles.
-  // Toasts and returns [] when nothing is enabled — the caller bails out.
   function btFallbackMenuEntries() {
     let entries = [];
     try {
@@ -6848,8 +5579,6 @@
     return entries;
   }
 
-  // Text/hover colors for fallback rows: sampled native colors win, the
-  // hardcoded pair is only the pre-sample default.
   function btFallbackRowColors(dark) {
     if (btNativeMenuTheme)
       return { text: btNativeMenuTheme.color, hover: 'rgba(128, 128, 128, 0.25)' };
@@ -6857,9 +5586,6 @@
     return { text: '#0f0f0f', hover: '#f2f2f2' };
   }
 
-  // Bare fallback menu container. Borderless by default (the native popup
-  // is borderless — elevation comes from the shadow alone); sampled
-  // border/shadow carry over automatically when measured.
   function btMakeFallbackMenu(rowColors, dark) {
     const menu = styleDialogNode(document.createElement('div'), {
       position: 'fixed',
@@ -6884,7 +5610,6 @@
     return menu;
   }
 
-  // Append one row per entry. Returns the row count (0 when unbuildable).
   function btFillFallbackMenu(menu, entries, commentEl, rowColors) {
     let rows = 0;
     for (let i = 0; i < entries.length; i += 1) {
@@ -6903,8 +5628,6 @@
     return rows;
   }
 
-  // Anchor the menu to the trigger rect, clamped to the viewport: below
-  // the button when it fits, flipped above it otherwise.
   function btPlaceFallbackMenu(menu, rect, rows) {
     try {
       const vw = window.innerWidth || 800;
@@ -6920,8 +5643,6 @@
     } catch (e) {}
   }
 
-  // Dismiss wiring for the open menu: outside-click, Escape and scroll.
-  // Only one menu is open at a time (see btCloseFallbackMenu).
   function btWireFallbackMenuDismiss(menu, btn) {
     const onDocClick = (event) => {
       try {
@@ -6951,16 +5672,6 @@
     };
   }
 
-  // Own menu for the fallback button: plain-HTML rows in a plain <div>
-  // (deliberately NOT ytd-menu-popup-renderer /
-  // ytd-menu-navigation-item-renderer). The custom-element version rendered
-  // 0-wide outside YouTube's popup scaffold — data-bound rows need the
-  // native container's Polymer upgrade + CSS to lay out, so the menu opened
-  // invisibly (field log: rows=6 menu=0x16) and the trigger looked dead.
-  // Plain divs lay out anywhere, in both themes. Positioned from the button
-  // rect and clamped to the viewport. Taps reuse the same paths as popup
-  // entries, anchored on commentEl directly (no fresh `...` anchor exists
-  // in this scenario).
   function btShowFallbackMenu(btn, commentEl) {
     btCloseFallbackMenu();
     if (typeof document === 'undefined') return;
@@ -6985,12 +5696,6 @@
     btWireFallbackMenuDismiss(menu, btn);
   }
 
-  // Trigger metrics + styling. Measured values win over `inherit`/vars:
-  // w/h px plus the resolved rgb() color, so the copy matches the native
-  // `...` even in the comment subtree where they resolve differently. The
-  // default is 40px (native host size, field capture); outline:none mirrors
-  // the official button — without it the focused trigger paints a focus
-  // ring that reads as a border.
   function btStyleFallbackTrigger(btn, tpl) {
     const btW = tpl && tpl.w ? `${tpl.w}px` : '40px';
     const btH = tpl && tpl.h ? `${tpl.h}px` : '40px';
@@ -7017,9 +5722,6 @@
     });
   }
 
-  // Bare trigger button: attrs set, metrics + styling applied. Deliberately
-  // no YouTube classes — only inline styles, so no page (or
-  // recolor-extension) rule can lend it a border.
   function btMakeFallbackTrigger(tpl) {
     const btn = document.createElement('button');
     btn.setAttribute('data-bt-fallback-btn', '1');
@@ -7030,9 +5732,6 @@
     return btn;
   }
 
-  // The static official SVG icon (see btOfficialMenuIcon): exact native
-  // dots, never a font glyph. `⋮` text is the last resort only, for realms
-  // without SVG DOM support.
   function btFillFallbackTriggerIcon(btn) {
     try {
       const official = btOfficialMenuIcon();
@@ -7046,10 +5745,6 @@
     } catch (e) {}
   }
 
-  // Slot placement: appending to #action-menu inherits the exact native
-  // position. The slot is 0x0 only because it is empty — a 40x40 child
-  // gives it size. A `hidden` gate from YouTube is lifted first. True when
-  // the button landed (later slots are skipped), false to fall through.
   function btPlaceTriggerInSlot(commentEl, btn) {
     let slot = null;
     try {
@@ -7074,7 +5769,6 @@
     return false;
   }
 
-  // Header-row placement: pushed right like the native `...`.
   function btPlaceTriggerInHeader(commentEl, btn) {
     let header = null;
     try {
@@ -7092,8 +5786,6 @@
     return false;
   }
 
-  // Absolute placement, last resort when neither slot nor header row
-  // exists. True when the button landed.
   function btPlaceTriggerAbsolute(commentEl, btn) {
     try {
       const pos = window.getComputedStyle
@@ -7115,15 +5807,12 @@
     return false;
   }
 
-  // Anchor the trigger where the native one would be: #action-menu slot,
-  // else #header row, else absolute top-right. True when it landed.
   function btPlaceFallbackTrigger(commentEl, btn) {
     if (btPlaceTriggerInSlot(commentEl, btn)) return true;
     if (btPlaceTriggerInHeader(commentEl, btn)) return true;
     return btPlaceTriggerAbsolute(commentEl, btn);
   }
 
-  // Trigger behavior: hover disc plus opening our menu on tap.
   function btWireFallbackTrigger(btn, commentEl) {
     try {
       btn.addEventListener('mouseenter', () => {
@@ -7144,14 +5833,6 @@
     } catch (e) {}
   }
 
-  // One comment's fallback button. Skips when a native menu host is visible
-  // (popup path owns it) or a button was already added. The trigger carries
-  // the official `...` SVG (see btOfficialMenuIcon), not a text glyph, and
-  // it is anchored where the native one would be (#action-menu slot, else
-  // #header row, else absolute top-right) so it reads as the normal menu.
-  // Our aria-label deliberately avoids "more/action/menu" so
-  // trackCommentMenuAnchor() ignores taps on it.
-  // Returns 'added' | 'native' | 'skip'.
   function btEnsureFallbackButton(commentEl) {
     try {
       if (!commentEl || commentEl.nodeType !== 1) return 'skip';
@@ -7167,8 +5848,6 @@
     return 'skip';
   }
 
-  // Comment renderers under one added node: the node itself when it is
-  // one, plus its matching descendants (capped). Never throws.
   function btSweepCandidates(node) {
     const candidates = [];
     try {
@@ -7187,8 +5866,6 @@
     return candidates;
   }
 
-  // Sweep one added node (plus its subtree, capped) for comment renderers
-  // lacking a native menu. Returns { seen, added, native } for the summary.
   function btSweepForFallbacks(node) {
     const out = { seen: 0, added: 0, native: 0 };
     try {
@@ -7209,11 +5886,6 @@
     return out;
   }
 
-  // Watch for popup menus as comment threads stream in (continuations,
-  // replies, sort changes all render late). Started once from hooks.js
-  // after the first real storage payload so labels match the mode. The
-  // desktop popup selectors never match mobile, so this is a no-op there
-  // by construction.
   let commentObserverStarted = false;
 
   function startCommentObserver() {
@@ -7241,8 +5913,6 @@
     try {
       observer.observe(document.documentElement, { childList: true, subtree: true });
     } catch (e) {}
-    // Sweep comments already rendered before boot (continuations, replies
-    // and sort changes arrive later through the observer above).
     try {
       btSweepForFallbacks(document.documentElement);
     } catch (e) {}
@@ -7250,9 +5920,6 @@
 
   // ================== src/scripts/inject/hooks.js ==================
 
-  // Read chained accessors off a property descriptor, refusing
-  // non-configurable properties (returns null then). Missing accessors read
-  // as undefined.
   function chainedAccessors(owner, prop) {
     const odesc = Object.getOwnPropertyDescriptor(owner, prop);
     if (!(odesc instanceof Object)) return { prevGetter: undefined, prevSetter: undefined };
@@ -7263,10 +5930,6 @@
     };
   }
 
-  // Install a value-trap on one property: the handler's init decides whether
-  // to arm, then getter/setter delegate to it (chaining any pre-existing
-  // accessors, per uBlock's multi-trapper contract). Refuses non-configurable
-  // properties.
   function trapProp(owner, prop, configurable, handler) {
     if (handler.init(owner[prop]) === false) {
       return;
@@ -7291,8 +5954,6 @@
     });
   }
 
-  // Leaf of a trap chain: trap the final property so reads return the
-  // replacement and writes run onSet (or the type-mismatch contract).
   function trapChainLeaf(owner, prop, state) {
     trapProp(owner, prop, true, {
       v: undefined,
@@ -7320,8 +5981,6 @@
     });
   }
 
-  // Mid-chain link: remember the untraversed remainder and continue from the
-  // freshly assigned object once it arrives.
   function trapChainLink(owner, prop, remPath, state) {
     trapProp(owner, prop, true, {
       v: undefined,
@@ -7335,15 +5994,12 @@
       setter(a) {
         this.v = a;
         if (a instanceof Object) {
-          // continue the remaining path from the freshly assigned object
           trapChain(a, remPath, state);
         }
       },
     });
   }
 
-  // Walk a dotted path, trapping each link so the leaf trap installs once
-  // its owner object exists. State carries the mismatch gate + onSet.
   function trapChain(owner, remPath, state) {
     const pos = remPath.indexOf('.');
     if (pos === -1) {
@@ -7352,7 +6008,6 @@
     }
     const prop = remPath.slice(0, pos);
     const v = owner[prop];
-    // remember the path that is still not reached, it must be traversed later
     remPath = remPath.slice(pos + 1);
     if (v instanceof Object || (typeof v === 'object' && v !== null)) {
       trapChain(v, remPath, state);
@@ -7361,17 +6016,12 @@
     trapChainLink(owner, prop, remPath, state);
   }
 
-  // Install a value-trap on a dotted path only YouTube owns, so we can run
-  // post-processing the moment the data becomes available (window.yt.config_,
-  // ytplayer.config, ytInitialData, ...). Adapted from uBlock Origin.
   const trapObjectPath = function (path, replacementValue, onSet = undefined) {
     const state = {
       replacementValue,
       onSet,
       blocked: false,
     };
-    // Once a value with a different type than our replacement arrives, refuse
-    // every later assignment for this property (uBlock's trapper contract).
     state.typeMismatch = function (value) {
       if (state.blocked) {
         return true;
@@ -7384,8 +6034,6 @@
         typeof value !== typeof state.replacementValue;
       return state.blocked;
     };
-    // https://github.com/uBlockOrigin/uBlock-issues/issues/156
-    //   Support multiple trappers for the same property.
     trapChain(window, path, state);
   };
 
@@ -7393,24 +6041,13 @@
 
   window.blockTubeReloadRequired = false;
 
-  // extension storageData
   let storageData;
 
-  // JavaScript filtering
   let jsFilter;
   let jsFilterEnabled = false;
 
-  // Set when a playback video has been blocked on this page. startHook() reads
-  // it to know whether ytInitialData arrived before or after the block and
-  // then redirects to the next (not blocked) video once data is available.
   let playerHasBeenBlocked = false;
-  // startHook() is idempotent and only ever runs with a real storage payload in
-  // place (see storageReceived); track that so a placeholder/undefined payload
-  // arriving earlier can't swallow the real boot.
   let hooksStarted = false;
-  // blockTubeReady must fire exactly once: seed.js defers its boot callbacks on
-  // it while blockTubeDispatched is not yet true, and a re-dispatch would
-  // re-run them (e.g. yt.player.Application.create, loadInitialData).
   let readyDispatched = false;
 
   function fireBlockTubeReady() {
@@ -7426,9 +6063,6 @@
     );
   }
 
-  // YouTube serves require-trusted-types-for 'script', so plain window.eval
-  // throws. A named createScript-only policy supplies the required TrustedScript
-  // without weakening page-wide Trusted Types (HTML/URL still enforced).
   let ttPolicy;
   try {
     ttPolicy =
@@ -7441,8 +6075,6 @@
     if (ttPolicy) return window.eval(ttPolicy.createScript(code));
     return window.eval(code);
   }
-  // Compile one [pattern, flags] pair into a RegExp, stripping the stateful
-  // `g` flag. Returns undefined for malformed entries (logged, skipped).
   function compileOneRegExp(v) {
     if (!Array.isArray(v)) return undefined;
     try {
@@ -7453,27 +6085,19 @@
     }
   }
 
-  // Compile every entry of one filterData array prop in place.
   function compileRegExpProp(filterData, prop) {
     if (has.call(filterData, prop) && Array.isArray(filterData[prop])) {
       filterData[prop] = filterData[prop].map(compileOneRegExp);
     }
   }
 
-  // Pre-compiled filter paths. The same path strings (from filterRules and the
-  // literals below) are resolved against thousands of objects, so split + regex
-  // parsing happens once per unique path instead of per call.
   function transformToRegExp(data) {
     if (typeof data !== 'object' || data === null) return;
     if (typeof data.filterData !== 'object' || data.filterData === null) return;
     regexProps.forEach((p) => compileRegExpProp(data.filterData, p));
-    // The allowlist is compiled with the exact-ID rule upstream; hydrate it
-    // the same way so channelId matching can test against RegExps.
     compileRegExpProp(data.filterData, 'whitelist');
   }
 
-  // Embed pages: filter the PLAYER_VARS payload at once, or trap yt.config_
-  // until it arrives.
   function hookEmbedConfig() {
     const ytConfigPlayerConfig = getObjectByPath(window, 'yt.config_.PLAYER_VARS');
     if (typeof ytConfigPlayerConfig === 'object' && ytConfigPlayerConfig !== null) {
@@ -7495,7 +6119,6 @@
     }
   }
 
-  // Legacy watch-page player config: filter at once, or trap until present.
   function hookYtPlayerConfig() {
     const ytPlayerconfig = getObjectByPath(window, 'ytplayer.config');
     if (typeof ytPlayerconfig === 'object' && ytPlayerconfig !== null) {
@@ -7513,7 +6136,6 @@
     }
   }
 
-  // Guide data: filter at once, or trap until present.
   function hookGuideData() {
     if (typeof window.ytInitialGuideData === 'object' && window.ytInitialGuideData !== null) {
       ObjectFilter(window.ytInitialGuideData, filterRules.guide);
@@ -7522,9 +6144,6 @@
     }
   }
 
-  // Initial player response: filter at once (clearing the blocked flag first),
-  // or trap until present. A clean verdict for the short on screen also lifts
-  // the seed.js first-frame guard (blocked shorts stay hidden under the panel).
   function hookInitialPlayerResponse() {
     if (
       typeof window.ytInitialPlayerResponse === 'object' &&
@@ -7542,16 +6161,8 @@
     }
   }
 
-  // Reentrancy guard for the sequence filter below: filtering the string
-  // phase writes the filtered JSON back through the trap, which would
-  // otherwise re-enter the filter on every write.
   let reelSequenceScrubbing = false;
 
-  // Filter one reel-sequence value in whatever phase it arrives in. YouTube
-  // assigns this global twice: first the escaped JSON string, later the
-  // parsed object (`window[x] = JSON.parse(x)`). Strings are parsed, filtered
-  // and written back (so the later parse yields an already-filtered object);
-  // objects are filtered in place, which is what the reel then consumes.
   function scrubSequenceValue(v) {
     if (typeof v === 'string') {
       if (reelSequenceScrubbing) return;
@@ -7572,9 +6183,6 @@
     } catch (e) {}
   }
 
-  // Initial reel sequence (the upcoming-shorts queue a direct Shorts load
-  // embeds in the page): filter its embedded players and neutralize its
-  // preloaded video frames at once, or trap until present. Shorts-only.
   function hookInitialReelSequence() {
     try {
       if (!document.location.pathname.startsWith('/shorts/')) return;
@@ -7588,8 +6196,6 @@
       current = null;
     }
     if (current !== undefined && current !== null) {
-      // Object (parsed) or string (escaped JSON): scrubSequenceValue handles
-      // both, and a present value must never be hidden behind a trap.
       scrubSequenceValue(current);
       return;
     }
@@ -7598,8 +6204,6 @@
     });
   }
 
-  // Initial page data: filter at once (redirecting when a block already
-  // landed), or trap until present.
   function hookInitialData() {
     const postActions = [fixAutoplay];
     if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
@@ -7624,10 +6228,6 @@
   }
 
   function startHook() {
-    // A hostile/odd data shape must never leave the page unarmed: deferred seed
-    // callbacks wait on blockTubeReady, so a mid-way failure fails open (traps
-    // may be partial) and the page still boots; the error is logged. hooksStarted
-    // is latched first so a retry can't double-trap.
     if (hooksStarted) return;
     hooksStarted = true;
 
@@ -7648,10 +6248,6 @@
     fireBlockTubeReady();
   }
 
-  // Page-forgeable message (FROM_CONTENT is public): drop anything that
-  // isn't a real storage payload so a garbage shape can't throw or poison
-  // storageData. Genuine payloads always pass (arrays/strings below).
-  // Returns true when the payload shape is safe to consume.
   function isValidStoragePayload(data) {
     if (
       typeof data !== 'object' ||
@@ -7663,13 +6259,10 @@
     ) {
       return false;
     }
-    // Non-array props would throw later at block*`.push`/match`.some`.
     for (let idx = 0; idx < regexProps.length; idx += 1) {
       const prop = data.filterData[regexProps[idx]];
       if (prop !== undefined && !Array.isArray(prop)) return false;
     }
-    // The allowlist stays out of regexProps (so blacklist loops ignore it)
-    // but must still be an array when present.
     if (data.filterData.whitelist !== undefined && !Array.isArray(data.filterData.whitelist))
       return false;
     if (data.filterData.vidLength !== undefined && !Array.isArray(data.filterData.vidLength))
@@ -7679,11 +6272,6 @@
     );
   }
 
-  // Enable the custom JS filter only when explicitly opted in. NOTE: the eval
-  // is MAIN-realm, so it grants no extra capability there (page scripts can
-  // already eval); the gate exists to keep it a deliberate user opt-in.
-  // Whitelist mode forces it off for the session: user JS that allows
-  // content back in would defeat the mode and complicate the audit.
   function setupJsFilter() {
     const jsOptIn =
       storageData.options[OPT.ENABLE_JAVASCRIPT] && !storageData.options[OPT.WHITELIST_MODE];
@@ -7703,8 +6291,6 @@
     }
   }
 
-  // Storage payload pushed by the background (via the content_script contract);
-  // `options` keys are BLOCKTUBE_CONSTS.OPTIONS (alias OPT in rules.js).
   function storageReceived(data) {
     if (data === undefined) {
       window.blockTubeDispatched = true;
@@ -7724,15 +6310,9 @@
 
     noActiveFilters = computeNoActiveFilters();
 
-    // Boot only with the first real payload in place: a placeholder/undefined
-    // storage message (cold-started SW race) must not consume the startHook
-    // slot by setting blockTubeDispatched early.
     if (!hooksStarted) {
       startHook();
     }
-    // The comment `...` menu entries (comment-dom.js) need the real
-    // options for their labels, so the observer starts with storage in
-    // place. Guarded by typeof: the fragment may be absent in stripped builds.
     try {
       if (typeof startCommentObserver === 'function') startCommentObserver();
     } catch (e) {}
@@ -7744,43 +6324,16 @@
 
   window.addEventListener('yt-navigate-start', () => {
     playerHasBeenBlocked = false;
-    // The page-channel cache (paths.js) is per page: continuations of the new
-    // page repopulate it from fresh metadata, but until then a stale channel
-    // must not attribute the new page's cards.
     pageChannel = null;
-    // Shorts skip accounting + skip-fired panel teardown (see
-    // shortsSkipNavigationStarted): a navigation we triggered drops its
-    // reason panel now instead of carrying it into the next short, while a
-    // manual one keeps the panel for the finish handler below. The
-    // blocked-Shorts overlay otherwise stays up through the transition (the
-    // reel element is reused across shorts — tearing down here flashes the
-    // blocked video); yt-navigate-finish below reconciles it for the landed
-    // short, and the sweep tick tears it down if the landing is unblocked.
     try {
       if (typeof shortsSkipNavigationStarted === 'function') shortsSkipNavigationStarted();
     } catch (e) {}
-    // A swipe lands on pre-rendered reels whose covers were skipped while the
-    // previous short held a clean verdict. The new short is undecided again:
-    // drop the verdict marker and re-cover its hosts now (synchronously at
-    // navigation start) so the finish decision below never races a paint.
     try {
       if (typeof shortsOverlayNavigateStart === 'function') shortsOverlayNavigateStart();
     } catch (e) {}
   });
 
   window.addEventListener('yt-navigate-finish', () => {
-    // A blocked short prefetched before the swipe landed stored its
-    // attribution without painting (wrong video on screen then); the landed
-    // short paints now when it is a known-blocked one — including a
-    // swipe-back target from the remembered map, whose player response may
-    // come from cache with no ids left to trigger the player-response path.
-    // Remove first so a panel carried through the transition never shows a
-    // stale reason on the new short (or lingers on an unblocked one).
-    // A landing with no blocked paint target is clean: lift its covers.
-    // A landing WITH one is a known-blocked short whose player response may
-    // have come from cache with nothing triggering the player-response path:
-    // arm its auto-advance sweep here, on screen (prefetches never arm, so
-    // this is the only sweep a cached landing gets).
     try {
       if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
     } catch (e) {}
@@ -7803,7 +6356,6 @@
     } catch (e) {}
   });
 
-  // listen for messages from content script
   window.addEventListener(
     'message',
     (event) => {
