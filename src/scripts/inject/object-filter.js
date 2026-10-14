@@ -247,12 +247,11 @@
       return { match: null, value };
     }
     // Fail-open on non-attribution values: structural renderers carry URLs
-    // (tabRenderer), icon types (chips) or other non-IDs in the channelId
-    // slot. Those can never match an exact-ID allowlist entry, so blocking
-    // them deletes page chrome instead of content — channel tabs vanish and
-    // the channel page looks like it never loads. Real channel ids and the
-    // page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay subject to
-    // the check below via the shared ID charset.
+    // (tabRenderer), icon types (chips) or other non-IDs in channelId slot.
+    // Those can never match exact-ID allowlist entry, so blocking them deletes
+    // page chrome not content — channel tabs vanish, page looks never-loaded.
+    // Real ids and page-block pseudo-ids (FEtrending, TAB_SHORTS, ...) stay
+    // subject to check below via shared ID charset.
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
       return { match: null, value };
     }

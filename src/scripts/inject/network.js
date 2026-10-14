@@ -24,14 +24,12 @@
         url.pathname,
       )
     ) {
-      // Swiping between Shorts loads each reel (overlay, channel bar and the
-      // `...` menu the Block entries live in) through these endpoints, shaped
-      // like a watch-next response. The sequence filter first blocks embedded
-      // prefetched players whose channel matches and neutralizes every
-      // preloaded frame (those entries carry no channel linkage, and no
-      // preloaded frame may ever paint); then the usual pass filters what
-      // matches and stamps the Block menu entries (no autoplay fixups here —
-      // there are no two-column results).
+      // Swiping between Shorts loads each reel (overlay, channel bar, `...`
+      // menu with Block entries) via these endpoints, shaped like watch-next.
+      // Sequence filter first blocks channel-matching embedded prefetched players
+      // and neutralizes every preloaded frame (no channel linkage, no frame may
+      // ever paint); then usual pass filters matches + stamps Block menu entries
+      // (no autoplay fixups — no two-column results).
       filterReelSequenceResponse(resp);
       ObjectFilter(resp, mergedFilterRules, [], true);
     } else if (url.pathname === '/youtubei/v1/guide') {

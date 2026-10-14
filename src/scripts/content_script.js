@@ -70,15 +70,12 @@
     return 'Blocked';
   }
 
-  // Resolve the annotation text for a block: the sanitized info text (joined
-  // with " + " when several collaborators were blocked at once). When
-  // extraction misses the label on layouts the rules don't know yet (the
-  // channelId resolves via the avatar while the name path doesn't), fall
-  // back to the blocked id so the annotation never renders an empty `()`
-  // and carries at least the identity. Exception: Shorts taps
-  // (`via: 'shorts'`) with no resolved label keep the bare `()` form — shelf
-  // cards carry a channel id but no channel name, so the id fallback would
-  // only echo the entry below it.
+  // Resolve the annotation text: sanitized info text (" + "-joined when several
+  // collaborators were blocked at once). When extraction misses the label on
+  // unknown layouts (channelId via avatar, name path missed), fall back to the
+  // blocked id so the annotation never renders empty `()` and keeps identity.
+  // Exception: Shorts taps (`via: 'shorts'`) keep bare `()` — shelf cards carry
+  // a channel id but no channel name, so the fallback would echo the entry below.
   function blockAnnotationText(info) {
     const raw = Array.isArray(info.text) ? info.text.join(' + ') : info.text || '';
     let text = String(raw).replace(/\s+/g, ' ').trim().slice(0, 200);

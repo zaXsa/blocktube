@@ -38,16 +38,12 @@
     return { rules, annotations };
   }
 
-  // Rebuild a stored array: annotations back at their original indices,
-  // (Test-only for now: the UI preserves annotations through the untouched
-  // save path instead, so nothing calls this yet. Kept — with coverage —
-  // as the specified save-time fallback.)
-  // rules (possibly edited — added, removed, reordered) filling the other
-  // slots in order, surplus rules appended at the end. With unedited rules
-  // the result is byte-identical to the split input, including interleaved
-  // comments and the trailing '' separator the background appends
-  // (src/scripts/background.js). With edited rules this is best-effort
-  // re-attachment, never a reason to block the save.
+  // Rebuild a stored array: annotations at original indices (test-only for now —
+  // UI preserves via the untouched save path, so nothing calls this yet; kept with
+  // coverage as the specified save-time fallback); rules (added/removed/reordered)
+  // fill other slots in order, surplus appended. Unedited rules stay byte-identical
+  // to split input, incl. interleaved comments + trailing '' separator from the
+  // background (src/scripts/background.js); edited rules best-effort, never blocks save.
   function mergeAnnotations(rules, annotations) {
     if (!(rules instanceof Array)) {
       throw new TypeError('mergeAnnotations expects an array of rules');
@@ -120,21 +116,12 @@
     return bad;
   }
 
-  // Row model for the ID entity tables (OPTIONS_UI_PLAN.md Phase 8).
-  //
-  // Provenance lines look like `// Blocked by context menu (<text>) (<date>)`
-  // or `// Blocked by direct add () (<date>)`. Comment-popup blocks use the
-  // same shape with a `comment menu` kind (`// Blocked by comment menu …`),
-  // Shorts taps with a `short context menu` kind
-  // (`// Blocked by short context menu …`).
-  // Allowlist entries use the same shape with an `Allowlisted` prefix
-  // (`// Allowlisted by context menu …`, `// Allowlisted by direct add …`,
-  // written by the whitelist context-menu and Add-box flows). Older entries predate the date
-  // and have a single group: `// Blocked by context menu (<text>)`. The text
-  // may itself contain parens, so in the two-group form the date is the LAST
-  // paren group; the kind is the fixed `context menu` / `direct add` /
-  // `comment menu` / `short context menu` word(s) right after the prefix. Anything else starting
-  // with either prefix is kept as unparsed provenance.
+  // Row model for ID entity tables (OPTIONS_UI_PLAN.md Phase 8). Provenance looks like
+  // `// Blocked by context menu (<text>) (<date>)` / `// Blocked by direct add () (<date>)`,
+  // comment-popup as `comment menu`, Shorts taps as `short context menu`; allowlist `Allowlisted`
+  // (`// Allowlisted by context menu …` / `direct add …`, via whitelist context-menu + Add-box flows).
+  // Older entries predate the date: single-group `// Blocked by context menu (<text>)`. Text may
+  // contain parens, so date is the LAST group; kind is the fixed word(s) after the prefix; rest stays unparsed.
   const PROVENANCE_PREFIXES = ['// Blocked by ', '// Allowlisted by '];
   const LABEL_PREFIX = '// Label:';
 

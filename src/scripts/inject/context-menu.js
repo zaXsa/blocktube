@@ -142,14 +142,12 @@
     };
   }
 
-  // Lockup cards resolve through the same rule paths, plus the channel-page
-  // fallback: cards on a channel's own tabs carry no attribution (no avatar,
-  // no channel row), so without the page channel the menu tap posts an
-  // undefined id that the content script drops — the tap silently does
-  // nothing — and the annotation falls back to the view count. lockupChannelName
-  // (a function rule path) already refuses the view count; the page channel
-  // fills the rest. Collab stacks contribute every entry, so the tap blocks
-  // all collaborators at once.
+  // Lockup cards share the rule paths, plus the channel-page fallback: cards on
+  // a channel's own tabs carry no attribution (no avatar, no channel row), so
+  // without the page channel the tap posts an undefined id the content script
+  // drops — silently doing nothing — and the annotation falls back to the view
+  // count, which lockupChannelName (a function rule path) already refuses. The
+  // page channel fills the rest; collab stacks contribute every entry, so one tap blocks them all.
   function lockupChannelFrom(renderer) {
     const searchIn = mergedFilterRules.lockupViewModel?.properties;
     const ids = getFlattenByPathAll(renderer, searchIn?.channelId).concat(
@@ -516,12 +514,11 @@
   }
 
   // Shorts-shelf branch of extractMenuItems: the sheet lives under menuOnTap
-  // (not under metadata.menuButton like lockupViewModel). The channel id
-  // decodes from reelWatchEndpoint.params (see shortsLockupChannelId) — there
-  // is no channel name on the card — so the channel entry is offered only
-  // when an id resolved. The blockTube metadata stamp mirrors lockupViewModel
-  // so right-hand taps resolve through the same stamped path. Null when no
-  // sheet.
+  // (not metadata.menuButton like lockupViewModel). The channel id decodes from
+  // reelWatchEndpoint.params (see shortsLockupChannelId) — no channel name on
+  // the card — so the channel entry is offered only when an id resolved. The
+  // blockTube stamp mirrors lockupViewModel so right-hand taps share the stamped
+  // path. Null when no sheet.
   function extractShortsLockupMenuFlags(obj, attr) {
     const items = extractFromShortsLockupViewModel(obj[attr]);
     if (!items) return null;
@@ -573,11 +570,10 @@
 
   // Watch-page branch of extractMenuItems: the reel `...` menu holds
   // listItemViewModel entries ("Description", "Save to playlist", ...), so the
-  // lockup-style entries below render alongside natively. The channel resolves
-  // from the reel channel bar (avatar/browse link + handle text); the video id
-  // is the /shorts/<id> URL and the name is the document title. The stamp
-  // carries isWatch so taps pause the reel instead of hunting a shelf card.
-  // Null when the overlay has no menu (e.g. embeds).
+  // lockup-style entries below render alongside natively. Channel resolves from
+  // the reel channel bar (avatar/browse link + handle text); video id is the
+  // /shorts/<id> URL, name the document title, stamp carries isWatch so taps
+  // pause the reel instead of hunting a shelf card. Null when overlay has no menu (e.g. embeds).
   function extractReelOverlayMenuFlags(obj, attr) {
     const items = extractFromReelOverlay(obj[attr]);
     if (!items) return null;
@@ -623,18 +619,12 @@
     return items;
   }
 
-  // Watch-page topbar branch of extractMenuItems: the VISIBLE `...` sheet
-  // lives in the reel topbar's trailing-buttons MORE_VERT buttonViewModel
-  // (showSheetCommand → inlineContent → sheetViewModel → listViewModel →
-  // listItems), not in overlay.menu (a decoy copy nothing renders). `attr`
-  // is the matched key: live swipe responses carry `topbar` (and `overlay`)
-  // at the top level, while the embedded prefetch wraps the same fields in
-  // `reelItemWatchResponse` — normalize to the inner object first. Channel
-  // resolves from the same response's overlay channel bar (correct per reel
-  // even for prefetches); the video resolves live at tap time (see
-  // stampedMenuBlockData), so prefetch staleness cannot misattribute a tap.
-  // Null when the response carries no such button (shape drift) — the
-  // overlay-menu branch above stays as the fallback.
+  // Watch-page topbar branch of extractMenuItems: the VISIBLE `...` sheet lives in the
+  // reel topbar's trailing-buttons MORE_VERT buttonViewModel (showSheetCommand → inlineContent
+  // → sheetViewModel → listViewModel → listItems), not overlay.menu (a decoy copy nothing renders).
+  // `attr` is the matched key: live swipes carry `topbar`/`overlay` top-level, prefetches wrap
+  // them in `reelItemWatchResponse` — normalize first. Channel resolves from the same response's
+  // overlay bar (correct per reel even for prefetches); video resolves live at tap time (see stampedMenuBlockData), so prefetch staleness cannot misattribute a tap. Null without the button (shape drift) — overlay-menu branch above stays the fallback.
   function extractReelTopbarMenuFlags(obj, attr) {
     const root = attr === 'reelItemWatchResponse' ? obj[attr] : obj;
     const found = findReelTopbarSheet(root);
@@ -785,23 +775,12 @@
     injectStandardMenuButtons(items, hasChannel, hasVideo, store);
   }
 
-  // Watch-page reel entries: clone a native row and retitle it. The popup's
-  // listItem transformer drops rows whose onTap command it cannot render,
-  // which is what the first synthesized no-op command did — hence injected
-  // entries in data but never on screen. Cloning a native row keeps the
-  // renderable shape, but the borrowed native command must then be
-  // neutralized: tapping a Block row must NOT execute someone else's action
-  // (Description/Save/... opening on a Block tap). The replacement is the
-  // same feedback-only no-op the lockup sheets use (see
-  // overwriteOnTapCommand): silent, no hide — menuOnTap's own block post +
-  // overlay/skip are the whole effect (no toast by design). Skipping
-  // forwardMenuTap alone is not enough, because the row's native handler
-  // fires on its own via the framework click binding. Params stay unique per entry (rows sharing a
-  // command verbatim collapse into the native row under param dedupe), and
-  // each clone is stamped so a cached response filtered twice never
-  // duplicates entries. Icon swapped to the BlockTube action; the blockTube
-  // stamp stays on the sheet (extractReelTopbarMenuFlags) / overlay renderer
-  // (extractFromReelOverlay), not per item.
+  // Watch-page reel entries: clone a native row and retitle it — the popup's listItem
+  // transformer drops rows whose onTap it cannot render, which sank the first synthesized
+  // no-op (in data, never on screen). Cloning keeps the renderable shape, but the borrowed
+  // command must be neutralized (see overwriteOnTapCommand): a Block tap must NOT run
+  // Description/Save/..., neither via forwardMenuTap (skipping it alone fails — the row's own
+  // framework click binding still fires) nor otherwise; the feedback-only no-op is silent, hides nothing, stays unique per entry (verbatim commands collapse under param dedupe) and stamped against double-filter duplicates, with the BlockTube icon; menuOnTap's block post + overlay/skip are the whole effect (no toast); the blockTube stamp stays on the sheet (extractReelTopbarMenuFlags) / overlay renderer (extractFromReelOverlay), not per item.
   function isOurReelEntry(item) {
     try {
       return !!(
@@ -1107,13 +1086,11 @@
 
     injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, obj[attr], storageData, isReelOverlay);
 
-    // Reactive renderers re-render on property assignment, not on in-place
-    // array mutation: if the reel popup bound the items array before our push
-    // (eager pre-render), a plain push stays invisible while the data looks
-    // right. Replacing the array reference notifies Polymer (property change)
-    // and Lit-style renderers (property set) alike; lazy readers see the same
-    // contents either way. Shelf sheets render lazily on open, so only the
-    // reel surfaces need this.
+    // Reactive renderers re-render on property assignment, not in-place array mutation:
+    // if the reel popup bound the items array before our push (eager pre-render), a plain
+    // push stays invisible while the data looks right. Replacing the array reference notifies
+    // Polymer (property change) and Lit-style renderers (property set) alike; lazy readers see
+    // the same contents either way. Shelf sheets render lazily on open, so only reel surfaces need this.
     if (attr === 'reelPlayerOverlayRenderer') {
       const menu = getObjectByPath(obj[attr], 'menu.menuRenderer');
       if (menu && Array.isArray(menu.items)) menu.items = menu.items.slice();
@@ -1129,13 +1106,12 @@
     }
   }
 
-  // Our own toast layer. The legacy yt-action dispatch below no longer
-  // surfaces a visible toast on current YouTube, so taps that relied on it
-  // confirmed with no feedback at all (the "Channel Allowed" seen on some
-  // surfaces comes from the executed menu command itself — a different
-  // system). This fixed-position div is styled property-by-property through
-  // CSSOM only (no <style>, no innerHTML), so page CSP and Trusted Types
-  // stay out of the way; pointer-events:none so it can never swallow clicks.
+  // Our own toast layer: the legacy yt-action dispatch below no longer surfaces a visible
+  // toast on current YouTube, so taps relying on it confirmed with no feedback at all (the
+  // "Channel Allowed" on some surfaces comes from the executed menu command itself — a
+  // different system). This fixed-position div is styled property-by-property through CSSOM
+  // only (no <style>, no innerHTML), so page CSP and Trusted Types stay out of the way;
+  // pointer-events:none so it can never swallow clicks.
   let toastTimer = 0;
 
   // Create the toast div (see constraints above).
@@ -1578,15 +1554,12 @@
     } catch (e) {}
   }
 
-  // Shorts shelf cards have no native hide affordance — their sheet holds
-  // only items like "Add to queue" / "Send feedback", so the cloned feedback
-  // command that dismisses lockup cards leaves a Shorts card in place.
-  // Dismiss it from the DOM instead: the card links to /shorts/<videoId>, so
-  // the grid item wrapping that link gets the same "Blocked" placeholder the
-  // other surfaces show, plus display:none so the card is gone even where the
-  // placeholder mechanism does not render. Fail-open throughout: any miss
-  // leaves the card for the next data load, which the just-added filter entry
-  // already covers.
+  // Shorts shelf cards have no native hide affordance — their sheet holds only "Add to
+  // queue" / "Send feedback", so the cloned feedback command that dismisses lockup cards
+  // leaves a Shorts card in place. Dismiss it from the DOM instead: the card links to
+  // /shorts/<videoId>, so the grid item wrapping that link gets the same "Blocked" placeholder
+  // other surfaces show, plus display:none where that mechanism does not render. Fail-open:
+  // any miss leaves the card for the next data load, already covered by the just-added filter entry.
   const SHORTS_CARD_SELECTORS = [
     'ytd-rich-item-renderer',
     'yt-lockup-view-model',
@@ -1742,15 +1715,12 @@
     if (!isWatch) forwardMenuTap.call(this, event);
   }
 
-  // Visible effect of blocking the playing Short: the menu tap lands after
-  // the player response already played, so the filter path (disablePlayer →
-  // overlay + skip) never runs for it. Reproduce it here: pause first (audio
-  // stops at once), paint the reason panel over the player root, then arm
-  // the same auto-advance sweep a filtered response would. When skip is off
-  // or capped, the pause + panel are the whole effect — the short stays put
-  // but covered and silent instead of playing on. Fail-open throughout.
-  // Called only for card-removing taps (channelId/videoId/unwhitelist — see
-  // isCardRemovingTap above), so allow taps never reach here.
+  // Visible effect of blocking the playing Short: the tap lands after the player response
+  // already played, so the filter path (disablePlayer → overlay + skip) never runs for it.
+  // Reproduce it here: pause first (audio stops at once), paint the reason panel over the
+  // player root, then arm the same auto-advance sweep a filtered response would. When skip is
+  // off or capped, pause + panel are the whole effect — the short stays covered and silent.
+  // Fail-open; called only for card-removing taps (channelId/videoId/unwhitelist — see isCardRemovingTap), so allow taps never reach here.
   function applyWatchBlockEffect(type, data, parentData) {
     try {
       pauseReelPlayer();

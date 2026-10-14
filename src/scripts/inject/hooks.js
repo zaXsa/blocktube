@@ -499,13 +499,11 @@
     // must not attribute the new page's cards.
     pageChannel = null;
     // Shorts skip accounting + skip-fired panel teardown (see
-    // shortsSkipNavigationStarted): a navigation we triggered drops its
-    // reason panel now instead of carrying it into the next short, while a
-    // manual one keeps the panel for the finish handler below. The
-    // blocked-Shorts overlay otherwise stays up through the transition (the
-    // reel element is reused across shorts — tearing down here flashes the
-    // blocked video); yt-navigate-finish below reconciles it for the landed
-    // short, and the sweep tick tears it down if the landing is unblocked.
+    // shortsSkipNavigationStarted): our navigation drops its reason panel now
+    // not into next short, manual keeps panel for finish handler below. The
+    // blocked-Shorts overlay stays up through transition (reel element reused
+    // — teardown here flashes blocked video); yt-navigate-finish reconciles
+    // landed short, sweep tick tears it down if landing unblocked.
     try {
       if (typeof shortsSkipNavigationStarted === 'function') shortsSkipNavigationStarted();
     } catch (e) {}
@@ -519,18 +517,12 @@
   });
 
   window.addEventListener('yt-navigate-finish', () => {
-    // A blocked short prefetched before the swipe landed stored its
-    // attribution without painting (wrong video on screen then); the landed
-    // short paints now when it is a known-blocked one — including a
-    // swipe-back target from the remembered map, whose player response may
-    // come from cache with no ids left to trigger the player-response path.
-    // Remove first so a panel carried through the transition never shows a
-    // stale reason on the new short (or lingers on an unblocked one).
-    // A landing with no blocked paint target is clean: lift its covers.
-    // A landing WITH one is a known-blocked short whose player response may
-    // have come from cache with nothing triggering the player-response path:
-    // arm its auto-advance sweep here, on screen (prefetches never arm, so
-    // this is the only sweep a cached landing gets).
+    // Blocked short prefetched before swipe stored attribution without painting
+    // (wrong video on screen); landed short paints now when known-blocked, incl.
+    // swipe-back target from remembered map whose response may come from cache
+    // with no ids left to trigger player-response path. Remove first so carried
+    // panel never shows stale reason (or lingers on unblocked); clean landing
+    // lifts covers, blocked landing arms auto-advance sweep on screen (prefetches never arm — only sweep cached landing gets).
     try {
       if (typeof removeShortsOverlay === 'function') removeShortsOverlay();
     } catch (e) {}

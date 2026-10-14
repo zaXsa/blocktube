@@ -350,13 +350,11 @@
       keys.length > 0 ? `${panelTotal} in this panel · ${total} total` : `${total} total`;
   }
 
-  // Invalid-regex warnings below the regex-evaluated editors (after the
-  // table/raw views, so showing them never shifts the list): lines that
-  // would fail RegExp construction downstream (and so never match).
-  // Invalid-ID warnings below the ID editors: ID lines are wrapped raw
-  // (`^id$`), so a line outside the ID charset either never matches or —
-  // like `.*` — matches far more than intended. Informational only in both
-  // cases — saving is never blocked.
+  // Invalid-regex warnings below regex-evaluated editors (after table/raw views so
+  // showing never shifts the list): lines failing downstream RegExp construction
+  // (hence never matching). Invalid-ID warnings below ID editors: lines wrapped raw
+  // (`^id$`), so outside-charset lines never match or — like `.*` — match far more
+  // than intended. Informational only in both cases — saving is never blocked.
   const WARNING_EDITORS = {
     title: 'warning-title',
     channelName: 'warning-channelName',
@@ -407,13 +405,10 @@
     });
   }
 
-  // Whitelist mode (WHITELIST_PLAN.md Phase 1): one flag, two surfaces. Mode
-  // on -> the Whitelist panel, General, and Export / Import stay usable (UI
-  // theme/password must never be locked out, stored General values like
-  // block_message stay honored, and backup/restore stays available); every
-  // other panel hides. Mode off -> the Whitelist panel hides
-  // and the normal UI returns. The inject realm ignores both the flag and the
-  // list in this phase.
+  // Whitelist mode (WHITELIST_PLAN.md Phase 1): one flag, two surfaces. On -> Whitelist,
+  // General, Export/Import stay usable (theme/password never locked out, stored General
+  // values like block_message honored, backup/restore available); all other panels hide.
+  // Off -> Whitelist hides, normal UI returns. Inject realm ignores flag + list in this phase.
   const WHITELIST_VISIBLE = ['panel-whitelist', 'panel-general', 'panel-data'];
 
   function isWhitelistModeOn() {
@@ -756,13 +751,11 @@
     goToTablePage(key, 1);
   }
 
-  // True paging: exactly one page lives in the DOM. Nothing mutates while
-  // scrolling, so the view cannot jitter, drift, or cascade.
-  // Single closing line: the last row keeps its divider (closing line for
-  // short lists), but once scrollable AND parked at the very bottom that
-  // divider would stack on the box edge into a 2px line — so the box gets
-  // an `is-bottom` flag there and CSS yields the row divider, leaving the
-  // box edge as the one line.
+  // True paging: exactly one page in the DOM; nothing mutates while scrolling, so no
+  // jitter/drift/cascade. Single closing line: last row keeps its divider (closes short
+  // lists), but when scrollable AND parked at the very bottom it would stack on the box
+  // edge into a 2px line — so the box gets `is-bottom` there and CSS yields the row
+  // divider, leaving the box edge as the one line.
   function updateTableBottomEdge(key) {
     const t = TABLE_EDITORS[key];
     const scroller = $(t.scroll);
@@ -1567,17 +1560,12 @@
     });
   }
 
-  // Decided once per refresh, never continuous: with no stored (dragged)
-  // height, tall viewports grow the lists into free space instead of
-  // leaving the page half empty — but only when that exceeds the CSS
-  // default, so short windows keep the stylesheet's no-double-scrollbar
-  // sizing. A manual drag persists (localStorage LIST_HEIGHT_KEY, UI-only,
-  // never exported) and is applied verbatim: a tall drag is the user's
-  // explicit choice, even if the page then scrolls. For testing, reset a
-  // stored drag via devtools (localStorage.removeItem('blocktube_list_height'))
-  // + refresh, otherwise refreshes keep re-applying it and testing is
-  // confusing. (The window resize listener below only refreshes the
-  // bottom-edge flag; it must never touch heights.)
+  // Decided once per refresh, never continuous: with no stored (dragged) height, tall viewports
+  // grow lists into free space (only when exceeding the CSS default, so short windows keep the
+  // no-double-scrollbar sizing). Manual drags persist (localStorage LIST_HEIGHT_KEY, UI-only,
+  // never exported) verbatim — tall drag is explicit choice even if the page scrolls. Testing:
+  // reset via devtools (localStorage.removeItem('blocktube_list_height')) + refresh or refreshes
+  // keep re-applying it; resize listener below refreshes only the bottom-edge flag, never heights.
   function initListHeights() {
     const stored = getStoredListHeight();
     if (stored !== null) {
@@ -1770,14 +1758,11 @@
     }
   });
 
-  // Whitelist mode preview: panel visibility flips with the checkbox before
-  // Save (dirty tracking still goes through the form-level change listener,
-  // and saveForm persists the flag like every other option). Deliberately NOT
-  // written through here: isWhitelistModeOn() reads the checkbox, so the
-  // preview needs no persistence, and an immediate write would make Discard
-  // a lie for this one switch (storage already flipped) while every other
-  // control honestly waits for Save. A popup opened mid-edit shows the stored
-  // value — correct unsaved-changes semantics, converged on Save.
+  // Whitelist mode preview: panel visibility flips with the checkbox before Save (dirty
+  // tracking still via the form-level change listener; saveForm persists the flag like any
+  // option). Deliberately NOT written through: isWhitelistModeOn() reads the checkbox so no
+  // persistence is needed, and an immediate write would make Discard a lie (storage flipped)
+  // while other controls wait for Save. Mid-edit popups show the stored value — correct unsaved-changes semantics, converged on Save.
   $('whitelist_mode').addEventListener('change', () => {
     updateWhitelistUI();
   });

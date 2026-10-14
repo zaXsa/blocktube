@@ -200,14 +200,12 @@
     return compiled;
   }
 
-  // THE canonical dotted-path walker for this codebase (options.js `get` is a
-  // mirror for the options page — it cannot import this bundle — and MUST stay
-  // in sync). Plain tokens do an own-key lookup (at an ARRAY node: the FIRST
-  // element owning the key); token[idx..] does the lookup then numeric indices
-  // in order. Any miss returns `def`, so typos/shape changes fail silently.
-  // String paths are compiled once and cached (see compiledPath/pathCache).
-  // Miss sentinel: payload values come from JSON and can never be this
-  // reference, so an explicit `undefined` value still reads as a hit.
+  // THE canonical dotted-path walker (options.js `get` mirrors for options page
+  // — cannot import this bundle — MUST stay in sync). Plain tokens own-key lookup
+  // (at ARRAY node: FIRST element owning key); token[idx..] lookups then numeric
+  // indices in order. Miss returns `def`, so typos/shape changes fail silently.
+  // String paths compiled once and cached (see compiledPath/pathCache). Miss
+  // sentinel is JSON-impossible reference, so explicit `undefined` still hits.
   const PATH_MISS = {};
 
   // Plain token (no brackets): own-key lookup, or first array element owning
@@ -369,16 +367,12 @@
     return channelTextOf(title);
   }
 
-  // The channel a lockupViewModel card attributes itself to, or undefined.
-  // No static dotted path expresses this: channel-less cards (a channel's own
-  // /videos tab, "From <channel>" shelves) drop the channel row, so a naive
-  // metadataRows path silently resolves to the VIEW COUNT instead — the wrong
-  // annotation and false channelName-filter hits. Tries linked -> positional
-  // -> bare-label -> avatar-stack -> channel-type title, in that order. The
-  // stack pass is explicit attribution (not a positional guess), so it cannot
-  // misread a view count; without it link-less collab rows resolve to
-  // undefined and the channelName field is skipped entirely, letting every
-  // collaborator through.
+  // Channel a lockupViewModel card attributes to, or undefined. No static path:
+  // channel-less cards (own /videos tab, "From <channel>" shelves) drop channel
+  // row, so naive metadataRows path resolves to VIEW COUNT — wrong annotation,
+  // false channelName hits. Tries linked -> positional -> bare -> stack -> title
+  // in order. Stack is explicit attribution (not positional), so never misreads
+  // view count; without it link-less collab rows yield undefined, skipping channelName, letting collaborators through.
   function lockupChannelName(renderer) {
     const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
     if (Array.isArray(rows)) {
@@ -394,16 +388,12 @@
     return lockupTitleChannelName(renderer);
   }
 
-  // The channel a shortsLockupViewModel card attributes itself to, or
-  // undefined. Shorts shelf cards carry no byline/avatar link — the only
-  // channel signal is the protobuf baked into
-  // onTap.innertubeCommand.reelWatchEndpoint.params (URL-encoded base64
-  // whose decoded bytes embed the UC-prefixed channel id). Decoded as
-  // latin1 and scanned for the UC-prefixed id, so protobuf framing changes
-  // outside the id bytes cannot break the read. No channel name exists on
-  // the card (overlayMetadata is title + view count only).
-  // Minimal base64 -> latin1 decoder (no atob/Buffer: the inject realm and
-  // the unit sandbox do not share either). Returns undefined on bad input.
+  // Channel a shortsLockupViewModel card attributes to, or undefined. No
+  // byline/avatar link — only signal is protobuf in
+  // onTap.innertubeCommand.reelWatchEndpoint.params (URL-encoded base64 embedding
+  // UC-prefixed id). Decoded as latin1 and scanned for id, so framing changes
+  // outside id bytes cannot break read. No channel name on card (overlayMetadata
+  // title + view count only). Minimal base64->latin1 (no atob/Buffer shared); undefined on bad input.
   function base64ToLatin1(input) {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const clean = String(input).replace(/[^A-Za-z0-9+/=]/g, '');
@@ -440,13 +430,12 @@
     return match ? match[0] : undefined;
   }
 
-  // The channel that owns the current page (channel pages only), remembered
-  // from the last payload that carried page metadata. Video cards on a
-  // channel's own tabs omit per-card attribution (no avatar, no channel row),
-  // so without this neither filtering nor the context menu can tell they
-  // belong to the page's channel. Continuation payloads carry no metadata
-  // themselves, hence the cache; it is cleared on navigation (see hooks.js
-  // yt-navigate-start) and only ever set from a real channelMetadataRenderer.
+  // Channel owning current page (channel pages only), remembered from last
+  // payload carrying page metadata. Cards on channel's own tabs omit per-card
+  // attribution (no avatar/channel row), so without this neither filtering nor
+  // context menu can tell they belong to page's channel. Continuations carry
+  // no metadata, hence cache; cleared on navigation (see hooks.js
+  // yt-navigate-start), set only from real channelMetadataRenderer.
   let pageChannel = null;
 
   function rememberPageChannel(root) {

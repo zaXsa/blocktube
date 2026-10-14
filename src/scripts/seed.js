@@ -156,21 +156,12 @@
     };
   }
 
-  // Start
-  // Shorts first-frame guard (see shorts-overlay.js): the filter verdict needs
-  // extension storage, which arrives async AFTER this script runs, while a
-  // blocked Short's player response already ships playable streams AND
-  // thumbnails. Hiding <video> alone cannot work: Shorts pre-render thumbnail
-  // and poster images that are not video elements. So every Shorts media host
-  // (#shorts-player, ytd-reel-video-renderer — the same hosts the reason panel
-  // anchors to) gets a plain black cover div the moment it appears, covering
-  // video, thumbnails and posters alike. Covers stay until a verdict lifts
-  // them (clean) or keeps them under the reason panel (blocked). Runs before
-  // the early-abort check below on purpose: even when YouTube initialized
-  // first, the covers still apply and the later verdict still lands. Inline
-  // styles only (no <style>), fail-open throughout. The blockTubeReady
-  // fail-safe below guarantees a page with no verdict (e.g. storage never
-  // arrived) never stays covered.
+  // Shorts first-frame guard (see shorts-overlay.js): verdict needs async storage AFTER this
+  // runs while blocked responses already ship playable streams AND non-<video> thumbnail/
+  // posters, so every media host (#shorts-player, ytd-reel-video-renderer — reason-panel
+  // hosts) gets a black cover on appearance (clean lifts, blocked stays under panel). Runs
+  // before early-abort so covers apply even if YouTube initialized first; inline styles only
+  // (no <style>), fail-open; blockTubeReady fail-safe never leaves a verdict-less (storage never arrived) page covered.
   try {
     if (document.location.pathname.startsWith('/shorts/')) {
       const SHORTS_COVER_ATTR = 'data-bt-cover';
@@ -196,15 +187,12 @@
           if (position === 'static' && host.style) host.style.position = 'relative';
         } catch (e) {}
       };
-      // A clean verdict for the short on screen is already recorded
-      // (window.__blockTubeShortsVerdict, set by shorts-overlay.js). A host
-      // that is BOTH decided-clean and in the viewport right now is the
-      // visible current short (e.g. arrived after its verdict on initial
-      // load) and needs no cover. Everything else is covered — in particular
-      // prefetched neighbours, which are always inserted OFF-viewport and
-      // would otherwise peek in during the swipe before navigation starts.
-      // Zero-area or unreadable rects fail closed (covered): only a host
-      // provably on screen is left open.
+      // A clean verdict for the on-screen short may already be recorded
+      // (window.__blockTubeShortsVerdict, set by shorts-overlay.js): a host BOTH
+      // decided-clean AND in-viewport now is the visible current short (e.g. arrived
+      // after its verdict on initial load) and needs no cover. All else is covered,
+      // notably prefetched neighbours (always OFF-viewport, else peek during swipe
+      // before navigation). Zero-area/unreadable rects fail closed; only provably on-screen stays open.
       const hostInViewport = (host) => {
         try {
           if (!host || typeof host.getBoundingClientRect !== 'function') return false;

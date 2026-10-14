@@ -260,13 +260,12 @@
     });
   }
 
-  // Tap handler for one injected menu entry. The comment is resolved
-  // against the freshest `...` anchor at tap time (falling back to the
-  // injection-time one): YouTube reuses popup containers and entries
-  // across openings, so a captured anchor would block the previous
-  // comment again. The thread stays in place with a placeholder note
-  // (like blocked videos keep a "Blocked" card): allow taps keep the
-  // comment itself, blocks and removals replace it.
+  // Tap handler for one injected entry: resolves against freshest `...`
+  // anchor at tap time (fallback: injection-time one), since YouTube reuses
+  // popup containers/entries across openings and a captured anchor would
+  // block the previous comment again. Thread stays with a placeholder note
+  // (like blocked videos keep a "Blocked" card): allow keeps comment,
+  // blocks/removals replace it.
   function handleCommentMenuTap(event, anchorEl, type) {
     try {
       if (event) {
@@ -809,13 +808,11 @@
     return 'NOT_INTERESTED';
   }
 
-  // Build one BlockTube popup entry as a real navigation-item element with
-  // its text/icon bound through `data` — the way YouTube renders the
-  // native Report entry. (Cloning the Report node and retitling its text
-  // does not render: the visible text comes from the bound model, which a
-  // clone does not carry.) Icon-rendering attributes are copied from the
-  // native sibling so the same block icon shows. seed.js never hooks this
-  // tag, so only our own click handler runs on it.
+  // Build one popup entry as real navigation-item with text/icon via `data`,
+  // like YouTube renders native Report (cloning Report and retitling text
+  // fails: visible text comes from bound model, which a clone lacks).
+  // Icon-rendering attrs copied from native sibling for same block icon.
+  // seed.js never hooks this tag, so only our click handler runs on it.
   function buildCommentMenuEntry(template, anchorEl, label, type) {
     const item = document.createElement('ytd-menu-navigation-item-renderer');
     try {
@@ -840,14 +837,12 @@
     return item;
   }
 
-  // The native entry of one popup scope to build after, if present and
-  // BlockTube has not injected there yet. Matched by Report text; on
-  // non-English YouTube that text differs, so a popup with exactly one
-  // entry falls back to it (comment popups carry only Report, while video
-  // menus carry many entries — a single-item popup is unambiguous).
-  // Duplicate protection is the injected entries themselves
-  // (`data-bt-comment-menu`): YouTube reuses popup containers across
-  // openings, so a marker on the scope would suppress every later menu.
+  // Native entry of one popup scope to build after, if present and not yet
+  // injected. Matched by Report text; on non-English YouTube it differs, so
+  // a single-entry popup falls back to it (comment popups carry only Report
+  // vs video menus' many entries — unambiguous). Duplicate guard is the
+  // injected entries (`data-bt-comment-menu`): YouTube reuses popup containers,
+  // so a scope marker would suppress every later menu.
   function commentPopupReport(scope) {
     if (!scope) return null;
     if (typeof scope.querySelectorAll !== 'function') return null;
@@ -1022,18 +1017,12 @@
     } catch (e) {}
   }
 
-  // Fallback when the native `...` is missing/hidden (seen in some regions
-  // while logged out / incognito: no Report, sometimes no menu button at
-  // all, so the popup path above never fires). We inject our own trigger
-  // per rendered comment and show our own menu from it.
-  // True when the native `...` menu exists and is visibly laid out (the
-  // popup path owns it). Must ONLY match menu candidates: matching any
-  // visible button (Like/Dislike/author avatar) wrongly skips every
-  // comment. A menu candidate is a menu host with size, or a button whose
-  // aria-label looks like a menu (`...` buttons carry "More actions"-style
-  // labels — the same /more|action|menu/i match trackCommentMenuAnchor
-  // uses). Visibility is by rect (offsetParent is unreliable inside
-  // flex/YouTube layouts).
+  // Fallback when native `...` missing/hidden (some regions logged out/incognito:
+  // no Report, sometimes no button, so popup path never fires): own trigger per
+  // comment with own menu. True when native menu visibly laid out (popup path owns
+  // it); match ONLY menu candidates (any Like/Dislike/avatar button would skip every
+  // comment): sized menu host or button with menu-like aria-label (same /more|action|menu/i
+  // as trackCommentMenuAnchor); rect visibility since offsetParent fails in flex/YouTube layouts.
   function btHasNativeMenu(commentEl) {
     try {
       const hosts = commentEl.querySelectorAll('ytd-menu-renderer, #menu, #action-menu');
@@ -1082,13 +1071,11 @@
     btFallbackMenuEl = null;
   }
 
-  // Fallback pixel-match helpers: measure YouTube's own nodes instead of
-  // guessing, so the trigger + menu render like the native `...` / Report
-  // popup in both themes. Trigger metrics come from a visible native icon
-  // button (resolved once per page; a miss retries every 25th call, so
-  // per-comment sweeps never scan the whole document per comment) and the
-  // icon is the static official SVG above. Menu colors are sampled from a
-  // real native popup whenever one opens (see btSampleNativeMenuTheme).
+  // Fallback pixel-match helpers: measure YouTube's own nodes, not guesses, so
+  // trigger + menu match native `...`/Report popup in both themes. Trigger metrics
+  // from one visible native icon button (once per page; miss retries every 25th call
+  // so sweeps never scan whole document per comment); icon is static official SVG
+  // above. Menu colors sampled from a real native popup on open (see btSampleNativeMenuTheme).
   let btNativeTemplateCache = null;
   let btNativeTemplateCalls = 0;
 
@@ -1127,16 +1114,12 @@
     return null;
   }
 
-  // Official `...` icon, copied dot-for-dot from the native comment menu
-  // button's own HTML (field capture: <button id="button"
-  // class="style-scope yt-icon-button" aria-label="Action menu"> wrapping a
-  // 24x24 svg of three filled circles with fill=currentcolor; icon box
-  // --yt-icon-button-icon-width/height: 24px on a 40px host). Built via DOM
-  // + SVG namespace (no innerHTML — page CSP and Trusted Types). This
-  // replaces the earlier `⋮` text glyph, which rendered visibly thinner
-  // than the official filled dots, and the arbitrary-button <yt-icon>
-  // clone, which risked copying the wrong icon. 24px box; the 40px
-  // trigger's flex layout centers it, exactly like the native host.
+  // Official `...` icon, dot-for-dot from native menu button HTML (field capture:
+  // <button id="button" class="style-scope yt-icon-button" aria-label="Action menu">
+  // wrapping 24x24 svg of three filled circles, fill=currentcolor; icon box
+  // --yt-icon-button-icon-width/height: 24px on 40px host). DOM + SVG namespace
+  // (no innerHTML — CSP/Trusted Types). Replaces `⋮` glyph (thinner than filled dots)
+  // and arbitrary <yt-icon> clone (wrong-icon risk); 24px box centered by 40px trigger flex, like native host.
   const BT_OFFICIAL_MENU_PATH =
     'M12 4a2 2 0 100 4 2 2 0 000-4Zm0 6a2 2 0 100 4 2 2 0 000-4Zm0 6a2 2 0 100 4 2 2 0 000-4Z';
 
@@ -1570,16 +1553,12 @@
     };
   }
 
-  // Own menu for the fallback button: plain-HTML rows in a plain <div>
-  // (deliberately NOT ytd-menu-popup-renderer /
-  // ytd-menu-navigation-item-renderer). The custom-element version rendered
-  // 0-wide outside YouTube's popup scaffold — data-bound rows need the
-  // native container's Polymer upgrade + CSS to lay out, so the menu opened
-  // invisibly (field log: rows=6 menu=0x16) and the trigger looked dead.
-  // Plain divs lay out anywhere, in both themes. Positioned from the button
-  // rect and clamped to the viewport. Taps reuse the same paths as popup
-  // entries, anchored on commentEl directly (no fresh `...` anchor exists
-  // in this scenario).
+  // Own menu for fallback button: plain-HTML rows in plain <div> (NOT
+  // ytd-menu-popup-renderer/ytd-menu-navigation-item-renderer). Custom-element version
+  // rendered 0-wide outside YouTube's popup scaffold — data-bound rows need native
+  // Polymer upgrade + CSS, so menu opened invisibly (field log: rows=6 menu=0x16,
+  // trigger looked dead). Plain divs lay out anywhere/both themes; positioned from
+  // button rect, clamped to viewport; taps reuse popup-entry paths anchored on commentEl (no fresh `...` anchor here).
   function btShowFallbackMenu(btn, commentEl) {
     btCloseFallbackMenu();
     if (typeof document === 'undefined') return;
@@ -1763,13 +1742,11 @@
     } catch (e) {}
   }
 
-  // One comment's fallback button. Skips when a native menu host is visible
-  // (popup path owns it) or a button was already added. The trigger carries
-  // the official `...` SVG (see btOfficialMenuIcon), not a text glyph, and
-  // it is anchored where the native one would be (#action-menu slot, else
-  // #header row, else absolute top-right) so it reads as the normal menu.
-  // Our aria-label deliberately avoids "more/action/menu" so
-  // trackCommentMenuAnchor() ignores taps on it.
+  // One comment's fallback button: skips when native menu host visible (popup path
+  // owns it) or button already added. Trigger carries official `...` SVG (see
+  // btOfficialMenuIcon), not text glyph, anchored where native would be (#action-menu
+  // slot, else #header row, else absolute top-right) to read as normal menu. Own
+  // aria-label avoids "more/action/menu" so trackCommentMenuAnchor() ignores it.
   // Returns 'added' | 'native' | 'skip'.
   function btEnsureFallbackButton(commentEl) {
     try {

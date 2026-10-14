@@ -7,15 +7,12 @@ importScripts('consts.js');
 const has = Object.prototype.hasOwnProperty;
 const unicodeBoundary = '[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:\'",\\.\\/<>\\?`~:]+';
 
-// The storage.options schema (source of truth). Stored data from the options
-// page ISN'T merged onto this — it replaces `storage` wholesale on load — so
-// this only serves as the placeholder AND as the drift baseline for
-// checkShape(). Every option key here is written by options.js saveForm()
-// (src/ui/options.js) and read by the inject fragments (object-filter.js,
-// custom-filters.js, context-menu.js, hooks.js/storageReceived). Keys that
-// drift here are invisible at runtime, so keep this list in sync with both
-// those files; the load-time shape check (utils.checkShape) reports any
-// mismatch.
+// storage.options schema (source of truth). Stored options replace `storage`
+// wholesale on load (no merge), so this is the placeholder AND the drift
+// baseline for checkShape(). Every key is written by saveForm()
+// (src/ui/options.js) and read by object-filter.js, custom-filters.js,
+// context-menu.js, hooks.js/storageReceived; drifted keys are invisible at
+// runtime — utils.checkShape reports mismatches, keep in sync.
 const OPTS = BLOCKTUBE_CONSTS.OPTIONS;
 const DEFAULT_OPTIONS = {
   [OPTS.TRENDING]: false,

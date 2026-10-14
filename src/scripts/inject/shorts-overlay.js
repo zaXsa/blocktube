@@ -110,14 +110,12 @@
     return null;
   }
 
-  // Reel-only host lookup (no player-root fallback): the reel the player
-  // itself sits in (authoritative where the layouts nest it), then the main
-  // reel renderer by id (the player lives in a separate subtree and the reel
-  // carries no is-active attribute, so neither closest nor [is-active]
-  // reaches it), then any reel renderer. Null until the reel upgrades into
-  // the DOM. First paint waits for this (see shortsOverlayPaintCurrent) so
-  // the panel appears once at full size instead of flashing small on the
-  // player root and jumping a tick later.
+  // Reel-only host lookup (no player-root fallback): player's own reel
+  // (authoritative where nested), then main reel renderer by id (player is in
+  // a separate subtree and the reel has no is-active, so neither closest nor
+  // [is-active] reaches it), then any reel renderer. Null until the reel
+  // upgrades; first paint waits (see shortsOverlayPaintCurrent) so the panel
+  // appears once full-size, not flashing small on the player root first.
   function shortsOverlayReelHost() {
     try {
       if (typeof document === 'undefined') return null;
@@ -288,14 +286,12 @@
     }
   }
 
-  // First-frame hiding protocol (shared with the seed.js guard, which carries
-  // its own copy: seed.js runs before this bundle exists, so it cannot call
-  // these — keep the two in sync: attr names, cover z-index below the reason
-  // panel's 2147483647, and the verdict shape on window.__blockTubeShortsVerdict).
-  // Every Shorts media host gets a black cover div on appearance; covers lift
-  // on a clean verdict and stay under the reason panel on a blocked one.
-  // data-bt-cover: a black cover div planted on a Shorts media host.
-  // data-bt-revealed: the host's short earned a clean verdict; never re-cover.
+  // First-frame hiding protocol (mirrored in the seed.js guard, which runs
+  // before this bundle exists so cannot call these — keep in sync: attr names,
+  // cover z-index below the reason panel's 2147483647, verdict shape on
+  // window.__blockTubeShortsVerdict). Every host gets a black cover on
+  // appearance: lifted on clean verdicts, kept under the panel on blocked ones.
+  // data-bt-cover = cover div; data-bt-revealed = earned clean verdict, never re-cover.
   function shortsOverlayCoverHost(host) {
     try {
       if (!host || typeof host.querySelector !== 'function') return;
@@ -630,17 +626,12 @@
     }, 150);
   }
 
-  // Paint the stored block when it is the short on screen and no panel is
-  // up. No-op otherwise (wrong video, off-shorts, no host, already painted).
-  // Entry point for both the player-response path below and the
-  // yt-navigate-finish hook: prefetched shorts store their attribution
-  // before the swipe lands, and the landing paints them. A swipe away and
-  // back also repaints: the last attribution may belong to a prefetched id
-  // by then, so fall back to the remembered per-video map.
-  // `allowFallback` permits the player-root host: direct call sites omit it
-  // (reel only — a small-first paint that migrates up a tick later is the
-  // two-step flicker this avoids), while the pending retry passes true past
-  // the grace period so reel-less layouts still get covered.
+  // Paint the stored block when it is the short on screen and no panel is up
+  // (else no-op: wrong video, off-shorts, no host, already painted); entry for
+  // player-response + yt-navigate-finish (prefetched stores attribution, landing
+  // paints; away/back repaints via remembered per-video map as last may be
+  // prefetched). `allowFallback` permits player-root: direct calls omit it
+  // (reel-only avoids small-first flicker); retry passes true past grace for reel-less layouts.
   function shortsOverlayPaintCurrent(allowFallback) {
     if (shortsOverlayEl) {
       shortsOverlayClearPending();

@@ -974,13 +974,11 @@ input#import {
   background-color: transparent;
 }
 
-/* Fixed equal heights for the table/raw views so toggling never jumps.
-   Both views fill the same viewport-relative box; inner areas scroll.
-   (Class selectors, so the `hidden` attribute keeps working.)
-   The min-height is capped by the viewport (min ... calc(100vh - ...)) so
-   short windows shrink the list instead of adding a second page-level
-   scrollbar next to the table's own: the 340px reserves the surrounding
-   chrome (header, toolbar, footer, resizer). */
+/* Fixed equal heights for table/raw views so toggling never jumps: both fill the same
+   viewport-relative box; inner areas scroll. (Class selectors, so `hidden` keeps working.)
+   min-height capped by viewport (min ... calc(100vh - ...)) so short windows shrink the list
+   instead of a second page-level scrollbar beside the table's own: 340px reserves header,
+   toolbar, footer, resizer. */
 .fixed-view {
   height: min(54vh, calc(100vh - 340px));
   min-height: max(140px, min(220px, calc(100vh - 340px)));
@@ -1193,17 +1191,12 @@ input#discard_btn {
   cursor: pointer;
 }
 
-/* Shell breakpoint (1040px — above the generic 800px "Mobile" block below):
-   the sidebar eats ~270px, so with it present the toolbar drops below its
-   ~720px one-line need (16em search floor + 28ch count floor + trio) while
-   still in row mode: the trio wraps below, then pops back onto the same line
-   when the column flip hands the toolbar ~230px back — below, same line,
-   below again across one continuous sweep. Stacking the nav before the wrap
-   point keeps the toolbar at full width through that whole range, so the trio
-   goes one-line → wrapped exactly once. Measured wrap ≈ 985px viewport;
-   +55px covers cross-font variance in the ch-based floors. Only the shell
-   direction moves here — body padding, header and fieldset rhythm still flip
-   at 800px. */
+/* Shell breakpoint 1040px (above generic 800px "Mobile" below): sidebar eats ~270px, so the
+   toolbar drops below its ~720px one-line need (16em search + 28ch count + trio) while still
+   in row mode — trio wraps below, then pops back when the column flip hands ~230px back
+   (below, same line, below again in one sweep). Stacking nav before the wrap keeps toolbar
+   full-width so trio wraps exactly once. Measured wrap ≈985px +55px for ch-floor font variance;
+   only shell direction moves here; padding/header/fieldset rhythm still flips at 800px. */
 @media only screen and (max-width: 1040px) {
   .opt-shell {
     flex-direction: column;

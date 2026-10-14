@@ -110,12 +110,11 @@
   }
 
   // Skip state for blocked Shorts (see skipBlockedShort): consecutive
-  // auto-advance counter (reset on manual navigation), the video id a sweep
-  // is armed for (one sweep per video — a player response flows through
-  // several ytPlayer rules), whether the last navigation was ours, and when
-  // this video's advance was first triggered (a trigger is async — the
-  // navigation lands later — so the sweep watches for it instead of
-  // assuming).
+  // auto-advance counter (reset on manual navigation), video id a sweep is
+  // armed for (one sweep per video — a response flows through several
+  // ytPlayer rules), whether last navigation was ours, and when this
+  // video's advance first triggered (trigger is async — navigation lands
+  // later — so sweep watches for it instead of assuming).
   let shortsConsecutiveSkips = 0;
   let shortsSkipArmedFor = null;
   let shortsSkipJustFired = false;
@@ -131,13 +130,12 @@
   // machine-gun the player; the ERROR status above still stops playback.
   const SHORTS_SKIP_CAP = 15;
 
-  // Navigation started: consume the skip accounting for the previous short.
-  // A navigation we triggered keeps the consecutive counter; a manual one
-  // (new swipe, new page) resets it and disarms any pending sweep. When the
-  // navigation is our own auto-advance past a blocked short, its reason
-  // panel is dropped now instead of riding into the next short — the black
-  // covers underneath keep the departing frame hidden until the landing
-  // verdict. Returns true when the panel was dropped. Never throws.
+  // Navigation started: consume skip accounting for previous short. Ours
+  // keeps consecutive counter; manual (new swipe, new page) resets it and
+  // disarms any pending sweep. Our auto-advance drops its reason panel now
+  // instead of riding into next short — black covers underneath keep the
+  // departing frame hidden until landing verdict. True when panel dropped.
+  // Never throws.
   function shortsSkipNavigationStarted() {
     let ours = false;
     try {
@@ -160,13 +158,12 @@
     return ours;
   }
 
-  // Blocked Shorts are removed, never messaged: advance the reel to the next
-  // short while the reason-only overlay (shorts-overlay.js, anchored to the
-  // reel item) covers the blocked one. Runs as a short fail-open
-  // sweep; when it cannot advance, the overlay reason plus the ERROR status
-  // above is the whole effect (the short stays covered instead of playing). Prefetched (not yet watched)
-  // shorts stay silent until swiped to; non-Shorts pages keep the native
-  // error screen. Exotic realms without timers never schedule the sweep.
+  // Blocked Shorts are removed, never messaged: advance reel to next short
+  // while reason-only overlay (shorts-overlay.js, anchored to reel item)
+  // covers blocked one. Short fail-open sweep; when it cannot advance, the
+  // overlay reason plus ERROR status above is whole effect (short stays
+  // covered not playing). Prefetched (not yet watched) shorts stay silent
+  // till swiped to; non-Shorts keep native error screen; timerless realms never sweep.
   function skipBlockedShort(videoId) {
     if (typeof videoId !== 'string' || videoId.length === 0) return;
     try {
@@ -214,14 +211,12 @@
     }, 250);
   }
 
-  // One sweep tick: still on the blocked short? Actuate at most ONCE per
-  // video and then only watch for the navigation. Two races make anything
-  // more dangerous than that: a manual swipe can land while the URL still
-  // shows the armed video (a tick in that window would swipe the user off an
-  // innocent short), and a retry after a keys trigger can double-advance past
-  // an unblocked short. So: wait out the first ticks for the URL to settle,
-  // fire a single trigger, then watch (or time out). True when navigated
-  // away or when no navigation followed the trigger within a few seconds.
+  // One sweep tick: still on blocked short? Actuate at most ONCE per video,
+  // then only watch for navigation. Two races forbid more: manual swipe can
+  // land while URL still shows armed video (tick then would swipe user off
+  // innocent short), and retry after keys trigger can double-advance past
+  // unblocked short. Wait first ticks for URL to settle, fire once, then
+  // watch (or time out). True when navigated away or trigger got no nav within seconds.
   function skipBlockedShortTick(videoId, tries) {
     try {
       if (document.location.pathname !== `/shorts/${videoId}`) return true;
@@ -343,17 +338,12 @@
     delete vid.thumbnailOverlays;
   }
 
-  // Filter one reel sequence response: the fetch reel endpoints (network.js)
-  // and the initial ytInitialReelWatchSequenceResponse (hooks.js). Embedded
-  // prefetched player responses carry full videoDetails — verified against a
-  // real capture: exactly one videoDetails per sequence, no args/PLAYER_VARS
-  // shapes, so the ytPlayer table can only match genuine players. The ytPlayer
-  // pass blocks prefetches whose channel matches (wiping their stream and
-  // remembering the id for the landing panel + skip sweep, exactly like a
-  // /player block); the scrub then neutralizes every preloaded frame,
-  // unconditionally (Shorts only — these payloads never leave Shorts).
-  // playerHasBeenBlocked is preserved: a prefetch verdict must never leak
-  // into the page-level flow that reads the flag after us. Fail-open.
+  // Filter one reel sequence response: fetch reel endpoints (network.js) and
+  // initial ytInitialReelWatchSequenceResponse (hooks.js). Embedded prefetched
+  // players carry full videoDetails — verified by real capture: exactly one
+  // videoDetails per sequence, no args/PLAYER_VARS shapes, so ytPlayer matches
+  // only genuine players. ytPlayer blocks channel-matching prefetches (wipes stream, remembers id for landing panel + skip sweep like /player block); scrub then neutralizes every preloaded frame unconditionally (Shorts only — payloads never leave Shorts).
+  // playerHasBeenBlocked preserved: prefetch verdict must never leak into page-level flow reading flag after us. Fail-open.
   function filterReelSequenceResponse(resp) {
     if (!resp || typeof resp !== 'object') return;
     const wasBlocked = playerHasBeenBlocked;
@@ -367,15 +357,12 @@
       scrubReelThumbnails.call({ object: resp });
     } catch (e) {}
   }
-  // Blanket video-thumbnail scrub for the reel responses (reel_item_watch,
-  // reel_watch_sequence — Shorts pages only): every video frame/poster URL in
-  // the payload is replaced with a neutral placeholder, unconditionally. Reel
-  // entries carry no channel linkage, and the point is precisely that no
-  // preloaded frame ever paints: blocked or not, the video itself still loads
-  // and plays, so allowed shorts are unaffected beyond their preload image.
-  // Only i.ytimg.com frame/poster URLs are touched — channel avatars (yt3)
-  // and menu icons stay intact, and player responses ride a different
-  // endpoint branch (streams must survive for playback). Fail-open throughout.
+  // Blanket video-thumbnail scrub for reel responses (reel_item_watch,
+  // reel_watch_sequence — Shorts only): every video frame/poster URL replaced
+  // with neutral placeholder, unconditionally. Reel entries carry no channel
+  // linkage; no preloaded frame may ever paint, yet video still loads/plays so
+  // allowed shorts keep only preload image changed. Only i.ytimg.com URLs
+  // touched — avatars (yt3)/icons intact; player responses ride other branch (streams survive). Fail-open.
   function scrubReelThumbnailUrls(node) {
     try {
       if (!node || typeof node !== 'object' || node instanceof Array) return;
