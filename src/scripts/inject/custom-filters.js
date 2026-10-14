@@ -164,32 +164,40 @@
   // overlay reason plus ERROR status above is whole effect (short stays
   // covered not playing). Prefetched (not yet watched) shorts stay silent
   // till swiped to; non-Shorts keep native error screen; timerless realms never sweep.
-  function skipBlockedShort(videoId) {
-    if (typeof videoId !== 'string' || videoId.length === 0) return;
+  // Sweep preconditions for one blocked Short: shaped id, Shorts page, the
+  // short on screen, skip enabled, sweep budget left. Prefetches (not yet
+  // watched) arm nothing: their sweep would instantly complete ("not on
+  // screen" reads as "navigated away") and burn the one sweep per video, so
+  // a blocked short landed on later would never advance. False when any read
+  // throws (exotic realms never sweep).
+  function canArmShortSkip(videoId) {
+    if (typeof videoId !== 'string' || videoId.length === 0) return false;
     try {
-      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX))
+        return false;
     } catch (e) {
-      return;
-    }
-    // Prefetches (not yet watched) arm nothing: their sweep would instantly
-    // complete ("not on screen" reads as "navigated away" in the tick below)
-    // and burn the one sweep per video, so a blocked short landed on later —
-    // whose player response may come from cache with nothing re-triggering
-    // this path — would never advance. The landing hook (hooks.js
-    // yt-navigate-finish) arms the sweep when actually watched instead.
-    try {
-      if (currentShortsId() !== videoId) return;
-    } catch (e) {
-      return;
+      return false;
     }
     try {
-      if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return;
+      if (currentShortsId() !== videoId) return false;
     } catch (e) {
-      return;
+      return false;
     }
-    if (shortsSkipArmedFor === videoId) return;
-    if (shortsSkipFiredIds.has(videoId)) return;
-    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return;
+    try {
+      if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return false;
+    } catch (e) {
+      return false;
+    }
+    if (shortsSkipArmedFor === videoId) return false;
+    if (shortsSkipFiredIds.has(videoId)) return false;
+    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return false;
+    return true;
+  }
+
+  // Run the fail-open auto-advance sweep for one armed video: tick every
+  // 250ms, stop on navigation/timeout. The tick fires the advance at most
+  // once (see skipBlockedShortTick). Timerless realms arm nothing to sweep.
+  function startShortSkipSweep(videoId) {
     shortsSkipArmedFor = videoId;
     shortsSkipTriggeredAt = 0;
     if (typeof setInterval !== 'function') return;
@@ -209,6 +217,11 @@
         if (shortsSkipArmedFor === videoId) shortsSkipArmedFor = null;
       }
     }, 250);
+  }
+
+  function skipBlockedShort(videoId) {
+    if (!canArmShortSkip(videoId)) return;
+    startShortSkipSweep(videoId);
   }
 
   // One sweep tick: still on blocked short? Actuate at most ONCE per video,
@@ -364,6 +377,16 @@
   // linkage; no preloaded frame may ever paint, yet video still loads/plays so
   // allowed shorts keep only preload image changed. Only i.ytimg.com URLs
   // touched — avatars (yt3)/icons intact; player responses ride other branch (streams survive). Fail-open.
+  // One thumbnail/source entry: i.ytimg.com frame URLs become the neutral
+  // placeholder (avatars/icons ride other keys and stay intact). Fail-open.
+  function scrubReelThumbUrl(item) {
+    try {
+      if (item && typeof item.url === 'string' && item.url.indexOf('i.ytimg.com') !== -1) {
+        item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
+      }
+    } catch (e) {}
+  }
+
   function scrubReelThumbnailUrls(node) {
     try {
       if (!node || typeof node !== 'object' || node instanceof Array) return;
@@ -371,18 +394,7 @@
         try {
           const list = node[key];
           if (!(list instanceof Array)) continue;
-          for (let i = 0; i < list.length; i += 1) {
-            try {
-              const item = list[i];
-              if (
-                item &&
-                typeof item.url === 'string' &&
-                item.url.indexOf('i.ytimg.com') !== -1
-              ) {
-                item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
-              }
-            } catch (e) {}
-          }
+          for (let i = 0; i < list.length; i += 1) scrubReelThumbUrl(list[i]);
         } catch (e) {}
       }
     } catch (e) {}

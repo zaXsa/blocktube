@@ -77,6 +77,21 @@
   // closest() alone is not enough: it stops at shadow-root boundaries, and
   // the player may sit inside one — so also step out through getRootNode()
   // hosts (bounded). Null when unreachable. Never throws.
+  // One shadow-host step of the walk below: the host itself when it is the
+  // reel, else its closest reel. Undefined when neither reaches one (the
+  // walk continues outward). Never throws.
+  function reelFromShadowHost(host) {
+    try {
+      const tag = host && typeof host.tagName === 'string' ? host.tagName.toLowerCase() : '';
+      if (tag === 'ytd-reel-video-renderer') return host;
+      if (host && typeof host.closest === 'function') {
+        const reel = host.closest('ytd-reel-video-renderer');
+        if (reel) return reel;
+      }
+    } catch (e) {}
+    return undefined;
+  }
+
   function shortsOverlayReelFrom(node) {
     try {
       if (node && typeof node.closest === 'function') {
@@ -91,15 +106,8 @@
       while (root && root.host && guard < 4) {
         guard += 1;
         const host = root.host;
-        try {
-          const tag =
-            host && typeof host.tagName === 'string' ? host.tagName.toLowerCase() : '';
-          if (tag === 'ytd-reel-video-renderer') return host;
-          if (host && typeof host.closest === 'function') {
-            const reel = host.closest('ytd-reel-video-renderer');
-            if (reel) return reel;
-          }
-        } catch (e) {}
+        const reel = reelFromShadowHost(host);
+        if (reel) return reel;
         try {
           root = typeof host.getRootNode === 'function' ? host.getRootNode() : null;
         } catch (e) {
@@ -364,31 +372,37 @@
     } catch (e) {}
   }
 
+  // One cover kid: remove it when it carries the black-cover mark.
+  // Fail-open throughout.
+  function removeShortsCoverKid(host, kid) {
+    try {
+      const mark = kid && kid.getAttribute ? kid.getAttribute('data-bt-cover') : null;
+      if (mark !== null && mark !== undefined && host.removeChild) {
+        host.removeChild(kid);
+      }
+    } catch (e) {}
+  }
+
+  // Remove one host's black covers (seed + overlay), then mark it revealed
+  // so swipe-start re-covers skip it. Fail-open throughout.
+  function revealShortsHost(host) {
+    try {
+      const kids = host.children;
+      if (kids) {
+        for (let k = kids.length - 1; k >= 0; k -= 1) removeShortsCoverKid(host, kids[k]);
+      }
+    } catch (e) {}
+    try {
+      if (host.setAttribute) host.setAttribute('data-bt-revealed', '1');
+    } catch (e) {}
+  }
+
   // Drop the black covers from the current hosts and mark them revealed so
   // the still-connected guard never re-covers them (neighbour reels keep
   // theirs until their own verdict or landing). Never throws.
   function shortsOverlayRevealPrehide() {
     const hosts = shortsOverlayCurrentHosts();
-    for (let i = 0; i < hosts.length; i += 1) {
-      try {
-        const kids = hosts[i].children;
-        if (kids) {
-          for (let k = kids.length - 1; k >= 0; k -= 1) {
-            try {
-              const kid = kids[k];
-              const mark =
-                kid && kid.getAttribute ? kid.getAttribute('data-bt-cover') : null;
-              if (mark !== null && mark !== undefined && hosts[i].removeChild) {
-                hosts[i].removeChild(kid);
-              }
-            } catch (e) {}
-          }
-        }
-      } catch (e) {}
-      try {
-        if (hosts[i].setAttribute) hosts[i].setAttribute('data-bt-revealed', '1');
-      } catch (e) {}
-    }
+    for (let i = 0; i < hosts.length; i += 1) revealShortsHost(hosts[i]);
     shortsOverlayUnblankVideo();
   }
 
@@ -493,17 +507,26 @@
       alignItems: 'center',
       justifyContent: 'center',
     });
+    root.appendChild(shortsOverlayPanel(block.message));
+    return root;
+  }
 
+  // Fixed-width reason panel: a menu tap ("Channel Blocked") and a filter
+  // block (long rule-carrying reason) render the same panel.
+  function shortsOverlayPanel(message) {
     const panel = document.createElement('div');
-    // Fixed width (not shrink-to-fit): a menu tap ("Channel Blocked") and a
-    // filter block (long rule-carrying reason) must render the same panel.
     shortsOverlayStyle(panel, {
       width: '80%',
       maxWidth: '80%',
       textAlign: 'center',
       padding: '16px',
     });
+    panel.appendChild(shortsOverlayTitle());
+    panel.appendChild(shortsOverlayReason(message));
+    return panel;
+  }
 
+  function shortsOverlayTitle() {
     const title = document.createElement('div');
     title.textContent = 'Blocked by BlockTube';
     shortsOverlayStyle(title, {
@@ -513,20 +536,19 @@
       fontFamily: 'Roboto, Arial, sans-serif',
       marginBottom: '8px',
     });
-    panel.appendChild(title);
+    return title;
+  }
 
+  function shortsOverlayReason(message) {
     const reason = document.createElement('div');
-    reason.textContent = block.message || 'Video blocked by BlockTube filter';
+    reason.textContent = message || 'Video blocked by BlockTube filter';
     shortsOverlayStyle(reason, {
       color: '#ccc',
       fontSize: '13px',
       fontFamily: 'Roboto, Arial, sans-serif',
       overflowWrap: 'anywhere',
     });
-    panel.appendChild(reason);
-
-    root.appendChild(panel);
-    return root;
+    return reason;
   }
 
   // Tear the overlay down: landing reconcile (yt-navigate-finish), an
@@ -632,30 +654,35 @@
   // paints; away/back repaints via remembered per-video map as last may be
   // prefetched). `allowFallback` permits player-root: direct calls omit it
   // (reel-only avoids small-first flicker); retry passes true past grace for reel-less layouts.
-  function shortsOverlayPaintCurrent(allowFallback) {
+  // Reconcile the paint target: keep a still-current block, else adopt the
+  // remembered entry for the short on screen (swipe-back repaints). False
+  // when nothing paints. Fail-open.
+  function recallShortsBlock() {
     if (shortsOverlayEl) {
       shortsOverlayClearPending();
-      return;
+      return false;
     }
-    if (!shortsOverlayStillCurrent()) {
-      let remembered = null;
-      try {
-        const id = currentShortsId();
-        if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
-          remembered = { videoId: id, message: shortsBlockedOverlays.get(id) };
-        }
-      } catch (e) {
-        remembered = null;
+    if (shortsOverlayStillCurrent()) return true;
+    let remembered = null;
+    try {
+      const id = currentShortsId();
+      if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
+        remembered = { videoId: id, message: shortsBlockedOverlays.get(id) };
       }
-      if (!remembered) {
-        shortsOverlayClearPending();
-        return;
-      }
-      lastShortsBlock = remembered;
+    } catch (e) {
+      remembered = null;
     }
-    // The panel may wait for the reel to upgrade (retry below); the video
-    // element exists already, so hide its frame now rather than with the paint.
-    shortsOverlayBlankVideo();
+    if (!remembered) {
+      shortsOverlayClearPending();
+      return false;
+    }
+    lastShortsBlock = remembered;
+    return true;
+  }
+
+  // Paint host for the current block: reel first, player root only past the
+  // upgrade grace (allowFallback). Null until the reel upgrades. Fail-open.
+  function resolveShortsOverlayHost(allowFallback) {
     let host = null;
     try {
       host = shortsOverlayReelHost();
@@ -669,29 +696,26 @@
         host = null;
       }
     }
-    if (!host) {
-      // Reel not upgraded yet (or exotic realm): retry briefly rather
-      // than dropping the paint — the skip sweep still advances meanwhile.
-      shortsOverlaySchedulePaintRetry();
-      return;
-    }
-    let el = null;
-    try {
-      el = shortsOverlayBuild();
-    } catch (e) {
-      el = null;
-    }
-    if (!el) return;
+    return host;
+  }
+
+  // Attach a built reason panel to the host. False when the append fails
+  // (caller retries). Never throws.
+  function attachShortsOverlay(host, el) {
     shortsOverlayEl = el;
     shortsOverlayEnsureHostPositioned(host);
     try {
       host.appendChild(shortsOverlayEl);
     } catch (e) {
       shortsOverlayEl = null;
-      shortsOverlaySchedulePaintRetry();
-      return;
+      return false;
     }
-    shortsOverlayClearPending();
+    return true;
+  }
+
+  // Keep the panel glued to its host while the short is on screen: re-parent
+  // on layout shifts, stop when navigated away. Fail-open throughout.
+  function startShortsOverlaySync() {
     if (typeof setInterval !== 'function') return;
     shortsOverlaySyncTimer = setInterval(() => {
       let done = false;
@@ -707,6 +731,33 @@
         shortsOverlaySyncTimer = 0;
       }
     }, 250);
+  }
+
+  function shortsOverlayPaintCurrent(allowFallback) {
+    if (!recallShortsBlock()) return;
+    // The panel may wait for the reel to upgrade (retry below); the video
+    // element exists already, so hide its frame now rather than with the paint.
+    shortsOverlayBlankVideo();
+    const host = resolveShortsOverlayHost(allowFallback);
+    if (!host) {
+      // Reel not upgraded yet (or exotic realm): retry briefly rather
+      // than dropping the paint — the skip sweep still advances meanwhile.
+      shortsOverlaySchedulePaintRetry();
+      return;
+    }
+    let el = null;
+    try {
+      el = shortsOverlayBuild();
+    } catch (e) {
+      el = null;
+    }
+    if (!el) return;
+    if (!attachShortsOverlay(host, el)) {
+      shortsOverlaySchedulePaintRetry();
+      return;
+    }
+    shortsOverlayClearPending();
+    startShortsOverlaySync();
   }
 
   // Store a blocked Short's attribution + reason, painting only when it is

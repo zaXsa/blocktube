@@ -149,6 +149,19 @@
   // (lockupChannelName), so without this a blocked name listed second never
   // matches — the channelName half of the collab gap (channelId is covered
   // by getCollaboratorChannelIds above).
+  // Display name from a collaborator dialog item title: `content` first,
+  // runs-joined text second. Undefined when the title carries no name.
+  function collabNameOf(title) {
+    if (title && typeof title === 'object') {
+      if (typeof title.content === 'string' && title.content.length > 0) return title.content;
+      const flat = flattenRuns(title);
+      if (typeof flat === 'string' && flat.length > 0) return flat;
+      return undefined;
+    }
+    if (typeof title === 'string' && title.length > 0) return title;
+    return undefined;
+  }
+
   function getCollaboratorChannelNames(obj) {
     const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
     const names = [];
@@ -156,18 +169,7 @@
       for (let i = 0; i < listItems.length; i += 1) {
         const item = listItems[i] && listItems[i].listItemViewModel;
         if (!item || typeof item !== 'object') continue;
-        const title = item.title;
-        let name;
-        if (title && typeof title === 'object') {
-          if (typeof title.content === 'string' && title.content.length > 0) {
-            name = title.content;
-          } else {
-            const flat = flattenRuns(title);
-            if (typeof flat === 'string' && flat.length > 0) name = flat;
-          }
-        } else if (typeof title === 'string' && title.length > 0) {
-          name = title;
-        }
+        const name = collabNameOf(item.title);
         if (name !== undefined) names.push(name);
       }
     }

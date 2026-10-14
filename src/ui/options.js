@@ -519,7 +519,7 @@
       second: 'numeric',
     }).format(new Date());
     const annotation =
-      editorKey === 'whitelist'
+      editorKey === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW
         ? `// ${BLOCKTUBE_CONSTS.VERBS.ALLOW} by ${BLOCKTUBE_CONSTS.ORIGINS.DIRECT} () (${now})`
         : `// ${BLOCKTUBE_CONSTS.VERBS.BLOCK} by ${BLOCKTUBE_CONSTS.ORIGINS.DIRECT} () (${now})`;
     const prefix = current.trim() === '' ? '' : `${current.replace(/\n+$/, '')}\n\n`;
@@ -971,7 +971,11 @@
     // Exact IDs are short and stay on one line; patterns (names, titles,
     // comments) may be long, so they wrap instead of widening the table.
     idCell.className =
-      key === 'channelId' || key === 'videoId' || key === 'whitelist' ? 'cell-id' : 'cell-pattern';
+      key === BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL ||
+      key === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ||
+      key === BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW
+        ? 'cell-id'
+        : 'cell-pattern';
     idCell.title = String(row.id);
     idCell.textContent = String(row.id);
     return idCell;
@@ -1509,55 +1513,77 @@
       // that leave the window keep delivering to the handle. The anchor is
       // the handle's own box — never the sibling view, which is hidden
       // (height 0) in the other mode and used to collapse the drag to min.
-      handle.addEventListener('pointerdown', (e) => {
-        if (listDragActive) return;
-        if (e.button !== undefined && e.button !== 0) return;
-        const wrap = handle.closest('.fixed-view');
-        if (!wrap) return;
-        e.preventDefault();
-        listDragActive = true;
-        const startY = e.clientY;
-        const startH = wrap.getBoundingClientRect().height;
-        let pendingH = startH;
-        let rafId = 0;
-        let settled = false;
-        const prevUserSelect = document.body.style.userSelect;
-        document.body.style.userSelect = 'none';
-        try {
-          handle.setPointerCapture(e.pointerId);
-        } catch (err) {
-          // No capture (old browser): window-level move/up still tracks.
-        }
-        const flush = () => {
-          rafId = 0;
-          applyListHeight(pendingH, false, key);
-        };
-        const onMove = (ev) => {
-          pendingH = startH + ev.clientY - startY;
-          if (rafId === 0) {
-            if (window.requestAnimationFrame) rafId = window.requestAnimationFrame(flush);
-            else flush();
-          }
-        };
-        const cleanup = () => {
-          if (settled) return;
-          settled = true;
-          handle.removeEventListener('pointermove', onMove);
-          handle.removeEventListener('pointerup', cleanup);
-          handle.removeEventListener('pointercancel', cleanup);
-          document.body.style.userSelect = prevUserSelect;
-          if (rafId !== 0) {
-            if (window.cancelAnimationFrame) window.cancelAnimationFrame(rafId);
-            rafId = 0;
-          }
-          listDragActive = false;
-          applyListHeight(pendingH, true);
-        };
-        handle.addEventListener('pointermove', onMove);
-        handle.addEventListener('pointerup', cleanup);
-        handle.addEventListener('pointercancel', cleanup);
-      });
+      handle.addEventListener('pointerdown', (e) => startListResize(handle, key, e));
     });
+  }
+
+  // rAF-throttled drag applier shared by the resizers below: coalesce move
+  // events into one apply per frame (synchronous fallback without rAF).
+  function makeDragApplier(apply) {
+    const state = { rafId: 0, pendingH: 0 };
+    const flush = () => {
+      state.rafId = 0;
+      apply(state.pendingH);
+    };
+    const track = (h) => {
+      state.pendingH = h;
+      if (state.rafId === 0) {
+        if (window.requestAnimationFrame) state.rafId = window.requestAnimationFrame(flush);
+        else flush();
+      }
+    };
+    const cancelFrame = () => {
+      if (state.rafId !== 0) {
+        if (window.cancelAnimationFrame) window.cancelAnimationFrame(state.rafId);
+        state.rafId = 0;
+      }
+    };
+    return { state, track, cancelFrame };
+  }
+
+  // Idempotent end of one filter-list drag: unwire, unlock selection, drop a
+  // pending frame, commit the height. `drag` is the per-gesture state below.
+  function finishListDrag(handle, key, drag, onMove, cleanup) {
+    if (drag.settled) return;
+    drag.settled = true;
+    handle.removeEventListener('pointermove', onMove);
+    handle.removeEventListener('pointerup', cleanup);
+    handle.removeEventListener('pointercancel', cleanup);
+    document.body.style.userSelect = drag.prevUserSelect;
+    drag.throttle.cancelFrame();
+    listDragActive = false;
+    applyListHeight(drag.throttle.state.pendingH, true);
+  }
+
+  // One filter-list resize drag: anchor on the handle's own box, rAF-throttled
+  // apply, idempotent cleanup that commits the height. Ignored while a drag
+  // is active or for non-primary buttons.
+  function startListResize(handle, key, e) {
+    if (listDragActive) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    const wrap = handle.closest('.fixed-view');
+    if (!wrap) return;
+    e.preventDefault();
+    listDragActive = true;
+    const startY = e.clientY;
+    const startH = wrap.getBoundingClientRect().height;
+    const drag = {
+      settled: false,
+      prevUserSelect: document.body.style.userSelect,
+      throttle: makeDragApplier((h) => applyListHeight(h, false, key)),
+    };
+    drag.throttle.state.pendingH = startH;
+    document.body.style.userSelect = 'none';
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch (err) {
+      // No capture (old browser): window-level move/up still tracks.
+    }
+    const onMove = (ev) => drag.throttle.track(startH + ev.clientY - startY);
+    const cleanup = () => finishListDrag(handle, key, drag, onMove, cleanup);
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', cleanup);
+    handle.addEventListener('pointercancel', cleanup);
   }
 
   // Decided once per refresh, never continuous: with no stored (dragged) height, tall viewports
@@ -1579,66 +1605,72 @@
     Object.keys(TABLE_EDITORS).forEach(wireListResizer);
   }
 
-  function cmResizer(cm, resizer) {
-    const MIN_HEIGHT = 220;
-    if (!resizer) return;
+  // Editor scroller height in px, sans unit. Hoisted for the resizer below.
+  function heightOf(element) {
+    return parseInt(window.getComputedStyle(element).height.replace(/px$/, ''));
+  }
 
-    function heightOf(element) {
-      return parseInt(window.getComputedStyle(element).height.replace(/px$/, ''));
+  // Lowest editor height in px. (Was local to cmResizer; hoisted so the
+  // finish helper below can clamp too.)
+  const CM_RESIZER_MIN_HEIGHT = 220;
+
+  // Idempotent end of one editor resize drag: unwire, unlock selection, drop
+  // a pending frame (repainting it first), record the height for the F11/Esc
+  // fullscreen toggle (see filterEditorExtraKeys). `drag` is the state below.
+  function finishCmResize(cm, resizer, drag, onMove, cleanup) {
+    if (drag.settled) return;
+    drag.settled = true;
+    resizer.removeEventListener('pointermove', onMove);
+    resizer.removeEventListener('pointerup', cleanup);
+    resizer.removeEventListener('pointercancel', cleanup);
+    document.body.style.userSelect = drag.prevUserSelect;
+    if (drag.throttle.state.rafId !== 0) {
+      drag.throttle.cancelFrame();
+      cm.display.scroller.style.maxHeight = '100%';
+      cm.setSize(null, `${Math.max(CM_RESIZER_MIN_HEIGHT, drag.throttle.state.pendingH)}px`);
     }
+    cm.start_h = `${Math.max(CM_RESIZER_MIN_HEIGHT, drag.throttle.state.pendingH)}px`;
+  }
 
+  // One editor resize drag: pointer capture so fast drags keep tracking,
+  // rAF-throttled scroller repaint, idempotent cleanup. Records pre-drag
+  // metrics for the F11/Esc toggle. Ignored for non-primary buttons.
+  function startCmResize(cm, resizer, e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = heightOf(cm.display.wrapper);
+    // Kept for the F11/Esc fullscreen toggle below, which restores the
+    // pre-fullscreen scroller cap from cm.start_h.
+    cm.start_y = startY;
+    cm.start_h = `${startH}px`;
+    const drag = {
+      settled: false,
+      prevUserSelect: document.body.style.userSelect,
+      throttle: makeDragApplier((h) => {
+        cm.display.scroller.style.maxHeight = '100%';
+        cm.setSize(null, `${Math.max(CM_RESIZER_MIN_HEIGHT, h)}px`);
+      }),
+    };
+    drag.throttle.state.pendingH = startH;
+    document.body.style.userSelect = 'none';
+    try {
+      resizer.setPointerCapture(e.pointerId);
+    } catch (err) {
+      // No capture: move/up listeners below still track.
+    }
+    const onMove = (ev) => drag.throttle.track(startH + ev.clientY - startY);
+    const cleanup = () => finishCmResize(cm, resizer, drag, onMove, cleanup);
+    resizer.addEventListener('pointermove', onMove);
+    resizer.addEventListener('pointerup', cleanup);
+    resizer.addEventListener('pointercancel', cleanup);
+  }
+
+  function cmResizer(cm, resizer) {
+    if (!resizer) return;
     // Pointer events + capture so fast drags keep tracking; rAF-throttled
     // so the editor resize cannot fall behind the pointer.
-    resizer.addEventListener('pointerdown', function (e) {
-      if (e.button !== undefined && e.button !== 0) return;
-      e.preventDefault();
-      const startY = e.clientY;
-      const startH = heightOf(cm.display.wrapper);
-      // Kept for the F11/Esc fullscreen toggle below, which restores the
-      // pre-fullscreen scroller cap from cm.start_h.
-      cm.start_y = startY;
-      cm.start_h = `${startH}px`;
-      let pendingH = startH;
-      let rafId = 0;
-      let settled = false;
-      const prevUserSelect = document.body.style.userSelect;
-      document.body.style.userSelect = 'none';
-      try {
-        resizer.setPointerCapture(e.pointerId);
-      } catch (err) {
-        // No capture: move/up listeners below still track.
-      }
-      const flush = () => {
-        rafId = 0;
-        cm.display.scroller.style.maxHeight = '100%';
-        cm.setSize(null, `${Math.max(MIN_HEIGHT, pendingH)}px`);
-      };
-      const onMove = (ev) => {
-        pendingH = startH + ev.clientY - startY;
-        if (rafId === 0) {
-          if (window.requestAnimationFrame) rafId = window.requestAnimationFrame(flush);
-          else flush();
-        }
-      };
-      const cleanup = () => {
-        if (settled) return;
-        settled = true;
-        resizer.removeEventListener('pointermove', onMove);
-        resizer.removeEventListener('pointerup', cleanup);
-        resizer.removeEventListener('pointercancel', cleanup);
-        document.body.style.userSelect = prevUserSelect;
-        if (rafId !== 0) {
-          if (window.cancelAnimationFrame) window.cancelAnimationFrame(rafId);
-          rafId = 0;
-          cm.display.scroller.style.maxHeight = '100%';
-          cm.setSize(null, `${Math.max(MIN_HEIGHT, pendingH)}px`);
-        }
-        cm.start_h = `${Math.max(MIN_HEIGHT, pendingH)}px`;
-      };
-      resizer.addEventListener('pointermove', onMove);
-      resizer.addEventListener('pointerup', cleanup);
-      resizer.addEventListener('pointercancel', cleanup);
-    });
+    resizer.addEventListener('pointerdown', (e) => startCmResize(cm, resizer, e));
   }
 
   // Extra editor keys: persistent search replaces the one-shot default

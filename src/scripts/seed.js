@@ -243,6 +243,11 @@
       // filter ever sees after first render. Hide those divs the moment they
       // appear, same protocol as the covers (hidden until a verdict reveals).
       const SHORTS_SEQ_THUMB_SEL = '.reel-video-in-sequence-thumbnail';
+      const hideShortsSeqThumb = (thumb) => {
+        try {
+          if (thumb && thumb.style) thumb.style.opacity = '0';
+        } catch (e) {}
+      };
       const hideShortsSeqThumbsIn = (root) => {
         try {
           if (!root) return;
@@ -256,11 +261,7 @@
           }
           if (typeof root.querySelectorAll === 'function') {
             const thumbs = root.querySelectorAll(SHORTS_SEQ_THUMB_SEL);
-            for (let i = 0; i < thumbs.length; i += 1) {
-              try {
-                if (thumbs[i] && thumbs[i].style) thumbs[i].style.opacity = '0';
-              } catch (e) {}
-            }
+            for (let i = 0; i < thumbs.length; i += 1) hideShortsSeqThumb(thumbs[i]);
           }
         } catch (e) {}
       };

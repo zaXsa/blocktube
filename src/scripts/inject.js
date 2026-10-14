@@ -638,6 +638,17 @@
     return ids;
   }
 
+  function collabNameOf(title) {
+    if (title && typeof title === 'object') {
+      if (typeof title.content === 'string' && title.content.length > 0) return title.content;
+      const flat = flattenRuns(title);
+      if (typeof flat === 'string' && flat.length > 0) return flat;
+      return undefined;
+    }
+    if (typeof title === 'string' && title.length > 0) return title;
+    return undefined;
+  }
+
   function getCollaboratorChannelNames(obj) {
     const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
     const names = [];
@@ -645,18 +656,7 @@
       for (let i = 0; i < listItems.length; i += 1) {
         const item = listItems[i] && listItems[i].listItemViewModel;
         if (!item || typeof item !== 'object') continue;
-        const title = item.title;
-        let name;
-        if (title && typeof title === 'object') {
-          if (typeof title.content === 'string' && title.content.length > 0) {
-            name = title.content;
-          } else {
-            const flat = flattenRuns(title);
-            if (typeof flat === 'string' && flat.length > 0) name = flat;
-          }
-        } else if (typeof title === 'string' && title.length > 0) {
-          name = title;
-        }
+        const name = collabNameOf(item.title);
         if (name !== undefined) names.push(name);
       }
     }
@@ -1057,38 +1057,28 @@
     return undefined;
   }
 
+  function matchCollabEntries(fieldName, filterEntries, values) {
+    for (let i = 0; i < values.length; i += 1) {
+      const entry = findMatchingEntry(filterEntries, values[i]);
+      if (entry) {
+        return {
+          name: fieldName,
+          value: String(values[i]).slice(0, 40),
+          filter: displayFilterEntry(entry),
+        };
+      }
+    }
+    return null;
+  }
+
   function matchCollabChannel(fieldName, rendererKey, filterEntries, obj) {
     if (rendererKey !== 'lockupViewModel') return null;
     if (!Array.isArray(filterEntries) || filterEntries.length === 0) return null;
     if (fieldName === 'channelId') {
-      const collabIds = getCollaboratorChannelIds(obj);
-      for (let i = 0; i < collabIds.length; i += 1) {
-        const id = collabIds[i];
-        const entry = findMatchingEntry(filterEntries, id);
-        if (entry) {
-          return {
-            name: fieldName,
-            value: String(id).slice(0, 40),
-            filter: displayFilterEntry(entry),
-          };
-        }
-      }
-      return null;
+      return matchCollabEntries(fieldName, filterEntries, getCollaboratorChannelIds(obj));
     }
     if (fieldName === 'channelName') {
-      const collabNames = getCollaboratorChannelNames(obj);
-      for (let i = 0; i < collabNames.length; i += 1) {
-        const collabName = collabNames[i];
-        const entry = findMatchingEntry(filterEntries, collabName);
-        if (entry) {
-          return {
-            name: fieldName,
-            value: String(collabName).slice(0, 40),
-            filter: displayFilterEntry(entry),
-          };
-        }
-      }
-      return null;
+      return matchCollabEntries(fieldName, filterEntries, getCollaboratorChannelNames(obj));
     }
     return null;
   }
@@ -1713,26 +1703,30 @@
     return ours;
   }
 
-  function skipBlockedShort(videoId) {
-    if (typeof videoId !== 'string' || videoId.length === 0) return;
+  function canArmShortSkip(videoId) {
+    if (typeof videoId !== 'string' || videoId.length === 0) return false;
     try {
-      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return false;
     } catch (e) {
-      return;
+      return false;
     }
     try {
-      if (currentShortsId() !== videoId) return;
+      if (currentShortsId() !== videoId) return false;
     } catch (e) {
-      return;
+      return false;
     }
     try {
-      if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return;
+      if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return false;
     } catch (e) {
-      return;
+      return false;
     }
-    if (shortsSkipArmedFor === videoId) return;
-    if (shortsSkipFiredIds.has(videoId)) return;
-    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return;
+    if (shortsSkipArmedFor === videoId) return false;
+    if (shortsSkipFiredIds.has(videoId)) return false;
+    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return false;
+    return true;
+  }
+
+  function startShortSkipSweep(videoId) {
     shortsSkipArmedFor = videoId;
     shortsSkipTriggeredAt = 0;
     if (typeof setInterval !== 'function') return;
@@ -1752,6 +1746,11 @@
         if (shortsSkipArmedFor === videoId) shortsSkipArmedFor = null;
       }
     }, 250);
+  }
+
+  function skipBlockedShort(videoId) {
+    if (!canArmShortSkip(videoId)) return;
+    startShortSkipSweep(videoId);
   }
 
   function skipBlockedShortTick(videoId, tries) {
@@ -1878,6 +1877,14 @@
       scrubReelThumbnails.call({ object: resp });
     } catch (e) {}
   }
+  function scrubReelThumbUrl(item) {
+    try {
+      if (item && typeof item.url === 'string' && item.url.indexOf('i.ytimg.com') !== -1) {
+        item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
+      }
+    } catch (e) {}
+  }
+
   function scrubReelThumbnailUrls(node) {
     try {
       if (!node || typeof node !== 'object' || node instanceof Array) return;
@@ -1885,14 +1892,7 @@
         try {
           const list = node[key];
           if (!(list instanceof Array)) continue;
-          for (let i = 0; i < list.length; i += 1) {
-            try {
-              const item = list[i];
-              if (item && typeof item.url === 'string' && item.url.indexOf('i.ytimg.com') !== -1) {
-                item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
-              }
-            } catch (e) {}
-          }
+          for (let i = 0; i < list.length; i += 1) scrubReelThumbUrl(list[i]);
         } catch (e) {}
       }
     } catch (e) {}
@@ -2137,17 +2137,7 @@
     if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
       ObjectFilter(resp, filterRules.main, [], true);
     } else if (url.pathname === '/youtubei/v1/get_watch') {
-      if (!(resp instanceof Array)) return;
-      resp.forEach((o) => {
-        if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
-          playerHasBeenBlocked = false;
-          ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
-        } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
-          const postActions = [fixAutoplay];
-          if (playerHasBeenBlocked) postActions.push(redirectToNext);
-          ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
-        }
-      });
+      filterGetWatchResponse(resp);
     } else if (['/youtubei/v1/next'].includes(url.pathname)) {
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
@@ -2157,8 +2147,7 @@
         url.pathname,
       )
     ) {
-      filterReelSequenceResponse(resp);
-      ObjectFilter(resp, mergedFilterRules, [], true);
+      filterReelResponse(resp);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {
@@ -2168,6 +2157,25 @@
     } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       ObjectFilter(resp, filterRules.comments, [], true);
     }
+  }
+
+  function filterGetWatchResponse(resp) {
+    if (!(resp instanceof Array)) return;
+    resp.forEach((o) => {
+      if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
+        playerHasBeenBlocked = false;
+        ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
+      } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
+        const postActions = [fixAutoplay];
+        if (playerHasBeenBlocked) postActions.push(redirectToNext);
+        ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
+      }
+    });
+  }
+
+  function filterReelResponse(resp) {
+    filterReelSequenceResponse(resp);
+    ObjectFilter(resp, mergedFilterRules, [], true);
   }
 
   function filterSpfPlayer(obj) {
@@ -2713,7 +2721,7 @@
     };
   }
 
-  function extractMenuItems(obj, attr) {
+  function extractDirectMenuFlags(obj, attr) {
     if (has.call(obj[attr], 'videoActions')) {
       return {
         items: obj[attr].videoActions.menuRenderer.items,
@@ -2730,6 +2738,12 @@
         isLockupViewModel: false,
       };
     }
+    return undefined;
+  }
+
+  function extractMenuItems(obj, attr) {
+    const direct = extractDirectMenuFlags(obj, attr);
+    if (direct !== undefined) return direct;
     if (attr === 'commentRenderer') {
       return extractCommentMenuFlags(obj, attr);
     }
@@ -2742,6 +2756,10 @@
     if (attr === 'reelPlayerOverlayRenderer') {
       return extractReelOverlayMenuFlags(obj, attr);
     }
+    return extractAttrMenuFlags(obj, attr);
+  }
+
+  function extractAttrMenuFlags(obj, attr) {
     if (attr === 'reelItemWatchResponse' || attr === 'topbar') {
       return extractReelTopbarMenuFlags(obj, attr);
     }
@@ -2869,14 +2887,8 @@
     return items;
   }
 
-  function extractReelTopbarMenuFlags(obj, attr) {
-    const root = attr === 'reelItemWatchResponse' ? obj[attr] : obj;
-    const found = findReelTopbarSheet(root);
-    if (!found) return null;
-    const overlay = getObjectByPath(root, 'overlay.reelPlayerOverlayRenderer');
-    const channel = overlay ? reelOverlayChannelFrom(overlay) : { id: undefined, text: undefined };
-    const video = currentShortsVideo();
-    Object.defineProperty(found.sheet, 'blockTube', {
+  function stampReelTopbarSheet(sheet, channel, video) {
+    Object.defineProperty(sheet, 'blockTube', {
       value: {
         metadata: {
           channelId: channel.id,
@@ -2892,6 +2904,16 @@
       enumerable: true,
       configurable: true,
     });
+  }
+
+  function extractReelTopbarMenuFlags(obj, attr) {
+    const root = attr === 'reelItemWatchResponse' ? obj[attr] : obj;
+    const found = findReelTopbarSheet(root);
+    if (!found) return null;
+    const overlay = getObjectByPath(root, 'overlay.reelPlayerOverlayRenderer');
+    const channel = overlay ? reelOverlayChannelFrom(overlay) : { id: undefined, text: undefined };
+    const video = currentShortsVideo();
+    stampReelTopbarSheet(found.sheet, channel, video);
     return {
       items: found.listItems,
       sheet: found.sheet,
@@ -3017,6 +3039,29 @@
     }
   }
 
+  function neutralizeReelMenuCommand(vm, tag) {
+    const context = vm.rendererContext;
+    if (context) {
+      if (!context.commandContext || typeof context.commandContext !== 'object') {
+        context.commandContext = {};
+      }
+      if (!context.commandContext.onTap || typeof context.commandContext.onTap !== 'object') {
+        context.commandContext.onTap = {};
+      }
+      context.commandContext.onTap.innertubeCommand = {
+        clickTrackingParams: `bt-${tag}`,
+        commandMetadata: { webCommandMetadata: { sendPost: false, apiUrl: '' } },
+        feedbackEndpoint: {
+          feedbackToken: '',
+          uiActions: { hideEnclosingContainer: false },
+          actions: [],
+        },
+      };
+      context.blockTubeReelEntry = tag;
+    }
+    vm.trackingParams = `bt-${tag}`;
+  }
+
   function cloneReelMenuItem(template, title, imageName, tag) {
     const clone = deepClone(template);
     const vm = clone.listItemViewModel;
@@ -3027,26 +3072,7 @@
       if (source && source.clientResource) source.clientResource.imageName = imageName;
     } catch (e) {}
     try {
-      const context = vm.rendererContext;
-      if (context) {
-        if (!context.commandContext || typeof context.commandContext !== 'object') {
-          context.commandContext = {};
-        }
-        if (!context.commandContext.onTap || typeof context.commandContext.onTap !== 'object') {
-          context.commandContext.onTap = {};
-        }
-        context.commandContext.onTap.innertubeCommand = {
-          clickTrackingParams: `bt-${tag}`,
-          commandMetadata: { webCommandMetadata: { sendPost: false, apiUrl: '' } },
-          feedbackEndpoint: {
-            feedbackToken: '',
-            uiActions: { hideEnclosingContainer: false },
-            actions: [],
-          },
-        };
-        context.blockTubeReelEntry = tag;
-      }
-      vm.trackingParams = `bt-${tag}`;
+      neutralizeReelMenuCommand(vm, tag);
     } catch (e) {}
     return clone;
   }
@@ -3781,6 +3807,19 @@
     }
   }
 
+  function dismissShortsTap(type, data, parentData, isShorts, isWatch) {
+    const isShortsTap = isShorts || parentData?._btOriginalAttr === 'shortsLockupViewModel';
+    if (!isShortsTap || !isCardRemovingTap(type)) return;
+    if (isWatch) {
+      applyWatchBlockEffect(type, data, parentData);
+    } else {
+      dismissShortsShelfCard(
+        shortsTapVideoId(parentData, type, data),
+        type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW ? 'Removed from whitelist' : 'Blocked',
+      );
+    }
+  }
+
   function menuOnTap(event) {
     if (storageData === undefined) return;
 
@@ -3812,18 +3851,38 @@
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
-    const isShortsTap = isShorts || parentData?._btOriginalAttr === 'shortsLockupViewModel';
-    if (isShortsTap && isCardRemovingTap(type)) {
-      if (isWatch) {
-        applyWatchBlockEffect(type, data, parentData);
-      } else {
-        dismissShortsShelfCard(
-          shortsTapVideoId(parentData, type, data),
-          type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW ? 'Removed from whitelist' : 'Blocked',
-        );
-      }
-    }
+    dismissShortsTap(type, data, parentData, isShorts, isWatch);
     if (!isWatch) forwardMenuTap.call(this, event);
+  }
+
+  function watchBlockVideoId(type, data, live, stamp) {
+    const id =
+      (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
+        data &&
+        typeof data.id === 'string' &&
+        data.id) ||
+      (typeof live.id === 'string' && live.id) ||
+      (typeof stamp.videoId === 'string' && stamp.videoId) ||
+      undefined;
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
+  }
+
+  function watchBlockAttribution(type, data, parentData) {
+    const live = currentShortsVideo();
+    const stamp = (parentData && parentData.blockTube && parentData.blockTube.metadata) || {};
+    const videoId = watchBlockVideoId(type, data, live, stamp);
+    if (videoId === undefined) return undefined;
+    const isVideo = type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO;
+    return {
+      videoId,
+      channelId:
+        (!isVideo && data && typeof data.id === 'string' && data.id) ||
+        (typeof stamp.channelId === 'string' && stamp.channelId) ||
+        undefined,
+      channelName: (!isVideo && data && data.text) || stamp.channelName || undefined,
+      title: (isVideo && data && data.text) || live.text || stamp.videoName,
+      message: isVideo ? 'Video Blocked' : 'Channel Blocked',
+    };
   }
 
   function applyWatchBlockEffect(type, data, parentData) {
@@ -3832,45 +3891,14 @@
     } catch (e) {}
     if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return;
     try {
-      const live = currentShortsVideo();
-      const stamp = (parentData && parentData.blockTube && parentData.blockTube.metadata) || {};
-      const videoId =
-        (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
-          data &&
-          typeof data.id === 'string' &&
-          data.id) ||
-        (typeof live.id === 'string' && live.id) ||
-        (typeof stamp.videoId === 'string' && stamp.videoId) ||
-        undefined;
-      if (typeof videoId !== 'string' || videoId.length === 0) return;
-      const channelId =
-        (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO &&
-          data &&
-          typeof data.id === 'string' &&
-          data.id) ||
-        (typeof stamp.channelId === 'string' && stamp.channelId) ||
-        undefined;
-      const message =
-        type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO ? 'Video Blocked' : 'Channel Blocked';
+      const attribution = watchBlockAttribution(type, data, parentData);
+      if (attribution === undefined) return;
+      const { message, ...target } = attribution;
       try {
-        showBlockedShortOverlay(
-          {
-            videoId,
-            channelId,
-            channelName:
-              (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && data.text) ||
-              stamp.channelName ||
-              undefined,
-            title:
-              (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.VIDEO && data && data.text) ||
-              live.text ||
-              stamp.videoName,
-          },
-          message,
-        );
+        showBlockedShortOverlay(target, message);
       } catch (e) {}
       try {
-        skipBlockedShort(videoId);
+        skipBlockedShort(attribution.videoId);
       } catch (e) {}
     } catch (e) {}
   }
@@ -3921,6 +3949,18 @@
     return { videoId, channelId, channelName, title };
   }
 
+  function reelFromShadowHost(host) {
+    try {
+      const tag = host && typeof host.tagName === 'string' ? host.tagName.toLowerCase() : '';
+      if (tag === 'ytd-reel-video-renderer') return host;
+      if (host && typeof host.closest === 'function') {
+        const reel = host.closest('ytd-reel-video-renderer');
+        if (reel) return reel;
+      }
+    } catch (e) {}
+    return undefined;
+  }
+
   function shortsOverlayReelFrom(node) {
     try {
       if (node && typeof node.closest === 'function') {
@@ -3934,14 +3974,8 @@
       while (root && root.host && guard < 4) {
         guard += 1;
         const host = root.host;
-        try {
-          const tag = host && typeof host.tagName === 'string' ? host.tagName.toLowerCase() : '';
-          if (tag === 'ytd-reel-video-renderer') return host;
-          if (host && typeof host.closest === 'function') {
-            const reel = host.closest('ytd-reel-video-renderer');
-            if (reel) return reel;
-          }
-        } catch (e) {}
+        const reel = reelFromShadowHost(host);
+        if (reel) return reel;
         try {
           root = typeof host.getRootNode === 'function' ? host.getRootNode() : null;
         } catch (e) {
@@ -4153,27 +4187,30 @@
     } catch (e) {}
   }
 
+  function removeShortsCoverKid(host, kid) {
+    try {
+      const mark = kid && kid.getAttribute ? kid.getAttribute('data-bt-cover') : null;
+      if (mark !== null && mark !== undefined && host.removeChild) {
+        host.removeChild(kid);
+      }
+    } catch (e) {}
+  }
+
+  function revealShortsHost(host) {
+    try {
+      const kids = host.children;
+      if (kids) {
+        for (let k = kids.length - 1; k >= 0; k -= 1) removeShortsCoverKid(host, kids[k]);
+      }
+    } catch (e) {}
+    try {
+      if (host.setAttribute) host.setAttribute('data-bt-revealed', '1');
+    } catch (e) {}
+  }
+
   function shortsOverlayRevealPrehide() {
     const hosts = shortsOverlayCurrentHosts();
-    for (let i = 0; i < hosts.length; i += 1) {
-      try {
-        const kids = hosts[i].children;
-        if (kids) {
-          for (let k = kids.length - 1; k >= 0; k -= 1) {
-            try {
-              const kid = kids[k];
-              const mark = kid && kid.getAttribute ? kid.getAttribute('data-bt-cover') : null;
-              if (mark !== null && mark !== undefined && hosts[i].removeChild) {
-                hosts[i].removeChild(kid);
-              }
-            } catch (e) {}
-          }
-        }
-      } catch (e) {}
-      try {
-        if (hosts[i].setAttribute) hosts[i].setAttribute('data-bt-revealed', '1');
-      } catch (e) {}
-    }
+    for (let i = 0; i < hosts.length; i += 1) revealShortsHost(hosts[i]);
     shortsOverlayUnblankVideo();
   }
 
@@ -4258,7 +4295,11 @@
       alignItems: 'center',
       justifyContent: 'center',
     });
+    root.appendChild(shortsOverlayPanel(block.message));
+    return root;
+  }
 
+  function shortsOverlayPanel(message) {
     const panel = document.createElement('div');
     shortsOverlayStyle(panel, {
       width: '80%',
@@ -4266,7 +4307,12 @@
       textAlign: 'center',
       padding: '16px',
     });
+    panel.appendChild(shortsOverlayTitle());
+    panel.appendChild(shortsOverlayReason(message));
+    return panel;
+  }
 
+  function shortsOverlayTitle() {
     const title = document.createElement('div');
     title.textContent = 'Blocked by BlockTube';
     shortsOverlayStyle(title, {
@@ -4276,20 +4322,19 @@
       fontFamily: 'Roboto, Arial, sans-serif',
       marginBottom: '8px',
     });
-    panel.appendChild(title);
+    return title;
+  }
 
+  function shortsOverlayReason(message) {
     const reason = document.createElement('div');
-    reason.textContent = block.message || 'Video blocked by BlockTube filter';
+    reason.textContent = message || 'Video blocked by BlockTube filter';
     shortsOverlayStyle(reason, {
       color: '#ccc',
       fontSize: '13px',
       fontFamily: 'Roboto, Arial, sans-serif',
       overflowWrap: 'anywhere',
     });
-    panel.appendChild(reason);
-
-    root.appendChild(panel);
-    return root;
+    return reason;
   }
 
   function removeShortsOverlay() {
@@ -4368,28 +4413,30 @@
     }, 150);
   }
 
-  function shortsOverlayPaintCurrent(allowFallback) {
+  function recallShortsBlock() {
     if (shortsOverlayEl) {
       shortsOverlayClearPending();
-      return;
+      return false;
     }
-    if (!shortsOverlayStillCurrent()) {
-      let remembered = null;
-      try {
-        const id = currentShortsId();
-        if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
-          remembered = { videoId: id, message: shortsBlockedOverlays.get(id) };
-        }
-      } catch (e) {
-        remembered = null;
+    if (shortsOverlayStillCurrent()) return true;
+    let remembered = null;
+    try {
+      const id = currentShortsId();
+      if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
+        remembered = { videoId: id, message: shortsBlockedOverlays.get(id) };
       }
-      if (!remembered) {
-        shortsOverlayClearPending();
-        return;
-      }
-      lastShortsBlock = remembered;
+    } catch (e) {
+      remembered = null;
     }
-    shortsOverlayBlankVideo();
+    if (!remembered) {
+      shortsOverlayClearPending();
+      return false;
+    }
+    lastShortsBlock = remembered;
+    return true;
+  }
+
+  function resolveShortsOverlayHost(allowFallback) {
     let host = null;
     try {
       host = shortsOverlayReelHost();
@@ -4403,27 +4450,22 @@
         host = null;
       }
     }
-    if (!host) {
-      shortsOverlaySchedulePaintRetry();
-      return;
-    }
-    let el = null;
-    try {
-      el = shortsOverlayBuild();
-    } catch (e) {
-      el = null;
-    }
-    if (!el) return;
+    return host;
+  }
+
+  function attachShortsOverlay(host, el) {
     shortsOverlayEl = el;
     shortsOverlayEnsureHostPositioned(host);
     try {
       host.appendChild(shortsOverlayEl);
     } catch (e) {
       shortsOverlayEl = null;
-      shortsOverlaySchedulePaintRetry();
-      return;
+      return false;
     }
-    shortsOverlayClearPending();
+    return true;
+  }
+
+  function startShortsOverlaySync() {
     if (typeof setInterval !== 'function') return;
     shortsOverlaySyncTimer = setInterval(() => {
       let done = false;
@@ -4439,6 +4481,29 @@
         shortsOverlaySyncTimer = 0;
       }
     }, 250);
+  }
+
+  function shortsOverlayPaintCurrent(allowFallback) {
+    if (!recallShortsBlock()) return;
+    shortsOverlayBlankVideo();
+    const host = resolveShortsOverlayHost(allowFallback);
+    if (!host) {
+      shortsOverlaySchedulePaintRetry();
+      return;
+    }
+    let el = null;
+    try {
+      el = shortsOverlayBuild();
+    } catch (e) {
+      el = null;
+    }
+    if (!el) return;
+    if (!attachShortsOverlay(host, el)) {
+      shortsOverlaySchedulePaintRetry();
+      return;
+    }
+    shortsOverlayClearPending();
+    startShortsOverlaySync();
   }
 
   function showBlockedShortOverlay(attribution, message) {

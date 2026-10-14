@@ -147,38 +147,31 @@
   // every collaborator in the stack as well. ANY match blocks, and the
   // returned descriptor names the filter that fired plus the collaborator
   // value it matched.
+  // First entry matching any listed value, as a fired-filter descriptor.
+  // Shared by both collab branches below (ids and names differ only in the
+  // value list they test).
+  function matchCollabEntries(fieldName, filterEntries, values) {
+    for (let i = 0; i < values.length; i += 1) {
+      const entry = findMatchingEntry(filterEntries, values[i]);
+      if (entry) {
+        return {
+          name: fieldName,
+          value: String(values[i]).slice(0, 40),
+          filter: displayFilterEntry(entry),
+        };
+      }
+    }
+    return null;
+  }
+
   function matchCollabChannel(fieldName, rendererKey, filterEntries, obj) {
     if (rendererKey !== 'lockupViewModel') return null;
     if (!Array.isArray(filterEntries) || filterEntries.length === 0) return null;
     if (fieldName === 'channelId') {
-      const collabIds = getCollaboratorChannelIds(obj);
-      for (let i = 0; i < collabIds.length; i += 1) {
-        const id = collabIds[i];
-        const entry = findMatchingEntry(filterEntries, id);
-        if (entry) {
-          return {
-            name: fieldName,
-            value: String(id).slice(0, 40),
-            filter: displayFilterEntry(entry),
-          };
-        }
-      }
-      return null;
+      return matchCollabEntries(fieldName, filterEntries, getCollaboratorChannelIds(obj));
     }
     if (fieldName === 'channelName') {
-      const collabNames = getCollaboratorChannelNames(obj);
-      for (let i = 0; i < collabNames.length; i += 1) {
-        const collabName = collabNames[i];
-        const entry = findMatchingEntry(filterEntries, collabName);
-        if (entry) {
-          return {
-            name: fieldName,
-            value: String(collabName).slice(0, 40),
-            filter: displayFilterEntry(entry),
-          };
-        }
-      }
-      return null;
+      return matchCollabEntries(fieldName, filterEntries, getCollaboratorChannelNames(obj));
     }
     return null;
   }

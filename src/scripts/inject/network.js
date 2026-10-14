@@ -4,17 +4,7 @@
     if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
       ObjectFilter(resp, filterRules.main, [], true);
     } else if (url.pathname === '/youtubei/v1/get_watch') {
-      if (!(resp instanceof Array)) return;
-      resp.forEach((o) => {
-        if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
-          playerHasBeenBlocked = false;
-          ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
-        } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
-          const postActions = [fixAutoplay];
-          if (playerHasBeenBlocked) postActions.push(redirectToNext);
-          ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
-        }
-      });
+      filterGetWatchResponse(resp);
     } else if (['/youtubei/v1/next'].includes(url.pathname)) {
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
@@ -24,14 +14,7 @@
         url.pathname,
       )
     ) {
-      // Swiping between Shorts loads each reel (overlay, channel bar, `...`
-      // menu with Block entries) via these endpoints, shaped like watch-next.
-      // Sequence filter first blocks channel-matching embedded prefetched players
-      // and neutralizes every preloaded frame (no channel linkage, no frame may
-      // ever paint); then usual pass filters matches + stamps Block menu entries
-      // (no autoplay fixups — no two-column results).
-      filterReelSequenceResponse(resp);
-      ObjectFilter(resp, mergedFilterRules, [], true);
+      filterReelResponse(resp);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
     } else if (url.pathname === '/youtubei/v1/player') {
@@ -43,6 +26,32 @@
     } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       ObjectFilter(resp, filterRules.comments, [], true);
     }
+  }
+
+  // One get_watch batch: player parts get the player rules, watch-next parts
+  // the merged rules with autoplay fixups. Non-array bodies pass through.
+  function filterGetWatchResponse(resp) {
+    if (!(resp instanceof Array)) return;
+    resp.forEach((o) => {
+      if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
+        playerHasBeenBlocked = false;
+        ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
+      } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
+        const postActions = [fixAutoplay];
+        if (playerHasBeenBlocked) postActions.push(redirectToNext);
+        ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
+      }
+    });
+  }
+
+  // One reel response (swipe loads overlay, channel bar, `...` menu with
+  // Block entries): sequence filter first blocks channel-matching embedded
+  // prefetched players and neutralizes every preloaded frame (no channel
+  // linkage, no frame may ever paint); then usual pass filters matches +
+  // stamps Block menu entries (no autoplay fixups — no two-column results).
+  function filterReelResponse(resp) {
+    filterReelSequenceResponse(resp);
+    ObjectFilter(resp, mergedFilterRules, [], true);
   }
 
   // One SPF part carrying an embedded player: hydrate the raw response and

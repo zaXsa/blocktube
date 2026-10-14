@@ -99,6 +99,32 @@
     return entries;
   }
 
+  // One annotation line for a block: `// <Verb> by <origin> (<text>) (<date>)`.
+  // Comment-popup taps drop the handle-style leading @; Shorts taps keep the
+  // `short context menu` origin so the surface stays visible in the entry.
+  function blockAnnotationLine(blockType, info) {
+    const now = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    }).format(new Date());
+    const viaComment = info && info.via === BLOCKTUBE_CONSTS.VIA.COMMENT;
+    const viaShorts = info && info.via === BLOCKTUBE_CONSTS.VIA.SHORTS;
+    const rawText = blockAnnotationText(info);
+    const stripped = viaComment ? rawText.replace(/^@+/, '').trim() : rawText;
+    const text = stripped || rawText;
+    const verb = blockProvenanceVerb(blockType);
+    const origin = viaComment
+      ? BLOCKTUBE_CONSTS.ORIGINS.COMMENT
+      : viaShorts
+        ? BLOCKTUBE_CONSTS.ORIGINS.SHORT
+        : BLOCKTUBE_CONSTS.ORIGINS.CONTEXT;
+    return `// ${verb} by ${origin} (${text}) (${now})`;
+  }
+
   // Handlers for messages coming from the injected page script
   const messageHandlers = {
     handleContextBlock(data) {
@@ -106,35 +132,10 @@
       if (!CONTEXT_BLOCK_TYPES.includes(blockType)) return;
       if (!data.info || !data.info.id) return;
 
-      // data.info.text flows into a comment line; strip newlines so a crafted
-      // text value can't splice additional filter lines into the block list.
-      const options = {
-        year: 'numeric',
-        month: 'numeric',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: 'numeric',
-        second: 'numeric',
-      };
-      const now = new Intl.DateTimeFormat(undefined, options).format(new Date());
-      // Comment-popup taps annotate their origin (`comment menu`) and drop
-      // the handle-style leading @, so the entry records a clean name plus
-      // where it came from: `// Blocked by comment menu (name) (date)`.
-      // Shorts taps (shelf cards and the watch-page `...` sheet) annotate
-      // `short context menu`, so the surface a block came from stays visible.
-      // Anything else keeps the long-standing `context menu` wording.
-      const viaComment = data.info && data.info.via === BLOCKTUBE_CONSTS.VIA.COMMENT;
-      const viaShorts = data.info && data.info.via === BLOCKTUBE_CONSTS.VIA.SHORTS;
-      const rawText = blockAnnotationText(data.info);
-      const stripped = viaComment ? rawText.replace(/^@+/, '').trim() : rawText;
-      const text = stripped || rawText;
-      const verb = blockProvenanceVerb(blockType);
-      const origin = viaComment
-        ? BLOCKTUBE_CONSTS.ORIGINS.COMMENT
-        : viaShorts
-          ? BLOCKTUBE_CONSTS.ORIGINS.SHORT
-          : BLOCKTUBE_CONSTS.ORIGINS.CONTEXT;
-      const entries = [`// ${verb} by ${origin} (${text}) (${now})`];
+      // data.info.text flows into a comment line; blockAnnotationLine strips
+      // newlines via blockAnnotationText so a crafted text value can't splice
+      // additional filter lines into the block list.
+      const entries = [blockAnnotationLine(blockType, data.info)];
       entries.push(...blockEntryIds(data.info));
       entries.push('');
       utils.safePortPost({
