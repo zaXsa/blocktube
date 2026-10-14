@@ -130,10 +130,10 @@
       const text = stripped || rawText;
       const verb = blockProvenanceVerb(blockType);
       const origin = viaComment
-        ? 'comment menu'
+        ? BLOCKTUBE_CONSTS.ORIGINS.COMMENT
         : viaShorts
-          ? 'short context menu'
-          : 'context menu';
+          ? BLOCKTUBE_CONSTS.ORIGINS.SHORT
+          : BLOCKTUBE_CONSTS.ORIGINS.CONTEXT;
       const entries = [`// ${verb} by ${origin} (${text}) (${now})`];
       entries.push(...blockEntryIds(data.info));
       entries.push('');

@@ -72,6 +72,15 @@
       REMOVE: 'Removed from whitelist',
       BLOCK: 'Blocked',
     }),
+    // Origin phrases for the same annotation lines: where a block came from.
+    // Single source for the writer (content script), the parser (options-page
+    // annotations) and the filter tags (options page).
+    ORIGINS: Object.freeze({
+      CONTEXT: 'context menu',
+      SHORT: 'short context menu',
+      COMMENT: 'comment menu',
+      DIRECT: 'direct add',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the

@@ -142,7 +142,12 @@
     const prefix = PROVENANCE_PREFIXES.find((p) => trimmed.startsWith(p));
     if (prefix === undefined) return null;
     const rest = line.trim().slice(prefix.length);
-    const kinds = ['short context menu', 'context menu', 'direct add', 'comment menu'];
+    const kinds = [
+      BLOCKTUBE_CONSTS.ORIGINS.SHORT,
+      BLOCKTUBE_CONSTS.ORIGINS.CONTEXT,
+      BLOCKTUBE_CONSTS.ORIGINS.DIRECT,
+      BLOCKTUBE_CONSTS.ORIGINS.COMMENT,
+    ];
     const kind = kinds.find((k) => rest === k || rest.startsWith(`${k} `));
     if (kind === undefined) return { kind: 'other', text: '', date: '', raw: line };
     const tail = rest.slice(kind.length).trim();

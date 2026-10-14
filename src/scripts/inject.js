@@ -65,6 +65,12 @@
       REMOVE: 'Removed from whitelist',
       BLOCK: 'Blocked',
     }),
+    ORIGINS: Object.freeze({
+      CONTEXT: 'context menu',
+      SHORT: 'short context menu',
+      COMMENT: 'comment menu',
+      DIRECT: 'direct add',
+    }),
   });
 
   const CONTEXT_BLOCK_TYPES = Object.freeze([
