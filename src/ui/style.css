@@ -752,7 +752,7 @@ input#import {
      full-width row and the count/trio stack beneath — one stable state
      per width. */
   flex: 1 1 0%;
-  min-width: 10em;
+  min-width: 16em;
   max-width: min(28em, 100%);
   background: var(--btn-bg);
   border: 2px solid transparent;
@@ -1193,6 +1193,30 @@ input#discard_btn {
   cursor: pointer;
 }
 
+/* Shell breakpoint (1040px — above the generic 800px "Mobile" block below):
+   the sidebar eats ~270px, so with it present the toolbar drops below its
+   ~720px one-line need (16em search floor + 28ch count floor + trio) while
+   still in row mode: the trio wraps below, then pops back onto the same line
+   when the column flip hands the toolbar ~230px back — below, same line,
+   below again across one continuous sweep. Stacking the nav before the wrap
+   point keeps the toolbar at full width through that whole range, so the trio
+   goes one-line → wrapped exactly once. Measured wrap ≈ 985px viewport;
+   +55px covers cross-font variance in the ch-based floors. Only the shell
+   direction moves here — body padding, header and fieldset rhythm still flip
+   at 800px. */
+@media only screen and (max-width: 1040px) {
+  .opt-shell {
+    flex-direction: column;
+  }
+  /* Narrow: the nav stays a vertical stack (full width, each tab below the
+     previous) instead of a wrapping row — wrapped tabs pop between "below"
+     and "right" while resizing, a vertical list has no such state. */
+  .opt-nav {
+    min-width: 0;
+    align-self: stretch;
+  }
+}
+
 /* Mobile */
 @media only screen and (max-width: 800px) {
   body {
@@ -1204,16 +1228,6 @@ input#discard_btn {
   #logo-img {
     height: 24px;
     width: 24px;
-  }
-  .opt-shell {
-    flex-direction: column;
-  }
-  /* Narrow: the nav stays a vertical stack (full width, each tab below the
-     previous) instead of a wrapping row — wrapped tabs pop between "below"
-     and "right" while resizing, a vertical list has no such state. */
-  .opt-nav {
-    min-width: 0;
-    align-self: stretch;
   }
   fieldset > div {
     padding-inline: 0;
