@@ -354,12 +354,7 @@
       if (!host || typeof host.querySelector !== 'function') return;
       if (host.hasAttribute && host.hasAttribute('data-bt-revealed')) return;
       if (host.querySelector('[data-bt-cover]')) return;
-      let cover = null;
-      try {
-        cover = document.createElement('div');
-      } catch (e) {
-        return;
-      }
+      const cover = document.createElement('div');
       cover.setAttribute('data-bt-cover', '1');
       shortsOverlayStyle(cover, {
         position: 'absolute',
@@ -372,9 +367,7 @@
         pointerEvents: 'none',
       });
       shortsOverlayEnsureHostPositioned(host);
-      try {
-        host.appendChild(cover);
-      } catch (e) {}
+      host.appendChild(cover);
     } catch (e) {}
   }
 
@@ -720,12 +713,9 @@
   function logShortsPaintExpiry() {
     try {
       if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
-      let id = null;
-      try {
-        id = currentShortsId();
-      } catch (e) {
-        id = null;
-      }
+      // currentShortsId() is already fail-open (returns undefined, never
+      // throws), so no inner guard: the outer try covers the warn itself.
+      const id = currentShortsId();
       console.warn(`[BlockTube] Shorts overlay never painted for ${id} (no reel host found)`);
     } catch (e) {}
   }

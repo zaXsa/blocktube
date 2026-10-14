@@ -1707,24 +1707,16 @@
 
   function canArmShortSkip(videoId) {
     if (typeof videoId !== 'string' || videoId.length === 0) return false;
+    if (shortsSkipArmedFor === videoId) return false;
+    if (shortsSkipFiredIds.has(videoId)) return false;
+    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return false;
     try {
       if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return false;
-    } catch (e) {
-      return false;
-    }
-    try {
       if (currentShortsId() !== videoId) return false;
-    } catch (e) {
-      return false;
-    }
-    try {
       if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return false;
     } catch (e) {
       return false;
     }
-    if (shortsSkipArmedFor === videoId) return false;
-    if (shortsSkipFiredIds.has(videoId)) return false;
-    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return false;
     return true;
   }
 
@@ -3939,16 +3931,22 @@
       pauseReelPlayer();
     } catch (e) {}
     if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return;
+    let target;
+    let message;
+    let videoId;
     try {
       const attribution = watchBlockAttribution(type, data, parentData);
       if (attribution === undefined) return;
-      const { message, ...target } = attribution;
-      try {
-        showBlockedShortOverlay(target, message);
-      } catch (e) {}
-      try {
-        skipBlockedShort(attribution.videoId);
-      } catch (e) {}
+      ({ message, ...target } = attribution);
+      videoId = attribution.videoId;
+    } catch (e) {
+      return;
+    }
+    try {
+      showBlockedShortOverlay(target, message);
+    } catch (e) {}
+    try {
+      skipBlockedShort(videoId);
     } catch (e) {}
   }
 
@@ -4213,12 +4211,7 @@
       if (!host || typeof host.querySelector !== 'function') return;
       if (host.hasAttribute && host.hasAttribute('data-bt-revealed')) return;
       if (host.querySelector('[data-bt-cover]')) return;
-      let cover = null;
-      try {
-        cover = document.createElement('div');
-      } catch (e) {
-        return;
-      }
+      const cover = document.createElement('div');
       cover.setAttribute('data-bt-cover', '1');
       shortsOverlayStyle(cover, {
         position: 'absolute',
@@ -4231,9 +4224,7 @@
         pointerEvents: 'none',
       });
       shortsOverlayEnsureHostPositioned(host);
-      try {
-        host.appendChild(cover);
-      } catch (e) {}
+      host.appendChild(cover);
     } catch (e) {}
   }
 
@@ -4514,12 +4505,7 @@
   function logShortsPaintExpiry() {
     try {
       if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
-      let id = null;
-      try {
-        id = currentShortsId();
-      } catch (e) {
-        id = null;
-      }
+      const id = currentShortsId();
       console.warn(`[BlockTube] Shorts overlay never painted for ${id} (no reel host found)`);
     } catch (e) {}
   }

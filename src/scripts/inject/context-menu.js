@@ -1803,16 +1803,24 @@
       pauseReelPlayer();
     } catch (e) {}
     if (type === BLOCKTUBE_CONSTS.BLOCK_TYPES.UNALLOW) return;
+    let target;
+    let message;
+    let videoId;
     try {
       const attribution = watchBlockAttribution(type, data, parentData);
       if (attribution === undefined) return;
-      const { message, ...target } = attribution;
-      try {
-        showBlockedShortOverlay(target, message);
-      } catch (e) {}
-      try {
-        skipBlockedShort(attribution.videoId);
-      } catch (e) {}
+      ({ message, ...target } = attribution);
+      videoId = attribution.videoId;
+    } catch (e) {
+      return;
+    }
+    // Kept separate: the overlay must still attempt the skip when painting
+    // throws, and vice versa.
+    try {
+      showBlockedShortOverlay(target, message);
+    } catch (e) {}
+    try {
+      skipBlockedShort(videoId);
     } catch (e) {}
   }
 

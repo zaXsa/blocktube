@@ -182,25 +182,20 @@
   // throws (exotic realms never sweep).
   function canArmShortSkip(videoId) {
     if (typeof videoId !== 'string' || videoId.length === 0) return false;
+    // Cheap in-memory guards first: no DOM/realm reads when this video
+    // already armed, already swept, or the sweep budget is spent (a
+    // response flows through several ytPlayer rules — one sweep per video).
+    if (shortsSkipArmedFor === videoId) return false;
+    if (shortsSkipFiredIds.has(videoId)) return false;
+    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return false;
     try {
       if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX))
         return false;
-    } catch (e) {
-      return false;
-    }
-    try {
       if (currentShortsId() !== videoId) return false;
-    } catch (e) {
-      return false;
-    }
-    try {
       if (!storageData.options[OPT.SHORTS_SKIP_BLOCKED]) return false;
     } catch (e) {
       return false;
     }
-    if (shortsSkipArmedFor === videoId) return false;
-    if (shortsSkipFiredIds.has(videoId)) return false;
-    if (shortsConsecutiveSkips >= SHORTS_SKIP_CAP) return false;
     return true;
   }
 
