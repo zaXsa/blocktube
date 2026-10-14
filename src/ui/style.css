@@ -890,6 +890,13 @@ input#import {
   width: 15em;
 }
 
+/* Date content is a fixed-shape locale timestamp (nowrap, two lines), so the
+   column gets a fixed width sized to that max: dates hug the left instead of
+   floating in half the free space, and the freed width goes to Label. */
+.col-date {
+  width: 13em;
+}
+
 .cell-index {
   text-align: right;
 }
@@ -897,6 +904,10 @@ input#import {
 .table-scroll {
   overflow-y: auto;
   overflow-x: auto;
+  /* Reserve the vertical scrollbar gutter even when the list is short: the
+     rightmost (×) column otherwise shifts by the scrollbar width every time
+     the bar appears/disappears (paging, searching, adding/removing). */
+  scrollbar-gutter: stable;
   border: 1px solid var(--borders);
   border-radius: 8px;
   /* Native thickness (like the raw editors' fake bars): same gutter on both
@@ -1065,6 +1076,7 @@ input#import {
 
 .cell-date {
   white-space: nowrap;
+  text-align: left;
   opacity: .8;
   line-height: 1.4;
 }
