@@ -122,7 +122,10 @@
   // (`// Allowlisted by context menu …` / `direct add …`, via whitelist context-menu + Add-box flows).
   // Older entries predate the date: single-group `// Blocked by context menu (<text>)`. Text may
   // contain parens, so date is the LAST group; kind is the fixed word(s) after the prefix; rest stays unparsed.
-  const PROVENANCE_PREFIXES = ['// Blocked by ', '// Allowlisted by '];
+  const PROVENANCE_PREFIXES = [
+    `// ${BLOCKTUBE_CONSTS.VERBS.BLOCK} by `,
+    `// ${BLOCKTUBE_CONSTS.VERBS.ALLOW} by `,
+  ];
   const LABEL_PREFIX = '// Label:';
 
   // A label line, tolerating user spacing (`//Label:x` as well as

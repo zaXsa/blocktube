@@ -520,8 +520,8 @@
     }).format(new Date());
     const annotation =
       editorKey === 'whitelist'
-        ? `// Allowlisted by direct add () (${now})`
-        : `// Blocked by direct add () (${now})`;
+        ? `// ${BLOCKTUBE_CONSTS.VERBS.ALLOW} by direct add () (${now})`
+        : `// ${BLOCKTUBE_CONSTS.VERBS.BLOCK} by direct add () (${now})`;
     const prefix = current.trim() === '' ? '' : `${current.replace(/\n+$/, '')}\n\n`;
     cm.setValue(`${prefix}${annotation}\n${id}\n`);
     applyReadOnlyMarks(editorKey);

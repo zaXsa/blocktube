@@ -60,6 +60,11 @@
       SHORTS: 'shorts',
       COMMENT: 'comment',
     }),
+    VERBS: Object.freeze({
+      ALLOW: 'Allowlisted',
+      REMOVE: 'Removed from whitelist',
+      BLOCK: 'Blocked',
+    }),
   });
 
   const CONTEXT_BLOCK_TYPES = Object.freeze([

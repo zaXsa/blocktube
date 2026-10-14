@@ -62,6 +62,16 @@
       SHORTS: 'shorts',
       COMMENT: 'comment',
     }),
+    // Provenance verbs for stored annotation lines (`// <Verb> by <origin>
+    // (<text>) (<date>)`). Single source for the writer (content script),
+    // the parser prefixes (options-page annotations) and the Add-box lines.
+    // User-visible placeholder/toast wording stays as-is — only the
+    // annotation verbs live here.
+    VERBS: Object.freeze({
+      ALLOW: 'Allowlisted',
+      REMOVE: 'Removed from whitelist',
+      BLOCK: 'Blocked',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the
