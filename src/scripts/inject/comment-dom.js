@@ -256,7 +256,7 @@
     const name = channel.text || channel.id;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
       type,
-      info: { id: channel.id, text: name, via: 'comment' },
+      info: { id: channel.id, text: name, via: BLOCKTUBE_CONSTS.VIA.COMMENT },
     });
   }
 
@@ -430,7 +430,7 @@
   function saveCommentTextDialog(back, anchorEl, clean) {
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
       type: BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT,
-      info: { id: clean, text: clean, via: 'comment' },
+      info: { id: clean, text: clean, via: BLOCKTUBE_CONSTS.VIA.COMMENT },
     });
     placeholderCommentThread(anchorEl, commentPlaceholderMessage(BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT));
     applyCommentRuleLive(clean);

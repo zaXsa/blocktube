@@ -80,7 +80,7 @@
     const raw = Array.isArray(info.text) ? info.text.join(' + ') : info.text || '';
     let text = String(raw).replace(/\s+/g, ' ').trim().slice(0, 200);
     // Shorts shelf cards are the deliberate exception (see above).
-    if (!text && info.via !== 'shorts') {
+    if (!text && info.via !== BLOCKTUBE_CONSTS.VIA.SHORTS) {
       const firstId = Array.isArray(info.id) ? info.id[0] : info.id;
       if (typeof firstId === 'string' && firstId.length > 0) text = firstId.slice(0, 200);
     }
@@ -123,8 +123,8 @@
       // Shorts taps (shelf cards and the watch-page `...` sheet) annotate
       // `short context menu`, so the surface a block came from stays visible.
       // Anything else keeps the long-standing `context menu` wording.
-      const viaComment = data.info && data.info.via === 'comment';
-      const viaShorts = data.info && data.info.via === 'shorts';
+      const viaComment = data.info && data.info.via === BLOCKTUBE_CONSTS.VIA.COMMENT;
+      const viaShorts = data.info && data.info.via === BLOCKTUBE_CONSTS.VIA.SHORTS;
       const rawText = blockAnnotationText(data.info);
       const stripped = viaComment ? rawText.replace(/^@+/, '').trim() : rawText;
       const text = stripped || rawText;

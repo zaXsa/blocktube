@@ -55,6 +55,13 @@
       UNALLOW: 'unwhitelist',
       COMMENT: 'comment',
     }),
+    // Provenance `via` tags on CONTEXT_BLOCK_DATA info: which surface a tap
+    // came from. Read by the content script to annotate the stored entry.
+    // Distinct from OPTIONS.SHORTS (the `shorts` option key) — DO NOT merge.
+    VIA: Object.freeze({
+      SHORTS: 'shorts',
+      COMMENT: 'comment',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the

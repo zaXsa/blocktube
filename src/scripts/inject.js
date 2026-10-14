@@ -56,6 +56,10 @@
       UNALLOW: 'unwhitelist',
       COMMENT: 'comment',
     }),
+    VIA: Object.freeze({
+      SHORTS: 'shorts',
+      COMMENT: 'comment',
+    }),
   });
 
   const CONTEXT_BLOCK_TYPES = Object.freeze([
@@ -3786,7 +3790,7 @@
       menuAction,
     );
 
-    const blockInfo = isShorts || isWatch ? { ...data, via: 'shorts' } : data;
+    const blockInfo = isShorts || isWatch ? { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS } : data;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
@@ -4633,7 +4637,7 @@
     const name = channel.text || channel.id;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
       type,
-      info: { id: channel.id, text: name, via: 'comment' },
+      info: { id: channel.id, text: name, via: BLOCKTUBE_CONSTS.VIA.COMMENT },
     });
   }
 
@@ -4766,7 +4770,7 @@
   function saveCommentTextDialog(back, anchorEl, clean) {
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
       type: BLOCKTUBE_CONSTS.BLOCK_TYPES.COMMENT,
-      info: { id: clean, text: clean, via: 'comment' },
+      info: { id: clean, text: clean, via: BLOCKTUBE_CONSTS.VIA.COMMENT },
     });
     placeholderCommentThread(
       anchorEl,

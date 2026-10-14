@@ -1700,7 +1700,9 @@
     // "Blocked by short context menu" instead of "context menu", so the
     // surface a block came from stays visible.
     const blockInfo =
-      isShorts || isWatch ? { ...data, via: 'shorts' } : data;
+      isShorts || isWatch
+        ? { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS }
+        : data;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
