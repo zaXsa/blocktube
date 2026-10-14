@@ -327,7 +327,7 @@
   // preloaded video frames at once, or trap until present. Shorts-only.
   function hookInitialReelSequence() {
     try {
-      if (!document.location.pathname.startsWith('/shorts/')) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
     } catch (e) {
       return;
     }

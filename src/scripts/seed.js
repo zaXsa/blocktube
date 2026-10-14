@@ -162,6 +162,9 @@
   // hosts) gets a black cover on appearance (clean lifts, blocked stays under panel). Runs
   // before early-abort so covers apply even if YouTube initialized first; inline styles only
   // (no <style>), fail-open; blockTubeReady fail-safe never leaves a verdict-less (storage never arrived) page covered.
+  // NOTE: the '/shorts/' literals below mirror BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX
+  // but stay literal — seed.js runs before the consts.js embed is available in
+  // this MAIN world, so it cannot reference it. Keep in sync.
   try {
     if (document.location.pathname.startsWith('/shorts/')) {
       const SHORTS_COVER_ATTR = 'data-bt-cover';

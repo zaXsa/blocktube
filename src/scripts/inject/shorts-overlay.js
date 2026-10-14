@@ -417,7 +417,7 @@
       if (
         typeof document === 'undefined' ||
         !document.location ||
-        !document.location.pathname.startsWith('/shorts/')
+        !document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)
       ) {
         return;
       }
@@ -719,7 +719,7 @@
       return;
     }
     try {
-      if (!document.location.pathname.startsWith('/shorts/')) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
     } catch (e) {
       return;
     }

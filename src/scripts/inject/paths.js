@@ -459,7 +459,7 @@
   const SHORTS_TIME = -2;
 
   function parseTime(timeStr) {
-    if (timeStr === 'SHORTS') {
+    if (timeStr === BLOCKTUBE_CONSTS.SHORTS.MARKER) {
       return SHORTS_TIME;
     }
     const parts = String(timeStr)

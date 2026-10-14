@@ -1589,7 +1589,9 @@
     try {
       // Video ids are [A-Za-z0-9_-]-only, so interpolation cannot break out
       // of the attribute selector.
-      links = document.querySelectorAll(`a[href*="/shorts/${videoId}"]`);
+      links = document.querySelectorAll(
+        `a[href*="${BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX}${videoId}"]`,
+      );
     } catch (e) {
       return;
     }

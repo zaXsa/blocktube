@@ -71,6 +71,10 @@
       COMMENT: 'comment menu',
       DIRECT: 'direct add',
     }),
+    SHORTS: Object.freeze({
+      PATH_PREFIX: '/shorts/',
+      MARKER: 'SHORTS',
+    }),
   });
 
   const CONTEXT_BLOCK_TYPES = Object.freeze([
@@ -881,7 +885,7 @@
   const SHORTS_TIME = -2;
 
   function parseTime(timeStr) {
-    if (timeStr === 'SHORTS') {
+    if (timeStr === BLOCKTUBE_CONSTS.SHORTS.MARKER) {
       return SHORTS_TIME;
     }
     const parts = String(timeStr)
@@ -1333,7 +1337,7 @@
   };
 
   function hasShortsTimeOverlay(obj) {
-    const style = 'SHORTS';
+    const style = BLOCKTUBE_CONSTS.SHORTS.MARKER;
     const paths = [
       'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
       'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
@@ -1712,7 +1716,7 @@
   function skipBlockedShort(videoId) {
     if (typeof videoId !== 'string' || videoId.length === 0) return;
     try {
-      if (!document.location.pathname.startsWith('/shorts/')) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
     } catch (e) {
       return;
     }
@@ -1752,7 +1756,8 @@
 
   function skipBlockedShortTick(videoId, tries) {
     try {
-      if (document.location.pathname !== `/shorts/${videoId}`) return true;
+      if (document.location.pathname !== `${BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX}${videoId}`)
+        return true;
     } catch (e) {
       return true;
     }
@@ -2251,7 +2256,7 @@
   function blockShorts(data) {
     if (!Array.isArray(data.filterData.channelId)) data.filterData.channelId = [];
 
-    if (document.location.pathname.startsWith('/shorts/')) {
+    if (document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) {
       redirectToIndex();
     }
 
@@ -3712,7 +3717,9 @@
     }
     let links = null;
     try {
-      links = document.querySelectorAll(`a[href*="/shorts/${videoId}"]`);
+      links = document.querySelectorAll(
+        `a[href*="${BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX}${videoId}"]`,
+      );
     } catch (e) {
       return;
     }
@@ -4187,7 +4194,7 @@
       if (
         typeof document === 'undefined' ||
         !document.location ||
-        !document.location.pathname.startsWith('/shorts/')
+        !document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)
       ) {
         return;
       }
@@ -4443,7 +4450,7 @@
       return;
     }
     try {
-      if (!document.location.pathname.startsWith('/shorts/')) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
     } catch (e) {
       return;
     }
@@ -6236,7 +6243,7 @@
 
   function hookInitialReelSequence() {
     try {
-      if (!document.location.pathname.startsWith('/shorts/')) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
     } catch (e) {
       return;
     }

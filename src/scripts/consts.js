@@ -81,6 +81,17 @@
       COMMENT: 'comment menu',
       DIRECT: 'direct add',
     }),
+    // Shorts route constants. PATH_PREFIX is the `/shorts/` URL prefix every
+    // Shorts surface keys off (pathname checks + link selectors); MARKER is
+    // the literal 'SHORTS' duration text YouTube uses (a Short has no real
+    // time). Three meanings, three consts — do NOT merge with OPTIONS.SHORTS
+    // (the `shorts` option key) or VIA.SHORTS (the `shorts` provenance tag).
+    // NOTE: seed.js keeps its own '/shorts/' literals — it runs before this
+    // embed is available in the MAIN world, so it cannot reference them.
+    SHORTS: Object.freeze({
+      PATH_PREFIX: '/shorts/',
+      MARKER: 'SHORTS',
+    }),
   });
 
   // filterData keys the CONTEXT_BLOCK path may write to; enforced in both the

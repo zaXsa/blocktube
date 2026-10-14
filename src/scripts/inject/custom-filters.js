@@ -167,7 +167,7 @@
   function skipBlockedShort(videoId) {
     if (typeof videoId !== 'string' || videoId.length === 0) return;
     try {
-      if (!document.location.pathname.startsWith('/shorts/')) return;
+      if (!document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) return;
     } catch (e) {
       return;
     }
@@ -219,7 +219,8 @@
   // watch (or time out). True when navigated away or trigger got no nav within seconds.
   function skipBlockedShortTick(videoId, tries) {
     try {
-      if (document.location.pathname !== `/shorts/${videoId}`) return true;
+      if (document.location.pathname !== `${BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX}${videoId}`)
+        return true;
     } catch (e) {
       return true;
     }

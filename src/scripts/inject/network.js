@@ -143,7 +143,7 @@
   function blockShorts(data) {
     if (!Array.isArray(data.filterData.channelId)) data.filterData.channelId = [];
 
-    if (document.location.pathname.startsWith('/shorts/')) {
+    if (document.location.pathname.startsWith(BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX)) {
       redirectToIndex();
     }
 

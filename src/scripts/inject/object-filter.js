@@ -496,7 +496,7 @@
   // the overlay style instead. `overlayStyle` is a guess from the DOM
   // attribute; only `style` is confirmed. See the knowledge base.
   function hasShortsTimeOverlay(obj) {
-    const style = 'SHORTS';
+    const style = BLOCKTUBE_CONSTS.SHORTS.MARKER;
     const paths = [
       'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
       'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
