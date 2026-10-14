@@ -119,6 +119,13 @@
   let shortsSkipArmedFor = null;
   let shortsSkipJustFired = false;
   let shortsSkipTriggeredAt = 0;
+  // Sweep epoch: bumped on every manual navigation (see
+  // shortsSkipNavigationStarted). A sweep timer orphaned by a quick manual
+  // swipe keeps ticking until its pathname check trips — without the epoch it
+  // could fire its advance mid-transition onto the innocent landed short and
+  // corrupt the reel. Our own auto-advance never bumps (its sweep must
+  // survive to watch for the landing).
+  let shortsSkipSweepEpoch = 0;
   // Videos already auto-advanced past once: going back to one (browser back,
   // swipe-back, reel loop) must show the reason panel and stay — force-skip
   // again would make the block reason unreadable. Bounded (insertion-ordered
@@ -131,8 +138,10 @@
   const SHORTS_SKIP_CAP = 15;
 
   // Navigation started: consume skip accounting for previous short. Ours
-  // keeps consecutive counter; manual (new swipe, new page) resets it and
-  // disarms any pending sweep. Our auto-advance drops its reason panel now
+  // keeps consecutive counter; manual (new swipe, new page) resets it,
+  // disarms any pending sweep and invalidates orphaned sweep timers (epoch)
+  // so a quick manual swipe can never be auto-advanced by the previous
+  // short's sweep mid-transition. Our auto-advance drops its reason panel now
   // instead of riding into next short — black covers underneath keep the
   // departing frame hidden until landing verdict. True when panel dropped.
   // Never throws.
@@ -146,6 +155,7 @@
         shortsConsecutiveSkips = 0;
         shortsSkipArmedFor = null;
         shortsSkipTriggeredAt = 0;
+        shortsSkipSweepEpoch += 1;
       }
     } catch (e) {
       ours = false;
@@ -197,16 +207,20 @@
   // Run the fail-open auto-advance sweep for one armed video: tick every
   // 250ms, stop on navigation/timeout. The tick fires the advance at most
   // once (see skipBlockedShortTick). Timerless realms arm nothing to sweep.
+  // A sweep orphaned by a manual swipe exits on its next tick (epoch drift)
+  // instead of actuating onto the landed short.
   function startShortSkipSweep(videoId) {
     shortsSkipArmedFor = videoId;
     shortsSkipTriggeredAt = 0;
+    const sweepEpoch = shortsSkipSweepEpoch;
     if (typeof setInterval !== 'function') return;
     let tries = 0;
     const timer = setInterval(() => {
       tries += 1;
       let done = false;
       try {
-        done = skipBlockedShortTick(videoId, tries);
+        done =
+          sweepEpoch === shortsSkipSweepEpoch ? skipBlockedShortTick(videoId, tries) : true;
       } catch (e) {
         done = false;
       }
@@ -215,8 +229,34 @@
           clearInterval(timer);
         } catch (e) {}
         if (shortsSkipArmedFor === videoId) shortsSkipArmedFor = null;
+        if (tries >= 24) logShortsSweepGiveup(videoId);
       }
     }, 250);
+  }
+
+  // One-line diagnosis for a sweep that ran its full ~6s without leaving the
+  // blocked short: either the advance fired and Shorts never navigated, or no
+  // Next control was ever found. Rare enough to log; silent otherwise.
+  function logShortsSweepGiveup(videoId) {
+    try {
+      if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
+      let navigated = false;
+      try {
+        navigated =
+          document.location.pathname !== `${BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX}${videoId}`;
+      } catch (e) {
+        navigated = false;
+      }
+      if (!navigated) {
+        console.warn(
+          `[BlockTube] Shorts skip gave up on ${videoId} ${
+            shortsSkipTriggeredAt > 0
+              ? '(advance fired, no navigation followed)'
+              : '(no Next control found)'
+          }`,
+        );
+      }
+    } catch (e) {}
   }
 
   function skipBlockedShort(videoId) {
@@ -239,7 +279,10 @@
     }
     if (shortsSkipTriggeredAt > 0) {
       try {
-        if (Date.now() - shortsSkipTriggeredAt > 4000) return true;
+        if (Date.now() - shortsSkipTriggeredAt > 4000) {
+          logShortsSweepGiveup(videoId);
+          return true;
+        }
       } catch (e) {
         return true;
       }
@@ -352,13 +395,14 @@
     delete vid.thumbnailOverlays;
   }
 
-  // Filter one reel sequence response: fetch reel endpoints (network.js) and
-  // initial ytInitialReelWatchSequenceResponse (hooks.js). Embedded prefetched
+  // Block channel-matching embedded prefetched players in a reel response:
+  // fetch reel endpoints (network.js) and initial
+  // ytInitialReelWatchSequenceResponse (hooks.js). Embedded prefetched
   // players carry full videoDetails — verified by real capture: exactly one
   // videoDetails per sequence, no args/PLAYER_VARS shapes, so ytPlayer matches
-  // only genuine players. ytPlayer blocks channel-matching prefetches (wipes stream, remembers id for landing panel + skip sweep like /player block); scrub then neutralizes every preloaded frame unconditionally (Shorts only — payloads never leave Shorts).
+  // only genuine players. ytPlayer blocks channel-matching prefetches (wipes stream, remembers id for landing panel + skip sweep like /player block).
   // playerHasBeenBlocked preserved: prefetch verdict must never leak into page-level flow reading flag after us. Fail-open.
-  function filterReelSequenceResponse(resp) {
+  function filterReelPlayers(resp) {
     if (!resp || typeof resp !== 'object') return;
     const wasBlocked = playerHasBeenBlocked;
     try {
@@ -367,12 +411,26 @@
     try {
       playerHasBeenBlocked = wasBlocked;
     } catch (e) {}
+  }
+
+  // Filter one reel sequence response (the upcoming-shorts queue): player
+  // blocking above, then neutralize every preloaded frame unconditionally
+  // (Shorts only — payloads never leave Shorts). Queue entries carry no
+  // channel linkage; no preloaded frame may ever paint, yet video still
+  // loads/plays so allowed shorts keep only preload image changed. Only
+  // i.ytimg.com URLs touched — avatars (yt3)/icons intact; player responses
+  // ride other branch (streams survive). The swipe-overlay response
+  // (reel_item_watch) describes the short ON SCREEN, so it gets the player
+  // pass only — scrubbing its poster/backdrop would replace the current
+  // short's own artwork with the placeholder. Fail-open.
+  function filterReelSequenceResponse(resp) {
+    filterReelPlayers(resp);
     try {
       scrubReelThumbnails.call({ object: resp });
     } catch (e) {}
   }
-  // Blanket video-thumbnail scrub for reel responses (reel_item_watch,
-  // reel_watch_sequence — Shorts only): every video frame/poster URL replaced
+  // Blanket video-thumbnail scrub for reel sequence responses
+  // (reel_watch_sequence — Shorts only): every video frame/poster URL replaced
   // with neutral placeholder, unconditionally. Reel entries carry no channel
   // linkage; no preloaded frame may ever paint, yet video still loads/plays so
   // allowed shorts keep only preload image changed. Only i.ytimg.com URLs

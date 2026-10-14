@@ -31,8 +31,8 @@
   // response (the overlay paint below keys on it).
   let lastShortsBlock = null;
   // Every blocked Short by videoId (reason line), so swiping away and back
-  // repaints the panel even though lastShortsBlock above now holds a
-  // prefetched id. Bounded (insertion-ordered eviction) like
+  // repaints the panel even though lastShortsBlock above only ever holds the
+  // short on screen (prefetches store here, never there). Bounded (insertion-ordered eviction) like
   // shortsSkipFiredIds, so a long session cannot grow it without limit.
   let shortsBlockedOverlays = new Map();
   const SHORTS_BLOCKED_MAP_CAP = 100;
@@ -262,15 +262,15 @@
     }
   }
 
-  // Hide the current Short's frame at once (pause stops audio too), plus the
-  // preloaded strip thumbnails (they may already show a blocked next short).
-  // Runs before/with the panel paint, which may wait for the reel to upgrade.
-  function shortsOverlayBlankVideo() {
+  // Hide every Short's frame (plus the preloaded strip thumbnails, which may
+  // already show a blocked next short). Visual only — never pauses: pausing
+  // an undecided video sticks when our pause wins the race against YouTube's
+  // own play-on-activate (nothing ever resumes it), leaving a healthy short
+  // frozen. The departing short is paused by YouTube's swipe handling; the
+  // blocked short is paused explicitly (see shortsOverlayPauseCurrentHosts).
+  function shortsOverlayHideVideo() {
     const nodes = shortsOverlayVideoNodes();
     for (let i = 0; i < nodes.length; i += 1) {
-      try {
-        if (typeof nodes[i].pause === 'function') nodes[i].pause();
-      } catch (e) {}
       try {
         if (nodes[i].style) nodes[i].style.opacity = '0';
       } catch (e) {}
@@ -281,6 +281,55 @@
         if (thumbs[i].style) thumbs[i].style.opacity = '0';
       } catch (e) {}
     }
+  }
+
+  // Pause the videos of the short on screen (reel + player hosts). Only ever
+  // called for a known-blocked short together with the panel paint, so the
+  // blocked audio stops at once. Scoped to the current hosts: pausing
+  // prefetched neighbours would stick the same way the old pause-everything
+  // did. Falls back to every video when no host resolves (fail-closed for
+  // audio, same as before). Never throws.
+  function shortsOverlayPauseCurrentHosts() {
+    let pausedAny = false;
+    try {
+      const hosts = shortsOverlayCurrentHosts();
+      for (let h = 0; h < hosts.length; h += 1) {
+        let vids = null;
+        try {
+          vids =
+            hosts[h] && typeof hosts[h].querySelectorAll === 'function'
+              ? hosts[h].querySelectorAll('video')
+              : null;
+        } catch (e) {
+          vids = null;
+        }
+        if (!vids || typeof vids.length !== 'number') continue;
+        for (let i = 0; i < vids.length; i += 1) {
+          try {
+            if (vids[i] && typeof vids[i].pause === 'function') {
+              vids[i].pause();
+              pausedAny = true;
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    if (!pausedAny) {
+      const nodes = shortsOverlayVideoNodes();
+      for (let i = 0; i < nodes.length; i += 1) {
+        try {
+          if (typeof nodes[i].pause === 'function') nodes[i].pause();
+        } catch (e) {}
+      }
+    }
+  }
+
+  // Hide the blocked Short's frame at once, plus the preloaded strip
+  // thumbnails. Runs before/with the panel paint, which may wait for the
+  // reel to upgrade.
+  function shortsOverlayBlankVideo() {
+    shortsOverlayHideVideo();
+    shortsOverlayPauseCurrentHosts();
   }
 
   // Reveal again on teardown (navigation away, unblocked landing). Never
@@ -419,10 +468,13 @@
     }
   }
 
-  // New short, undecided again: drop the old verdict, re-cover, and re-blank
-  // (pausing the departing short). Only on Shorts pages — pausing videos
-  // anywhere else would brick playback with no Shorts verdict coming to
-  // restore it. Never throws.
+  // New short, undecided again: drop the old verdict, re-cover, and conceal
+  // the frame. Visual only, never pausing: the departing short is paused by
+  // YouTube's swipe handling, and pausing undecided (possibly prefetched)
+  // videos sticks when our pause beats YouTube's play-on-activate, freezing
+  // a healthy short. Only on Shorts pages — concealing videos anywhere else
+  // would hide playback with no Shorts verdict coming to restore it. Never
+  // throws.
   function shortsOverlayNavigateStart() {
     try {
       window.__blockTubeShortsVerdict = null;
@@ -436,7 +488,7 @@
         return;
       }
       shortsOverlayEnsureCovers();
-      shortsOverlayBlankVideo();
+      shortsOverlayHideVideo();
     } catch (e) {}
   }
 
@@ -571,12 +623,23 @@
     shortsOverlayUnblankVideo();
   }
 
-  // Sweep tick: gone elsewhere → teardown (true). Host changed or panel
-  // dropped from the host (late upgrade, YouTube re-render) → move it to the
-  // current host. Otherwise nothing to do — inset 0 tracks the reel without
-  // any rect sync.
+  // Sweep tick: gone elsewhere → teardown (true), unless the landed short
+  // is another known-blocked one (quick swipe, stale last) → adopt it and
+  // repaint its reason instead of flashing the blocked frame. Host changed
+  // or panel dropped from the host (late upgrade, YouTube re-render) →
+  // move it to the current host. Otherwise nothing to do — inset 0 tracks
+  // the reel without any rect sync.
   function shortsOverlayTick() {
     if (!shortsOverlayStillCurrent()) {
+      try {
+        const id = currentShortsId();
+        if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
+          lastShortsBlock = { videoId: id, message: shortsBlockedOverlays.get(id) };
+          removeShortsOverlay();
+          shortsOverlayPaintCurrent();
+          return shortsOverlayEl === null;
+        }
+      } catch (e) {}
       removeShortsOverlay();
       return true;
     }
@@ -606,9 +669,7 @@
   const SHORTS_REEL_GRACE_TRIES = 6;
 
   // True when the short on screen has a panel to show: it is the last
-  // blocked Short, or a remembered blocked one (swipe away and back). The
-  // pending-paint retry keys on this so it does not give up on a remembered
-  // short just because the last attribution belongs to a prefetch.
+  // blocked Short, or a remembered blocked one (swipe away and back).
   function shortsOverlayHasPaintTarget() {
     try {
       if (shortsOverlayStillCurrent()) return true;
@@ -623,7 +684,9 @@
   // reel container upgrades into the DOM; a single-shot lookup then misses
   // and nothing retries, so the panel shows late or never. Retry briefly:
   // every 150ms for ~3s, stopping on paint, navigation away, or expiry.
-  // Fail-open throughout; at most one pending timer at a time.
+  // Fail-open throughout; at most one pending timer at a time. An expiry
+  // while the short is still blocked is logged: the panel never appeared and
+  // the reason is only in the console.
   function shortsOverlaySchedulePaintRetry() {
     if (shortsOverlayPendingTimer) return;
     if (typeof setInterval !== 'function') return;
@@ -644,15 +707,34 @@
       } catch (e) {
         painted = false;
       }
-      if (painted || stale || tries >= 20) shortsOverlayClearPending();
+      if (painted || stale || tries >= 20) {
+        if (!painted && !stale && tries >= 20) logShortsPaintExpiry();
+        shortsOverlayClearPending();
+      }
     }, 150);
+  }
+
+  // One-line diagnosis for a blocked short whose reason panel never found a
+  // host: the video stays covered by YouTube's own error screen. Rare enough
+  // to log; silent otherwise.
+  function logShortsPaintExpiry() {
+    try {
+      if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
+      let id = null;
+      try {
+        id = currentShortsId();
+      } catch (e) {
+        id = null;
+      }
+      console.warn(`[BlockTube] Shorts overlay never painted for ${id} (no reel host found)`);
+    } catch (e) {}
   }
 
   // Paint the stored block when it is the short on screen and no panel is up
   // (else no-op: wrong video, off-shorts, no host, already painted); entry for
-  // player-response + yt-navigate-finish (prefetched stores attribution, landing
-  // paints; away/back repaints via remembered per-video map as last may be
-  // prefetched). `allowFallback` permits player-root: direct calls omit it
+  // player-response + yt-navigate-finish (on-screen responses paint at once;
+  // prefetches store only and paint on landing; away/back repaints via the
+  // remembered per-video map). `allowFallback` permits player-root: direct calls omit it
   // (reel-only avoids small-first flicker); retry passes true past grace for reel-less layouts.
   // Reconcile the paint target: keep a still-current block, else adopt the
   // remembered entry for the short on screen (swipe-back repaints). False
@@ -774,6 +856,24 @@
     } catch (e) {
       return;
     }
+    // Remember every blocked Short (not just the current one) so a swipe
+    // away and back still repaints the panel — see shortsOverlayPaintCurrent.
+    rememberShortsBlock(attribution.videoId, message);
+    // A prefetch for another short must not disturb the current panel:
+    // overwriting lastShortsBlock here used to make the sweep tick read the
+    // on-screen blocked short as stale and tear its panel down (blocked
+    // frame back, sweep possibly already spent) — so only the short on
+    // screen becomes the last block. Prefetch blocks are logged too: their
+    // streams are already wiped, so a swipe onto them with no further
+    // response would otherwise be undiagnosable.
+    if (currentShortsId() !== attribution.videoId) {
+      try {
+        if (typeof console !== 'undefined' && typeof console.info === 'function') {
+          console.info(`[BlockTube] Shorts prefetch blocked: ${attribution.videoId} — ${message}`);
+        }
+      } catch (e) {}
+      return;
+    }
     lastShortsBlock = {
       videoId: attribution.videoId,
       channelId: attribution.channelId,
@@ -781,11 +881,14 @@
       videoName: attribution.title,
       message,
     };
-    // Remember every blocked Short (not just the current one) so a swipe
-    // away and back still repaints the panel — see shortsOverlayPaintCurrent.
-    rememberShortsBlock(attribution.videoId, message);
-    // A prefetch for another short must not disturb the current panel.
-    if (currentShortsId() !== attribution.videoId) return;
+    // Diagnosis anchor: a blocked on-screen short always logs its id and the
+    // rule that fired. If the panel or the skip below then fails, the console
+    // still shows what was blocked and why.
+    try {
+      if (typeof console !== 'undefined' && typeof console.info === 'function') {
+        console.info(`[BlockTube] Shorts blocked: ${attribution.videoId} — ${message}`);
+      }
+    } catch (e) {}
     // Decided for the short on screen: blocked. Record it for the seed.js
     // guard (covers stay) and the no-verdict fail-safe, then paint (which
     // blanks the video frame itself, including on the deferred-retry path).

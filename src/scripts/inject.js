@@ -1677,6 +1677,7 @@
   let shortsSkipArmedFor = null;
   let shortsSkipJustFired = false;
   let shortsSkipTriggeredAt = 0;
+  let shortsSkipSweepEpoch = 0;
   let shortsSkipFiredIds = new Set();
   const SHORTS_SKIP_FIRED_CAP = 100;
   const SHORTS_SKIP_CAP = 15;
@@ -1691,6 +1692,7 @@
         shortsConsecutiveSkips = 0;
         shortsSkipArmedFor = null;
         shortsSkipTriggeredAt = 0;
+        shortsSkipSweepEpoch += 1;
       }
     } catch (e) {
       ours = false;
@@ -1729,13 +1731,14 @@
   function startShortSkipSweep(videoId) {
     shortsSkipArmedFor = videoId;
     shortsSkipTriggeredAt = 0;
+    const sweepEpoch = shortsSkipSweepEpoch;
     if (typeof setInterval !== 'function') return;
     let tries = 0;
     const timer = setInterval(() => {
       tries += 1;
       let done = false;
       try {
-        done = skipBlockedShortTick(videoId, tries);
+        done = sweepEpoch === shortsSkipSweepEpoch ? skipBlockedShortTick(videoId, tries) : true;
       } catch (e) {
         done = false;
       }
@@ -1744,8 +1747,31 @@
           clearInterval(timer);
         } catch (e) {}
         if (shortsSkipArmedFor === videoId) shortsSkipArmedFor = null;
+        if (tries >= 24) logShortsSweepGiveup(videoId);
       }
     }, 250);
+  }
+
+  function logShortsSweepGiveup(videoId) {
+    try {
+      if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
+      let navigated = false;
+      try {
+        navigated =
+          document.location.pathname !== `${BLOCKTUBE_CONSTS.SHORTS.PATH_PREFIX}${videoId}`;
+      } catch (e) {
+        navigated = false;
+      }
+      if (!navigated) {
+        console.warn(
+          `[BlockTube] Shorts skip gave up on ${videoId} ${
+            shortsSkipTriggeredAt > 0
+              ? '(advance fired, no navigation followed)'
+              : '(no Next control found)'
+          }`,
+        );
+      }
+    } catch (e) {}
   }
 
   function skipBlockedShort(videoId) {
@@ -1762,7 +1788,10 @@
     }
     if (shortsSkipTriggeredAt > 0) {
       try {
-        if (Date.now() - shortsSkipTriggeredAt > 4000) return true;
+        if (Date.now() - shortsSkipTriggeredAt > 4000) {
+          logShortsSweepGiveup(videoId);
+          return true;
+        }
       } catch (e) {
         return true;
       }
@@ -1864,7 +1893,7 @@
     delete vid.thumbnailOverlays;
   }
 
-  function filterReelSequenceResponse(resp) {
+  function filterReelPlayers(resp) {
     if (!resp || typeof resp !== 'object') return;
     const wasBlocked = playerHasBeenBlocked;
     try {
@@ -1873,6 +1902,10 @@
     try {
       playerHasBeenBlocked = wasBlocked;
     } catch (e) {}
+  }
+
+  function filterReelSequenceResponse(resp) {
+    filterReelPlayers(resp);
     try {
       scrubReelThumbnails.call({ object: resp });
     } catch (e) {}
@@ -2142,11 +2175,9 @@
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
-    } else if (
-      ['/youtubei/v1/reel/reel_item_watch', '/youtubei/v1/reel/reel_watch_sequence'].includes(
-        url.pathname,
-      )
-    ) {
+    } else if (url.pathname === '/youtubei/v1/reel/reel_item_watch') {
+      filterReelItemWatchResponse(resp);
+    } else if (url.pathname === '/youtubei/v1/reel/reel_watch_sequence') {
       filterReelResponse(resp);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
@@ -2165,12 +2196,22 @@
       if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
         playerHasBeenBlocked = false;
         ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
+        try {
+          if (typeof maybeRevealShortsPrehide === 'function') {
+            maybeRevealShortsPrehide(o.playerResponse);
+          }
+        } catch (e) {}
       } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
         const postActions = [fixAutoplay];
         if (playerHasBeenBlocked) postActions.push(redirectToNext);
         ObjectFilter(o.watchNextResponse, mergedFilterRules, postActions, true);
       }
     });
+  }
+
+  function filterReelItemWatchResponse(resp) {
+    filterReelPlayers(resp);
+    ObjectFilter(resp, mergedFilterRules, [], true);
   }
 
   function filterReelResponse(resp) {
@@ -2185,11 +2226,19 @@
     } catch (e) {}
     playerHasBeenBlocked = false;
     ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
+    try {
+      if (typeof maybeRevealShortsPrehide === 'function') maybeRevealShortsPrehide(obj.player);
+    } catch (e) {}
   }
 
   function filterSpfPlayerResponse(obj) {
     playerHasBeenBlocked = false;
     ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
+    try {
+      if (typeof maybeRevealShortsPrehide === 'function') {
+        maybeRevealShortsPrehide(obj.playerResponse);
+      }
+    } catch (e) {}
   }
 
   function spfRulesFor(pathname) {
@@ -4095,12 +4144,9 @@
     }
   }
 
-  function shortsOverlayBlankVideo() {
+  function shortsOverlayHideVideo() {
     const nodes = shortsOverlayVideoNodes();
     for (let i = 0; i < nodes.length; i += 1) {
-      try {
-        if (typeof nodes[i].pause === 'function') nodes[i].pause();
-      } catch (e) {}
       try {
         if (nodes[i].style) nodes[i].style.opacity = '0';
       } catch (e) {}
@@ -4111,6 +4157,46 @@
         if (thumbs[i].style) thumbs[i].style.opacity = '0';
       } catch (e) {}
     }
+  }
+
+  function shortsOverlayPauseCurrentHosts() {
+    let pausedAny = false;
+    try {
+      const hosts = shortsOverlayCurrentHosts();
+      for (let h = 0; h < hosts.length; h += 1) {
+        let vids = null;
+        try {
+          vids =
+            hosts[h] && typeof hosts[h].querySelectorAll === 'function'
+              ? hosts[h].querySelectorAll('video')
+              : null;
+        } catch (e) {
+          vids = null;
+        }
+        if (!vids || typeof vids.length !== 'number') continue;
+        for (let i = 0; i < vids.length; i += 1) {
+          try {
+            if (vids[i] && typeof vids[i].pause === 'function') {
+              vids[i].pause();
+              pausedAny = true;
+            }
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    if (!pausedAny) {
+      const nodes = shortsOverlayVideoNodes();
+      for (let i = 0; i < nodes.length; i += 1) {
+        try {
+          if (typeof nodes[i].pause === 'function') nodes[i].pause();
+        } catch (e) {}
+      }
+    }
+  }
+
+  function shortsOverlayBlankVideo() {
+    shortsOverlayHideVideo();
+    shortsOverlayPauseCurrentHosts();
   }
 
   function shortsOverlayUnblankVideo() {
@@ -4236,7 +4322,7 @@
         return;
       }
       shortsOverlayEnsureCovers();
-      shortsOverlayBlankVideo();
+      shortsOverlayHideVideo();
     } catch (e) {}
   }
 
@@ -4356,6 +4442,15 @@
 
   function shortsOverlayTick() {
     if (!shortsOverlayStillCurrent()) {
+      try {
+        const id = currentShortsId();
+        if (typeof id === 'string' && shortsBlockedOverlays.has(id)) {
+          lastShortsBlock = { videoId: id, message: shortsBlockedOverlays.get(id) };
+          removeShortsOverlay();
+          shortsOverlayPaintCurrent();
+          return shortsOverlayEl === null;
+        }
+      } catch (e) {}
       removeShortsOverlay();
       return true;
     }
@@ -4409,8 +4504,24 @@
       } catch (e) {
         painted = false;
       }
-      if (painted || stale || tries >= 20) shortsOverlayClearPending();
+      if (painted || stale || tries >= 20) {
+        if (!painted && !stale && tries >= 20) logShortsPaintExpiry();
+        shortsOverlayClearPending();
+      }
     }, 150);
+  }
+
+  function logShortsPaintExpiry() {
+    try {
+      if (typeof console === 'undefined' || typeof console.warn !== 'function') return;
+      let id = null;
+      try {
+        id = currentShortsId();
+      } catch (e) {
+        id = null;
+      }
+      console.warn(`[BlockTube] Shorts overlay never painted for ${id} (no reel host found)`);
+    } catch (e) {}
   }
 
   function recallShortsBlock() {
@@ -4519,6 +4630,15 @@
     } catch (e) {
       return;
     }
+    rememberShortsBlock(attribution.videoId, message);
+    if (currentShortsId() !== attribution.videoId) {
+      try {
+        if (typeof console !== 'undefined' && typeof console.info === 'function') {
+          console.info(`[BlockTube] Shorts prefetch blocked: ${attribution.videoId} — ${message}`);
+        }
+      } catch (e) {}
+      return;
+    }
     lastShortsBlock = {
       videoId: attribution.videoId,
       channelId: attribution.channelId,
@@ -4526,8 +4646,11 @@
       videoName: attribution.title,
       message,
     };
-    rememberShortsBlock(attribution.videoId, message);
-    if (currentShortsId() !== attribution.videoId) return;
+    try {
+      if (typeof console !== 'undefined' && typeof console.info === 'function') {
+        console.info(`[BlockTube] Shorts blocked: ${attribution.videoId} — ${message}`);
+      }
+    } catch (e) {}
     shortsOverlayRecordVerdict(attribution.videoId, false);
     removeShortsOverlay();
     shortsOverlayPaintCurrent();

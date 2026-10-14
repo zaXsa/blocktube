@@ -9,11 +9,9 @@
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
-    } else if (
-      ['/youtubei/v1/reel/reel_item_watch', '/youtubei/v1/reel/reel_watch_sequence'].includes(
-        url.pathname,
-      )
-    ) {
+    } else if (url.pathname === '/youtubei/v1/reel/reel_item_watch') {
+      filterReelItemWatchResponse(resp);
+    } else if (url.pathname === '/youtubei/v1/reel/reel_watch_sequence') {
       filterReelResponse(resp);
     } else if (url.pathname === '/youtubei/v1/guide') {
       ObjectFilter(resp, filterRules.guide, [], true);
@@ -30,12 +28,20 @@
 
   // One get_watch batch: player parts get the player rules, watch-next parts
   // the merged rules with autoplay fixups. Non-array bodies pass through.
+  // A clean verdict for the short on screen lifts the seed.js first-frame
+  // guard, same as the /player branch below (blocked shorts stay hidden
+  // under the reason panel).
   function filterGetWatchResponse(resp) {
     if (!(resp instanceof Array)) return;
     resp.forEach((o) => {
       if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_PLAYER_RESPONSE') {
         playerHasBeenBlocked = false;
         ObjectFilter(o.playerResponse, filterRules.ytPlayer, [playerMiscFilters]);
+        try {
+          if (typeof maybeRevealShortsPrehide === 'function') {
+            maybeRevealShortsPrehide(o.playerResponse);
+          }
+        } catch (e) {}
       } else if (o.responseType === 'STREAMING_WATCH_RESPONSE_TYPE_WATCH_NEXT_RESPONSE') {
         const postActions = [fixAutoplay];
         if (playerHasBeenBlocked) postActions.push(redirectToNext);
@@ -44,11 +50,21 @@
     });
   }
 
-  // One reel response (swipe loads overlay, channel bar, `...` menu with
-  // Block entries): sequence filter first blocks channel-matching embedded
-  // prefetched players and neutralizes every preloaded frame (no channel
-  // linkage, no frame may ever paint); then usual pass filters matches +
-  // stamps Block menu entries (no autoplay fixups — no two-column results).
+  // One swipe-overlay response (current short's channel bar, `...` menu with
+  // Block entries): same embedded-player blocking as the sequence path, but
+  // NO thumbnail scrub — this response describes the short on screen, and
+  // neutralizing its poster/backdrop would show the placeholder whenever
+  // playback is paused or slow. Then the usual pass (menus, matches).
+  function filterReelItemWatchResponse(resp) {
+    filterReelPlayers(resp);
+    ObjectFilter(resp, mergedFilterRules, [], true);
+  }
+
+  // One reel sequence response (the upcoming-shorts queue): sequence filter
+  // first blocks channel-matching embedded prefetched players and neutralizes
+  // every preloaded frame (no channel linkage, no frame may ever paint);
+  // then usual pass filters matches + stamps Block menu entries (no autoplay
+  // fixups — no two-column results).
   function filterReelResponse(resp) {
     filterReelSequenceResponse(resp);
     ObjectFilter(resp, mergedFilterRules, [], true);
@@ -56,7 +72,8 @@
 
   // One SPF part carrying an embedded player: hydrate the raw response and
   // run the player filter. Guards the JSON parse — a malformed payload passes
-  // through unfiltered.
+  // through unfiltered. A clean verdict for the short on screen lifts the
+  // seed.js first-frame guard, same as the fetch /player branch.
   function filterSpfPlayer(obj) {
     try {
       const player_resp = getObjectByPath(obj.player, 'args.player_response');
@@ -64,12 +81,20 @@
     } catch (e) {}
     playerHasBeenBlocked = false;
     ObjectFilter(obj.player, filterRules.ytPlayer, [playerMiscFilters]);
+    try {
+      if (typeof maybeRevealShortsPrehide === 'function') maybeRevealShortsPrehide(obj.player);
+    } catch (e) {}
   }
 
   // One SPF part carrying a top-level playerResponse: filter it directly.
   function filterSpfPlayerResponse(obj) {
     playerHasBeenBlocked = false;
     ObjectFilter(obj.playerResponse, filterRules.ytPlayer);
+    try {
+      if (typeof maybeRevealShortsPrehide === 'function') {
+        maybeRevealShortsPrehide(obj.playerResponse);
+      }
+    } catch (e) {}
   }
 
   // Resolve the rule set + post actions for an SPF response/data part from
