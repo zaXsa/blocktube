@@ -6442,18 +6442,5 @@
     openToast,
     menuOnTap,
     menuOnTapMobile,
-    startCommentObserver:
-      typeof startCommentObserver === 'function' ? startCommentObserver : undefined,
-    resolveCommentChannel:
-      typeof resolveCommentChannel === 'function' ? resolveCommentChannel : undefined,
-    rememberCommentAuthor:
-      typeof rememberCommentAuthor === 'function' ? rememberCommentAuthor : undefined,
-    commentMenuEntries: typeof commentMenuEntries === 'function' ? commentMenuEntries : undefined,
-    collapseCommentText:
-      typeof collapseCommentText === 'function' ? collapseCommentText : undefined,
-    validateCommentEntry:
-      typeof validateCommentEntry === 'function' ? validateCommentEntry : undefined,
-    compileCommentRuleLive:
-      typeof compileCommentRuleLive === 'function' ? compileCommentRuleLive : undefined,
   };
 })();
