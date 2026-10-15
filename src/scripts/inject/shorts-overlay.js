@@ -283,6 +283,42 @@
     }
   }
 
+  // Pause every <video> inside one Shorts host. True when at least one
+  // pause landed. Never throws (hosts come from live DOM queries).
+  function shortsOverlayPauseHostVideos(host) {
+    let paused = false;
+    let vids = null;
+    try {
+      vids =
+        host && typeof host.querySelectorAll === 'function'
+          ? host.querySelectorAll('video')
+          : null;
+    } catch (e) {
+      vids = null;
+    }
+    if (!vids || typeof vids.length !== 'number') return false;
+    for (let i = 0; i < vids.length; i += 1) {
+      try {
+        if (vids[i] && typeof vids[i].pause === 'function') {
+          vids[i].pause();
+          paused = true;
+        }
+      } catch (e) {}
+    }
+    return paused;
+  }
+
+  // Fail-closed fallback: no host resolved, so pause every known video and
+  // keep blocked audio from leaking. Never throws.
+  function shortsOverlayPauseAllVideos() {
+    const nodes = shortsOverlayVideoNodes();
+    for (let i = 0; i < nodes.length; i += 1) {
+      try {
+        if (typeof nodes[i].pause === 'function') nodes[i].pause();
+      } catch (e) {}
+    }
+  }
+
   // Pause the videos of the short on screen (reel + player hosts). Only ever
   // called for a known-blocked short together with the panel paint, so the
   // blocked audio stops at once. Scoped to the current hosts: pausing
@@ -294,34 +330,10 @@
     try {
       const hosts = shortsOverlayCurrentHosts();
       for (let h = 0; h < hosts.length; h += 1) {
-        let vids = null;
-        try {
-          vids =
-            hosts[h] && typeof hosts[h].querySelectorAll === 'function'
-              ? hosts[h].querySelectorAll('video')
-              : null;
-        } catch (e) {
-          vids = null;
-        }
-        if (!vids || typeof vids.length !== 'number') continue;
-        for (let i = 0; i < vids.length; i += 1) {
-          try {
-            if (vids[i] && typeof vids[i].pause === 'function') {
-              vids[i].pause();
-              pausedAny = true;
-            }
-          } catch (e) {}
-        }
+        if (shortsOverlayPauseHostVideos(hosts[h])) pausedAny = true;
       }
     } catch (e) {}
-    if (!pausedAny) {
-      const nodes = shortsOverlayVideoNodes();
-      for (let i = 0; i < nodes.length; i += 1) {
-        try {
-          if (typeof nodes[i].pause === 'function') nodes[i].pause();
-        } catch (e) {}
-      }
-    }
+    if (!pausedAny) shortsOverlayPauseAllVideos();
   }
 
   // Hide the blocked Short's frame at once, plus the preloaded strip
@@ -832,6 +844,17 @@
     startShortsOverlaySync();
   }
 
+  // Prefetch blocks are logged too: their streams are already wiped, so a
+  // swipe onto them with no further response would otherwise be
+  // undiagnosable. Never throws.
+  function logShortsPrefetchBlock(videoId, message) {
+    try {
+      if (typeof console !== 'undefined' && typeof console.info === 'function') {
+        console.info(`[BlockTube] Shorts prefetch blocked: ${videoId} — ${message}`);
+      }
+    } catch (e) {}
+  }
+
   // Store a blocked Short's attribution + reason, painting only when it is
   // the short on screen. Player responses also arrive for prefetched (not yet
   // watched) shorts: painting those immediately would cover the wrong video
@@ -853,15 +876,9 @@
     // overwriting lastShortsBlock here used to make the sweep tick read the
     // on-screen blocked short as stale and tear its panel down (blocked
     // frame back, sweep possibly already spent) — so only the short on
-    // screen becomes the last block. Prefetch blocks are logged too: their
-    // streams are already wiped, so a swipe onto them with no further
-    // response would otherwise be undiagnosable.
+    // screen becomes the last block.
     if (currentShortsId() !== attribution.videoId) {
-      try {
-        if (typeof console !== 'undefined' && typeof console.info === 'function') {
-          console.info(`[BlockTube] Shorts prefetch blocked: ${attribution.videoId} — ${message}`);
-        }
-      } catch (e) {}
+      logShortsPrefetchBlock(attribution.videoId, message);
       return;
     }
     lastShortsBlock = {

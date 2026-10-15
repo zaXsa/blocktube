@@ -4157,39 +4157,45 @@
     }
   }
 
+  function shortsOverlayPauseHostVideos(host) {
+    let paused = false;
+    let vids = null;
+    try {
+      vids =
+        host && typeof host.querySelectorAll === 'function' ? host.querySelectorAll('video') : null;
+    } catch (e) {
+      vids = null;
+    }
+    if (!vids || typeof vids.length !== 'number') return false;
+    for (let i = 0; i < vids.length; i += 1) {
+      try {
+        if (vids[i] && typeof vids[i].pause === 'function') {
+          vids[i].pause();
+          paused = true;
+        }
+      } catch (e) {}
+    }
+    return paused;
+  }
+
+  function shortsOverlayPauseAllVideos() {
+    const nodes = shortsOverlayVideoNodes();
+    for (let i = 0; i < nodes.length; i += 1) {
+      try {
+        if (typeof nodes[i].pause === 'function') nodes[i].pause();
+      } catch (e) {}
+    }
+  }
+
   function shortsOverlayPauseCurrentHosts() {
     let pausedAny = false;
     try {
       const hosts = shortsOverlayCurrentHosts();
       for (let h = 0; h < hosts.length; h += 1) {
-        let vids = null;
-        try {
-          vids =
-            hosts[h] && typeof hosts[h].querySelectorAll === 'function'
-              ? hosts[h].querySelectorAll('video')
-              : null;
-        } catch (e) {
-          vids = null;
-        }
-        if (!vids || typeof vids.length !== 'number') continue;
-        for (let i = 0; i < vids.length; i += 1) {
-          try {
-            if (vids[i] && typeof vids[i].pause === 'function') {
-              vids[i].pause();
-              pausedAny = true;
-            }
-          } catch (e) {}
-        }
+        if (shortsOverlayPauseHostVideos(hosts[h])) pausedAny = true;
       }
     } catch (e) {}
-    if (!pausedAny) {
-      const nodes = shortsOverlayVideoNodes();
-      for (let i = 0; i < nodes.length; i += 1) {
-        try {
-          if (typeof nodes[i].pause === 'function') nodes[i].pause();
-        } catch (e) {}
-      }
-    }
+    if (!pausedAny) shortsOverlayPauseAllVideos();
   }
 
   function shortsOverlayBlankVideo() {
@@ -4603,6 +4609,14 @@
     startShortsOverlaySync();
   }
 
+  function logShortsPrefetchBlock(videoId, message) {
+    try {
+      if (typeof console !== 'undefined' && typeof console.info === 'function') {
+        console.info(`[BlockTube] Shorts prefetch blocked: ${videoId} — ${message}`);
+      }
+    } catch (e) {}
+  }
+
   function showBlockedShortOverlay(attribution, message) {
     if (
       !attribution ||
@@ -4618,11 +4632,7 @@
     }
     rememberShortsBlock(attribution.videoId, message);
     if (currentShortsId() !== attribution.videoId) {
-      try {
-        if (typeof console !== 'undefined' && typeof console.info === 'function') {
-          console.info(`[BlockTube] Shorts prefetch blocked: ${attribution.videoId} — ${message}`);
-        }
-      } catch (e) {}
+      logShortsPrefetchBlock(attribution.videoId, message);
       return;
     }
     lastShortsBlock = {
