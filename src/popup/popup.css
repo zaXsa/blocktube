@@ -35,9 +35,14 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 15px;
-  font-size: 13px;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  max-width: 220px;
+  border: 1px solid var(--toggle-bg);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
   text-align: center;
 }
 
@@ -47,10 +52,18 @@ body {
 
 /* The grant control reuses .options-button below: <button> neither inherits
    the page font nor shows a pointer cursor by default, so normalize both
-   here instead of duplicating the whole button style. */
+   here instead of duplicating the whole button style. Kept compact on
+   purpose: the warning text already names YouTube, so the button stays a
+   small inline action rather than a second full-width call-to-action. */
 button.options-button {
   font: inherit;
   cursor: pointer;
+}
+
+#grant-button {
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .toggle-row {

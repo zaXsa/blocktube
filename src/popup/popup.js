@@ -116,17 +116,40 @@ function wireWhitelistSwitch(whitelistCheckbox) {
   });
 }
 
+// The grant prompt only applies where YouTube access is a user-revocable
+// host permission (Firefox manifests declare these origins). Chrome has no
+// YouTube entry in host_permissions — filtering runs via content_scripts
+// matches that are always present — so a permissions.contains() check there
+// is always false and would nag on every popup open. Only prompt when the
+// manifest actually declares these origins.
+function requiresHostGrant() {
+  try {
+    const declared = chrome.runtime?.getManifest?.()?.host_permissions || [];
+    return YOUTUBE_ORIGINS.every((origin) => declared.includes(origin));
+  } catch (e) {
+    return false;
+  }
+}
+
 // On Firefox MV3 the YouTube host permission is user-controlled and is not
 // always granted at install: until it is, the content scripts never inject
 // and the extension does nothing with no visible sign of why. Surface it
 // with a one-click fix (permissions.request needs a user gesture, so it
-// must run from the click handler). Chrome grants host_permissions at
-// install, so the notice stays hidden there.
+// must run from the click handler). Chrome needs no grant (see above), so
+// the notice stays hidden there.
 function refreshPermissionState(permissionWarning) {
   if (!permissionWarning) return;
+  if (!requiresHostGrant()) {
+    permissionWarning.hidden = true;
+    return;
+  }
   if (!chrome.permissions || !chrome.permissions.contains) return;
   try {
     chrome.permissions.contains({ origins: YOUTUBE_ORIGINS }, (granted) => {
+      if (chrome.runtime.lastError) {
+        permissionWarning.hidden = true;
+        return;
+      }
       // Only prompt when access is definitively absent, never spuriously.
       permissionWarning.hidden = granted !== false;
     });
@@ -149,8 +172,8 @@ function wireGrantButton(permissionWarning) {
         window.close();
       });
     } catch (e) {
-      // Chrome rejects requests for origins that are already required host
-      // permissions, which are granted at install: nothing to recover.
+      // The button is hidden unless requiresHostGrant() passed, so a
+      // rejection here just means there is nothing to recover.
     }
   });
 }

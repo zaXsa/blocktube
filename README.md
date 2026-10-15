@@ -29,7 +29,7 @@ Filter and block unwanted content from YouTube™.
 
 Firefox does not always grant YouTube access at install. If the extension
 seems to do nothing (no `Block Channel` / `Block Video` entries in video
-`...` menus): open the toolbar popup and click **Grant access to YouTube**,
+`...` menus): open the toolbar popup and click **Grant access**,
 then reload open YouTube tabs. New installs also land inside the
 puzzle-piece menu — right-click the icon there and **Pin to Toolbar**.
 
