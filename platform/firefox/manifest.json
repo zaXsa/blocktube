@@ -49,6 +49,7 @@
   ],
   "background": {
     "scripts": [
+      "src/scripts/consts.js",
       "src/scripts/background.js"
     ]
   },

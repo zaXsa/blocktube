@@ -1,8 +1,15 @@
 'use strict';
 
-// BLOCKTUBE_CONSTS (cross-boundary message/storage strings) — loaded into the
-// service-worker global scope; see consts.js for the one-truth contract.
-importScripts('consts.js');
+// BLOCKTUBE_CONSTS (cross-boundary message/storage strings) — loaded via
+// importScripts in worker scope (Chrome service worker) or via manifest
+// background.scripts ordering on Firefox (background page, where
+// importScripts is undefined); see consts.js for the one-truth contract.
+if (typeof importScripts === 'function') {
+  importScripts('consts.js');
+}
+if (typeof BLOCKTUBE_CONSTS === 'undefined') {
+  throw new Error('BlockTube background: BLOCKTUBE_CONSTS missing (consts.js not loaded)');
+}
 
 const has = Object.prototype.hasOwnProperty;
 const unicodeBoundary = '[ \n\r\t!@#$%^&*()_\\-=+\\[\\]\\\\\\|;:\'",\\.\\/<>\\?`~:]+';
