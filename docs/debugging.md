@@ -74,7 +74,7 @@ The reverse of a miss: playback stops with
 names the filter and what it matched, e.g.
 `(title filter "puppy" matched "Girl Wakes Up ...")` — exact-ID blocks
 collapse to `(channelId: "UC…")`. That names the culprit entry to remove or
-narrow on the options page. Note the matched value is truncated to 40
+narrow on the options page. Note the matched value is truncated to 120
 characters, and a broad character range (e.g. `/[À-ỹ]/`) can fire on a
 lookalike far into the title (e.g. Greek `α`, or `×` reading as `x`) — when
 in doubt, test the entry against the full title in isolation.

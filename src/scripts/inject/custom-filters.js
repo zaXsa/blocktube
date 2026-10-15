@@ -14,8 +14,8 @@
     // Showing only the value looks like the user added a filter for that
     // exact title; showing only the compiled pattern reads like random regex.
     if (filter !== undefined && value !== undefined) {
-      const f = String(filter).slice(0, 40);
-      const v = String(value).slice(0, 40);
+      const f = String(filter).slice(0, 120);
+      const v = String(value).slice(0, 120);
       // Exact-id filters (channelId/videoId `^id$`) match only themselves,
       // so naming both reads as a stutter: (channelId filter "UC..." matched
       // "UC..."). Collapse those to a single attribution.
@@ -23,10 +23,10 @@
       return `${name} filter "${f}" matched "${v}"`;
     }
     if (filter !== undefined) {
-      return `${name} filter "${String(filter).slice(0, 40)}"`;
+      return `${name} filter "${String(filter).slice(0, 120)}"`;
     }
     if (value !== undefined) {
-      return `${name}: ${String(value).slice(0, 40)}`;
+      return `${name}: ${String(value).slice(0, 120)}`;
     }
     return name;
   }

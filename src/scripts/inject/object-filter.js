@@ -113,7 +113,7 @@
       const kwMatch = /^\(\^\|.*\)\((.*)\)\(.*\|\$\)$/.exec(src);
       if (flags === 'i' && kwMatch) {
         const raw = kwMatch[1].replace(/\\([\\^$*+?.()|[\]{}])/g, '$1');
-        return raw.slice(0, 40);
+        return raw.slice(0, 120);
       }
       if (
         flags === '' &&
@@ -123,9 +123,9 @@
         src.indexOf('(') === -1 &&
         src.indexOf('|') === -1
       ) {
-        return src.slice(1, -1).slice(0, 40);
+        return src.slice(1, -1).slice(0, 120);
       }
-      return String(entry).slice(0, 40);
+      return String(entry).slice(0, 120);
     } catch (e) {
       return undefined;
     }
@@ -156,7 +156,7 @@
       if (entry) {
         return {
           name: fieldName,
-          value: String(values[i]).slice(0, 40),
+          value: String(values[i]).slice(0, 120),
           filter: displayFilterEntry(entry),
         };
       }
@@ -270,7 +270,7 @@
       if (entry) {
         return {
           name: fieldName,
-          value: String(candidate).slice(0, 40),
+          value: String(candidate).slice(0, 120),
           filter: displayFilterEntry(entry),
         };
       }
