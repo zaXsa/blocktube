@@ -49,6 +49,11 @@
     "storage",
     "unlimitedStorage"
   ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://www.youtube-nocookie.com/*"
+  ],
   "background": {
     "scripts": [
       "src/scripts/consts.js",
@@ -63,6 +68,10 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "blocktube@git",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      },
       "update_url": "https://raw.githubusercontent.com/amitbl/blocktube/master/.updates/ff/updates.json"
     }
   },

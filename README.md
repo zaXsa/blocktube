@@ -25,6 +25,14 @@ Filter and block unwanted content from YouTube™.
 * [**Chrome Webstore**](https://chromewebstore.google.com/detail/blocktube/bbeaicapbccfllodepmimpkgecanonai?hl=en-US)
 * [**Firefox AMO**](https://addons.mozilla.org/en-US/firefox/addon/blocktube/)
 
+### Firefox first run
+
+Firefox does not always grant YouTube access at install. If the extension
+seems to do nothing (no `Block Channel` / `Block Video` entries in video
+`...` menus): open the toolbar popup and click **Grant access to YouTube**,
+then reload open YouTube tabs. New installs also land inside the
+puzzle-piece menu — right-click the icon there and **Pin to Toolbar**.
+
 ## Guides
 
 * [Filter syntax](docs/filters.md) — keywords, regex, comments, editor

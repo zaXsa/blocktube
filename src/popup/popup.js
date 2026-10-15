@@ -1,3 +1,14 @@
+// Must stay in sync with host_permissions in the Firefox manifests: the
+// popup offers a one-click grant when YouTube access is missing. Checked
+// and requested as a unit on purpose: contains() is true only when every
+// origin is granted, so a partially revoked grant still surfaces the
+// warning, and re-requesting already-granted origins is a no-op.
+const YOUTUBE_ORIGINS = [
+  'https://www.youtube.com/*',
+  'https://m.youtube.com/*',
+  'https://www.youtube-nocookie.com/*',
+];
+
 function renderToggle(checkbox, statusText, state) {
   checkbox.checked = state;
   statusText.textContent = state ? 'On' : 'Off';
@@ -105,10 +116,50 @@ function wireWhitelistSwitch(whitelistCheckbox) {
   });
 }
 
+// On Firefox MV3 the YouTube host permission is user-controlled and is not
+// always granted at install: until it is, the content scripts never inject
+// and the extension does nothing with no visible sign of why. Surface it
+// with a one-click fix (permissions.request needs a user gesture, so it
+// must run from the click handler). Chrome grants host_permissions at
+// install, so the notice stays hidden there.
+function refreshPermissionState(permissionWarning) {
+  if (!permissionWarning) return;
+  if (!chrome.permissions || !chrome.permissions.contains) return;
+  try {
+    chrome.permissions.contains({ origins: YOUTUBE_ORIGINS }, (granted) => {
+      // Only prompt when access is definitively absent, never spuriously.
+      permissionWarning.hidden = granted !== false;
+    });
+  } catch (e) {
+    permissionWarning.hidden = true;
+  }
+}
+
+// Wire the grant button: request YouTube access, then reload so the content
+// scripts (document_start) inject into the fresh page.
+function wireGrantButton(permissionWarning) {
+  const grantButton = document.getElementById('grant-button');
+  if (!grantButton) return;
+  grantButton.addEventListener('click', () => {
+    try {
+      chrome.permissions.request({ origins: YOUTUBE_ORIGINS }, (granted) => {
+        if (chrome.runtime.lastError || !granted) return;
+        if (permissionWarning) permissionWarning.hidden = true;
+        chrome.tabs.reload();
+        window.close();
+      });
+    } catch (e) {
+      // Chrome rejects requests for origins that are already required host
+      // permissions, which are granted at install: nothing to recover.
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const checkbox = document.getElementById('toggle-extension');
   const statusText = document.getElementById('status-text');
   const whitelistCheckbox = document.getElementById('toggle-whitelist');
+  const permissionWarning = document.getElementById('permission-warning');
 
   detectColorScheme();
 
@@ -124,4 +175,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   wireStaticControls(checkbox);
   wireWhitelistSwitch(whitelistCheckbox);
+  refreshPermissionState(permissionWarning);
+  wireGrantButton(permissionWarning);
 });
