@@ -456,22 +456,44 @@
     });
   };
 
+  // Walk the prototype chain for a property descriptor: on some embed pages
+  // (notably www.youtube-nocookie.com) XMLHttpRequest.prototype carries no
+  // own 'response' descriptor, so a direct getOwnPropertyDescriptor read
+  // yields undefined and the hook below would throw on first use.
+  function getPropertyDescriptor(obj, prop) {
+    while (obj) {
+      const descriptor = Object.getOwnPropertyDescriptor(obj, prop);
+      if (descriptor) return descriptor;
+      obj = Object.getPrototypeOf(obj);
+    }
+    return undefined;
+  }
+
   if (window.location.pathname.startsWith('/embed/')) {
-    const XMLHttpRequestResponse = Object.getOwnPropertyDescriptor(
-      XMLHttpRequest.prototype,
-      'response',
-    );
-    Object.defineProperty(XMLHttpRequest.prototype, 'response', {
-      get() {
-        if (!fetchUris.some((u) => this.responseURL.includes(u))) {
-          return XMLHttpRequestResponse.get.call(this);
-        }
-        const res = JSON.parse(XMLHttpRequestResponse.get.call(this).replace(")]}'", ''));
-        window.blockTubeExports.fetchFilter(new URL(this.responseURL), res);
-        return JSON.stringify(res);
-      },
-      configurable: true,
-    });
+    const XMLHttpRequestResponse = getPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+    // No usable getter (unexpected XHR shape): leave the page unhooked rather
+    // than throwing on the first response read and breaking playback.
+    if (XMLHttpRequestResponse && typeof XMLHttpRequestResponse.get === 'function') {
+      Object.defineProperty(XMLHttpRequest.prototype, 'response', {
+        get() {
+          const response = XMLHttpRequestResponse.get.call(this);
+          if (!this.responseURL || !fetchUris.some((u) => this.responseURL.includes(u))) {
+            return response;
+          }
+          // Non-string bodies (e.g. responseType document) carry no filterable
+          // JSON — hand them through untouched instead of throwing.
+          if (typeof response !== 'string') return response;
+          try {
+            const res = JSON.parse(response.replace(")]}'", ''));
+            window.blockTubeExports.fetchFilter(new URL(this.responseURL), res);
+            return JSON.stringify(res);
+          } catch (e) {
+            return response;
+          }
+        },
+        configurable: true,
+      });
+    }
   }
 
   // Wrap YT's legacy property definitions so every access that reach us BEFORE
