@@ -3,7 +3,32 @@ set -euo pipefail
 
 SCRIPT=$(realpath "$0")
 BASEDIR=$(dirname "$(dirname "$SCRIPT")")
-VERSION="${2:-$(cat "$BASEDIR/VERSION")}"
+
+BROWSER=""
+VERSION=""
+MAKE_ZIP=1
+UPDATE_URL=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        firefox|firefox_selfhosted|chrome) BROWSER="$1" ;;
+        --no-zip) MAKE_ZIP=0 ;;
+        --update-url)
+            if [ $# -lt 2 ]; then echo "missing URL after --update-url" >&2; exit 1; fi
+            UPDATE_URL="$2"; shift ;;
+        *) VERSION="$1" ;;
+    esac
+    shift
+done
+
+if [ -z "$BROWSER" ]; then
+    echo "Usage: $0 {firefox|firefox_selfhosted|chrome} [version] [--no-zip] [--update-url URL]" >&2
+    exit 1
+fi
+
+if [ -z "$VERSION" ]; then
+    VERSION=$(cat "$BASEDIR/VERSION")
+fi
 
 copy_files() {
     mkdir -p "$DEST"
@@ -19,7 +44,15 @@ set_version() {
     sed -i -e "s/{EXT_VERSION}/${VERSION}/" "${DEST}/src/ui/options.html"
 }
 
+set_update_url() {
+    if [ -n "$UPDATE_URL" ]; then
+        esc=$(printf '%s' "$UPDATE_URL" | sed 's/[&|]/\\&/g')
+        sed -i -e "s|\"update_url\": \"[^\"]*\"|\"update_url\": \"${esc}\"|" "${DEST}/manifest.json"
+    fi
+}
+
 zipfile() {
+    command -v zip >/dev/null || { echo "zip binary not found (pass --no-zip to skip the package)" >&2; exit 1; }
     cd -- "$DEST"
     zip "$DEST/blocktube_${BROWSER}_v${VERSION}.zip" -qr ./*
 }
@@ -37,25 +70,12 @@ build() {
     clean
     copy_files
     set_version
-    zipfile
+    set_update_url
+    if [ "$MAKE_ZIP" == "1" ]; then
+        zipfile
+    fi
 }
 
-if [ "${1:-}" == "firefox_selfhosted" ]; then
-    DEST=$BASEDIR/dist/firefox_selfhosted
-    BROWSER=firefox_selfhosted
-    echo "Building Firefox Self-Hosted to $DEST"
-    build
-elif [ "${1:-}" == "firefox" ]; then
-    DEST=$BASEDIR/dist/firefox
-    BROWSER=firefox
-    echo "Building Firefox to $DEST"
-    build
-elif [ "${1:-}" == "chrome" ]; then
-    DEST=$BASEDIR/dist/chrome
-    BROWSER=chrome
-    echo "Building Chrome to $DEST"
-    build
-else
-    echo "Usage: $0 {firefox|firefox_selfhosted|chrome} [version]" >&2
-    exit 1
-fi
+DEST=$BASEDIR/dist/$BROWSER
+echo "Building $BROWSER (version $VERSION) to $DEST"
+build

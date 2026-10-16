@@ -41,6 +41,8 @@ puzzle-piece menu — right-click the icon there and **Pin to Toolbar**.
   reference (`video` fields, `objectType` renderers, examples)
 * [Reporting a missed block](docs/debugging.md) — capture the response,
   file a reproducible issue, turn captures into tests
+* [Self-hosting](docs/self-hosting.md) — build from source and load it
+  without the stores (Chrome / Firefox walkthroughs)
 
 ## Options page
 
@@ -193,11 +195,23 @@ npm run check:length
 ./tools/build.sh chrome
 ./tools/build.sh firefox_selfhosted
 
-# Output packages locations (<VERSION> comes from the VERSION file —
-# the release track, independent of package.json)
-./dist/firefox/blocktube_firefox_v<VERSION>.zip
-./dist/chrome/blocktube_chrome_v<VERSION>.zip
-./dist/firefox_selfhosted/blocktube_firefox_selfhosted_v<VERSION>.zip
+# Windows Command Prompt (same outputs; from PowerShell itself drop the
+# `powershell -ExecutionPolicy Bypass -File` prefix and run .\tools\build.ps1)
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Browser chrome
+powershell -ExecutionPolicy Bypass -File tools\build.ps1 -Browser firefox_selfhosted
+
+# Output is unpacked directories (load straight into the browser) plus a
+# zip package per target; <VERSION> comes from the VERSION file when
+# substituted
+./dist/firefox/
+./dist/chrome/
+./dist/firefox_selfhosted/
+
+# Add --no-zip (build.sh) / -NoZip (build.ps1) to skip the package
+# (local Chrome use — Chrome cannot load a zip anyway)
+
+# Full walkthrough (which folder to load in which browser):
+docs/self-hosting.md
 
 # Temporary installation / debugging
 Firefox: https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/
