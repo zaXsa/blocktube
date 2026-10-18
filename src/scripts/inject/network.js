@@ -2,7 +2,11 @@
     if (storageData === undefined) return;
 
     if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
-      ObjectFilter(resp, filterRules.main, [], true);
+      // Feed/search continuations ride /browse and /search; hand the filtered
+      // instance to the pump so a shortened feed can nudge YouTube for more
+      // (continuation.js, feature-detected for stripped builds).
+      const filtered = ObjectFilter(resp, filterRules.main, [], true);
+      if (typeof maybePumpContinuation === 'function') maybePumpContinuation(filtered);
     } else if (url.pathname === '/youtubei/v1/get_watch') {
       filterGetWatchResponse(resp);
     } else if (['/youtubei/v1/next'].includes(url.pathname)) {

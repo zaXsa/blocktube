@@ -11,8 +11,9 @@ const OUT = path.join(ROOT, 'src', 'scripts', 'inject.js');
 
 // Order matters only for load-time const initializers (each module's consts
 // must be declared before they are read). consts.js (embedded data copy) ->
-// rules (pure data) -> paths -> object-filter -> custom-filters -> network ->
-// context-menu -> comment-dom -> hooks (lifecycle + listeners, which must stay last).
+// rules (pure data) -> paths -> object-filter -> custom-filters -> continuation
+// (feed pump) -> network -> context-menu -> comment-dom -> hooks (lifecycle +
+// listeners, which must stay last).
 // NOTE: consts.js is EMBEDDED as fragment #0. The page/MAIN-world bundle must
 // be SELF-CONTAINED — separately-injected MAIN-world content scripts do not
 // reliably share top-level bindings or cross-file globals (crash history:
@@ -26,6 +27,7 @@ const MODULES = [
   { path: 'src/scripts/inject/paths.js' },
   { path: 'src/scripts/inject/object-filter.js' },
   { path: 'src/scripts/inject/custom-filters.js' },
+  { path: 'src/scripts/inject/continuation.js' },
   { path: 'src/scripts/inject/network.js' },
   { path: 'src/scripts/inject/context-menu.js' },
   { path: 'src/scripts/inject/shorts-overlay.js' },

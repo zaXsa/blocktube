@@ -957,6 +957,8 @@
     this.ruleNamesSet = new Set(Object.keys(ruleConfig));
     this.contextMenus = contextMenus;
     this.blockedComments = [];
+    this.deletedCount = 0;
+    this.sawContinuation = false;
 
     try {
       this.filter();
@@ -1485,6 +1487,7 @@
     }
     if (customRet) {
       delete obj[rule.name];
+      filterCtx.deletedCount += 1;
       return rule.related || true;
     }
     return false;
@@ -1536,10 +1539,12 @@
       if (childDel && keys === undefined) {
         deleted = true;
         spliceDeletedChild(obj, idx, childDel, keys);
+        filterCtx.deletedCount += 1;
       }
 
       if (collapseEmptyContainers(obj, idx, childDel)) {
         deleted = true;
+        filterCtx.deletedCount += 1;
       }
     }
     return deleted;
@@ -1570,6 +1575,7 @@
     } else {
       keys = Object.keys(obj);
       len = keys.length;
+      if (has.call(obj, 'continuationItemRenderer')) this.sawContinuation = true;
       const matched = matchAndDeleteRules(this, obj, keys);
       if (matched) deletePrev = matched;
     }
@@ -2154,13 +2160,175 @@
     }
   }
 
+  // ================== src/scripts/inject/continuation.js ==================
+
+  // !! Continuation pump
+
+  const PUMP_ROUTES = new Set(['/', '/results', '/feed/subscriptions', '/feed/trending']);
+  const PUMP_ROUTE_PREFIXES = ['/feed/', '/channel/', '/@', '/c/', '/user/', '/playlist'];
+
+  const PUMP_INTERVAL_MS = 700;
+  const PUMP_NUDGE_COOLDOWN_MS = 2100;
+  const PUMP_UNDERFILL_MARGIN = 300;
+  const PUMP_MAX_STALL_MS = 15000;
+  const PUMP_ARM_GRACE_MS = 6000;
+
+  let pumpTimer = null;
+  let pumpRunning = false;
+  let pumpEpoch = 0;
+  let pumpAttempts = 0;
+  let pumpStartedAt = 0;
+  let pumpLastAttemptAt = 0;
+  let pumpSawItem = false;
+
+  function isContinuationRoute() {
+    try {
+      const path = document.location.pathname;
+      if (PUMP_ROUTES.has(path)) return true;
+      return PUMP_ROUTE_PREFIXES.some((prefix) => path.startsWith(prefix));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function continuationItemPresent() {
+    try {
+      return !!document.querySelector('ytd-continuation-item-renderer');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function pageUnderfilled() {
+    try {
+      const scroller = document.scrollingElement || document.documentElement;
+      const height = Math.max(
+        scroller ? scroller.scrollHeight : 0,
+        document.body ? document.body.scrollHeight : 0,
+      );
+      const viewport = window.innerHeight || (scroller && scroller.clientHeight) || 0;
+      return height <= viewport + PUMP_UNDERFILL_MARGIN;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function nudgeContinuation() {
+    try {
+      const cont = document.querySelector('ytd-continuation-item-renderer');
+      if (cont && typeof cont.triggerContinuation === 'function') {
+        cont.triggerContinuation();
+        return true;
+      }
+      const rich = document.querySelector('ytd-rich-grid-renderer');
+      if (rich && typeof rich.onScroll === 'function') {
+        rich.onScroll();
+        return true;
+      }
+      const browse = document.querySelector('ytd-browse');
+      if (browse && typeof browse.onScroll === 'function') {
+        browse.onScroll();
+        return true;
+      }
+      if (cont && typeof cont.onScroll === 'function') {
+        cont.onScroll();
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function logContinuationGiveup() {
+    try {
+      console.info(
+        `[BlockTube] feed still short after ${pumpAttempts} continuation attempt(s); leaving it to YouTube`,
+      );
+    } catch (e) {}
+  }
+
+  function continuationPumpTick() {
+    const hasItem = continuationItemPresent();
+    if (hasItem) {
+      pumpSawItem = true;
+    } else {
+      if (pumpSawItem) return true;
+      if (Date.now() - pumpStartedAt > PUMP_ARM_GRACE_MS) return true;
+      return false;
+    }
+    if (!pageUnderfilled()) return true;
+    const now = Date.now();
+    if (now - pumpStartedAt > PUMP_MAX_STALL_MS) {
+      logContinuationGiveup();
+      return true;
+    }
+    try {
+      if (document.visibilityState && document.visibilityState !== 'visible') return false;
+    } catch (e) {}
+    if (now - pumpLastAttemptAt >= PUMP_NUDGE_COOLDOWN_MS) {
+      pumpLastAttemptAt = now;
+      pumpAttempts += 1;
+      nudgeContinuation();
+    }
+    return false;
+  }
+
+  function armContinuationPump() {
+    if (pumpRunning) return;
+    if (typeof setInterval !== 'function') return;
+    const epoch = pumpEpoch;
+    pumpAttempts = 0;
+    pumpStartedAt = Date.now();
+    pumpLastAttemptAt = 0;
+    pumpSawItem = false;
+    pumpRunning = true;
+    const timer = setInterval(() => {
+      let done = true;
+      try {
+        done = epoch !== pumpEpoch ? true : continuationPumpTick();
+      } catch (e) {
+        done = true;
+      }
+      if (done) {
+        try {
+          clearInterval(timer);
+        } catch (e) {}
+        if (pumpTimer === timer) {
+          pumpTimer = null;
+          pumpRunning = false;
+        }
+      }
+    }, PUMP_INTERVAL_MS);
+    pumpTimer = timer;
+  }
+
+  function resetContinuationPump() {
+    pumpEpoch += 1;
+    pumpRunning = false;
+    pumpSawItem = false;
+    if (pumpTimer !== null) {
+      try {
+        clearInterval(pumpTimer);
+      } catch (e) {}
+      pumpTimer = null;
+    }
+  }
+
+  function maybePumpContinuation(instance) {
+    try {
+      if (!instance || !instance.deletedCount || !instance.sawContinuation) return;
+      if (!isContinuationRoute()) return;
+      armContinuationPump();
+    } catch (e) {}
+  }
+
   // ================== src/scripts/inject/network.js ==================
 
   function fetchFilter(url, resp) {
     if (storageData === undefined) return;
 
     if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
-      ObjectFilter(resp, filterRules.main, [], true);
+      const filtered = ObjectFilter(resp, filterRules.main, [], true);
+      if (typeof maybePumpContinuation === 'function') maybePumpContinuation(filtered);
     } else if (url.pathname === '/youtubei/v1/get_watch') {
       filterGetWatchResponse(resp);
     } else if (['/youtubei/v1/next'].includes(url.pathname)) {
@@ -6446,25 +6614,26 @@
     });
   }
 
-  function hookInitialData() {
+  function filterInitialData(data) {
     const postActions = [fixAutoplay];
+    const filtered = ObjectFilter(
+      data,
+      mergedFilterRules,
+      data.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
+      true,
+    );
+    try {
+      if (typeof maybePumpContinuation === 'function') maybePumpContinuation(filtered);
+    } catch (e) {}
+    return filtered;
+  }
+
+  function hookInitialData() {
     if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
-      ObjectFilter(
-        window.ytInitialData,
-        mergedFilterRules,
-        window.ytInitialData.contents && playerHasBeenBlocked
-          ? postActions.concat(redirectToNext)
-          : postActions,
-        true,
-      );
+      filterInitialData(window.ytInitialData);
     } else {
       trapObjectPath('ytInitialData', undefined, (v) => {
-        ObjectFilter(
-          v,
-          mergedFilterRules,
-          v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
-          true,
-        );
+        filterInitialData(v);
       });
     }
   }
@@ -6535,6 +6704,9 @@
 
   function storageReceived(data) {
     if (data === undefined) {
+      try {
+        if (typeof resetContinuationPump === 'function') resetContinuationPump();
+      } catch (e) {}
       window.blockTubeDispatched = true;
       fireBlockTubeReady();
       return;
@@ -6567,6 +6739,9 @@
   window.addEventListener('yt-navigate-start', () => {
     playerHasBeenBlocked = false;
     pageChannel = null;
+    try {
+      if (typeof resetContinuationPump === 'function') resetContinuationPump();
+    } catch (e) {}
     try {
       if (typeof shortsSkipNavigationStarted === 'function') shortsSkipNavigationStarted();
     } catch (e) {}

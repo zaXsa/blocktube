@@ -106,9 +106,12 @@ Discard, and an `Unsaved changes` flag):
   watch-progress rules, and the custom JavaScript filter do nothing, but
   everything is preserved and applies again when you switch the mode off.
   Section-level toggles (Shorts / Movies / Mixes / Chips-shelves) still apply.  
-  Warning: with a small allowlist feeds can look short or sparse — YouTube
-  sends a fixed batch of videos and does not load more replacements for
-  the hidden ones, so you may see only a few videos per page.
+  Warning: with a small allowlist feeds can look short or sparse. BlockTube
+  detects a feed that filtering left shorter than the viewport and asks
+  YouTube to load the next batch for you (bounded — it stops as soon as the
+  page scrolls normally again), so a short feed usually refills itself on the
+  home, search, subscriptions/trending and channel pages. A feed that is
+  almost entirely blocked can still only show the few videos that survive.
 
 * Where is my allowlist?  
   In the dedicated `Whitelist` panel on the options page (visible only while

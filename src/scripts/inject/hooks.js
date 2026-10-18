@@ -348,27 +348,30 @@
     });
   }
 
+  // Filter the initial page payload, then let the continuation pump consider
+  // it (continuation.js) — this is where the short-feed stall usually starts.
+  function filterInitialData(data) {
+    const postActions = [fixAutoplay];
+    const filtered = ObjectFilter(
+      data,
+      mergedFilterRules,
+      data.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
+      true,
+    );
+    try {
+      if (typeof maybePumpContinuation === 'function') maybePumpContinuation(filtered);
+    } catch (e) {}
+    return filtered;
+  }
+
   // Initial page data: filter at once (redirecting when a block already
   // landed), or trap until present.
   function hookInitialData() {
-    const postActions = [fixAutoplay];
     if (typeof window.ytInitialData === 'object' && window.ytInitialData !== null) {
-      ObjectFilter(
-        window.ytInitialData,
-        mergedFilterRules,
-        window.ytInitialData.contents && playerHasBeenBlocked
-          ? postActions.concat(redirectToNext)
-          : postActions,
-        true,
-      );
+      filterInitialData(window.ytInitialData);
     } else {
       trapObjectPath('ytInitialData', undefined, (v) => {
-        ObjectFilter(
-          v,
-          mergedFilterRules,
-          v.contents && playerHasBeenBlocked ? postActions.concat(redirectToNext) : postActions,
-          true,
-        );
+        filterInitialData(v);
       });
     }
   }
@@ -457,6 +460,11 @@
   // `options` keys are BLOCKTUBE_CONSTS.OPTIONS (alias OPT in rules.js).
   function storageReceived(data) {
     if (data === undefined) {
+      // Disabled / no storage: stop any feed pump armed for the previous state
+      // so it cannot keep nudging YouTube after the extension is switched off.
+      try {
+        if (typeof resetContinuationPump === 'function') resetContinuationPump();
+      } catch (e) {}
       window.blockTubeDispatched = true;
       fireBlockTubeReady();
       return;
@@ -498,6 +506,11 @@
     // page repopulate it from fresh metadata, but until then a stale channel
     // must not attribute the new page's cards.
     pageChannel = null;
+    // Drop any feed pump armed for the page we are leaving (continuation.js);
+    // the new page's payload re-arms it. Feature-detected for stripped builds.
+    try {
+      if (typeof resetContinuationPump === 'function') resetContinuationPump();
+    } catch (e) {}
     // Shorts skip accounting + skip-fired panel teardown (see
     // shortsSkipNavigationStarted): our navigation drops its reason panel now
     // not into next short, manual keeps panel for finish handler below. The

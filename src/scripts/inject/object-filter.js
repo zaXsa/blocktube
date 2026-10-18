@@ -13,6 +13,12 @@
     this.ruleNamesSet = new Set(Object.keys(ruleConfig));
     this.contextMenus = contextMenus;
     this.blockedComments = [];
+    // Continuation-pump telemetry (continuation.js): how many renderers this
+    // pass removed and whether the payload still carries a continuation
+    // sentinel. A pass that deleted content but left a continuation is exactly
+    // the feed-shortened-past-scroll case the pump repairs.
+    this.deletedCount = 0;
+    this.sawContinuation = false;
 
     try {
       this.filter();
@@ -685,6 +691,7 @@
     }
     if (customRet) {
       delete obj[rule.name];
+      filterCtx.deletedCount += 1;
       return rule.related || true;
     }
     return false;
@@ -751,11 +758,13 @@
       if (childDel && keys === undefined) {
         deleted = true;
         spliceDeletedChild(obj, idx, childDel, keys);
+        filterCtx.deletedCount += 1;
       }
 
       // if next child is an empty array that we filtered, mark parent for removal.
       if (collapseEmptyContainers(obj, idx, childDel)) {
         deleted = true;
+        filterCtx.deletedCount += 1;
       }
     }
     return deleted;
@@ -791,6 +800,10 @@
     } else {
       keys = Object.keys(obj);
       len = keys.length;
+      // Sentinels are not rule targets, so a surviving one means YouTube still
+      // has pages for this list. The pump arms off this flag (see
+      // continuation.js) — one hash lookup per non-array node.
+      if (has.call(obj, 'continuationItemRenderer')) this.sawContinuation = true;
       const matched = matchAndDeleteRules(this, obj, keys);
       if (matched) deletePrev = matched;
     }
