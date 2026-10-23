@@ -212,10 +212,21 @@
     return rows;
   }
 
+  // A stored blank separator is trimmed-empty (same classification as
+  // compileRegex); keep the check local so group boundaries never depend on
+  // the annotation parser's comment handling.
+  function isBlankStoredLine(line) {
+    return typeof line === 'string' && line.trim() === '';
+  }
+
   // Remove a rule by its index: the rule line plus an adjacent attached
   // `// Label:` line go, and the provenance comment goes too — but only when
   // no other remaining rule still uses it (context-menu groups share one
-  // comment across several IDs).
+  // comment across several IDs). When those drops empty the whole group, its
+  // blank separator goes too: otherwise every fully-removed group left an
+  // orphan blank line behind, and repeated table removals made the raw list
+  // accumulate whitespace. Only empty groups are touched, so user formatting
+  // inside surviving groups stays byte-identical.
   function removeRuleLines(lines, ruleIndex) {
     if (!(lines instanceof Array)) {
       throw new TypeError('removeRuleLines expects an array of lines');
@@ -237,6 +248,30 @@
       );
       if (!shared) drop.add(victim.provenanceIndex);
     }
+
+    // The non-blank block around the victim is one stored group (provenance
+    // comment, labels, one or more rules). If every line in it is being
+    // dropped, remove one adjacent separator — preferring the following one,
+    // falling back to the preceding blank for an end-of-list group.
+    let groupStart = ruleIndex;
+    while (groupStart > 0 && !isBlankStoredLine(lines[groupStart - 1])) groupStart -= 1;
+    let groupEnd = ruleIndex;
+    while (groupEnd < lines.length - 1 && !isBlankStoredLine(lines[groupEnd + 1])) groupEnd += 1;
+    let groupEmptied = true;
+    for (let i = groupStart; i <= groupEnd; i += 1) {
+      if (!drop.has(i)) {
+        groupEmptied = false;
+        break;
+      }
+    }
+    if (groupEmptied) {
+      if (groupEnd + 1 < lines.length && isBlankStoredLine(lines[groupEnd + 1])) {
+        drop.add(groupEnd + 1);
+      } else if (groupStart > 0 && isBlankStoredLine(lines[groupStart - 1])) {
+        drop.add(groupStart - 1);
+      }
+    }
+
     return lines.filter((line, index) => !drop.has(index));
   }
 
