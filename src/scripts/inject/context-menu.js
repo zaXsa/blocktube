@@ -1348,7 +1348,10 @@
   const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
 
   // Resolve channel/video from the now-playing player + owner renderers. The
-  // owner id joins the player id when they disagree (collab/featured cases).
+  // player payload carries only the first creator, so a collaboration video
+  // also contributes every channel from the owner's "Collaborators" dialog.
+  // One Block Channel tap therefore blocks the whole collab, matching a feed
+  // card tap (see lockupChannelFrom) and a channel selection.
   function playerMenuBlockData() {
     const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
     const playerData = pageManager.data || pageManager.getCurrentData();
@@ -1356,19 +1359,26 @@
 
     const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
     const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
+    // ytInitialData nests the renderer under videoOwnerRenderer; accept a
+    // direct renderer shape too so tests and future layouts both resolve.
+    const ownerData = owner?.videoOwnerRenderer || owner;
 
     const ownerUCID = getObjectByPath(
-      owner,
-      'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+      ownerData,
+      'title.runs[0].navigationEndpoint.browseEndpoint.browseId',
     );
-    let playerUCID = player.videoDetails.channelId;
-    if (ownerUCID && ownerUCID !== playerUCID) {
-      playerUCID = [playerUCID, ownerUCID];
-    }
+    const collaboratorIds = getCollaboratorChannelIds(
+      ownerData,
+      OWNER_COLLAB_LIST_ITEMS_PATHS,
+    );
+    const collaboratorNames = getCollaboratorChannelNames(
+      ownerData,
+      OWNER_COLLAB_LIST_ITEMS_PATHS,
+    );
     return {
       channelData: {
-        text: player.videoDetails.author,
-        id: playerUCID,
+        text: singleOrAll([player.videoDetails.author, ...collaboratorNames]),
+        id: singleOrAll([player.videoDetails.channelId, ownerUCID, ...collaboratorIds]),
       },
       videoData: {
         text: player.videoDetails.title,

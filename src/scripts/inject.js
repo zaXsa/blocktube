@@ -620,19 +620,50 @@
     }
     return out;
   }
-  const LOCKUP_COLLAB_LIST_ITEMS_PATH =
-    'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
+  const COLLAB_DIALOG_LIST_ITEMS_SUFFIX =
+    'showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
 
-  function getCollaboratorChannelIds(obj) {
-    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
+  const LOCKUP_COLLAB_LIST_ITEMS_PATH = `metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`;
+
+  const OWNER_COLLAB_LIST_ITEMS_PATHS = [
+    `navigationEndpoint.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`,
+    `attributedTitle.commandRuns.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`,
+  ];
+
+  function collabListItems(obj, listItemsPaths) {
+    const paths = listItemsPaths instanceof Array ? listItemsPaths : [listItemsPaths];
+    const items = [];
+    for (let p = 0; p < paths.length; p += 1) {
+      const lists = getAllByPath(obj, paths[p]);
+      for (let l = 0; l < lists.length; l += 1) {
+        const list = lists[l];
+        if (!(list instanceof Array)) continue;
+        for (let i = 0; i < list.length; i += 1) items.push(list[i]);
+      }
+    }
+    return items;
+  }
+
+  const COLLAB_ITEM_ID_PATHS = [
+    'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+    'listItemViewModel.title.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
+    'listItemViewModel.leadingAccessory.avatarViewModel.endpoint.innertubeCommand.browseEndpoint.browseId',
+  ];
+
+  function getCollaboratorChannelIds(obj, listItemsPaths) {
+    const listItems = collabListItems(
+      obj,
+      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+    );
     const ids = [];
-    if (Array.isArray(listItems)) {
-      for (let i = 0; i < listItems.length; i += 1) {
-        const id = getObjectByPath(
-          listItems[i],
-          'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
-        );
-        if (id !== undefined) ids.push(id);
+    const seen = new Set();
+    for (let i = 0; i < listItems.length; i += 1) {
+      const candidates = getFlattenByPathAll(listItems[i], COLLAB_ITEM_ID_PATHS);
+      for (let c = 0; c < candidates.length; c += 1) {
+        const id = candidates[c];
+        if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
       }
     }
     return ids;
@@ -649,16 +680,20 @@
     return undefined;
   }
 
-  function getCollaboratorChannelNames(obj) {
-    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
+  function getCollaboratorChannelNames(obj, listItemsPaths) {
+    const listItems = collabListItems(
+      obj,
+      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+    );
     const names = [];
-    if (Array.isArray(listItems)) {
-      for (let i = 0; i < listItems.length; i += 1) {
-        const item = listItems[i] && listItems[i].listItemViewModel;
-        if (!item || typeof item !== 'object') continue;
-        const name = collabNameOf(item.title);
-        if (name !== undefined) names.push(name);
-      }
+    const seen = new Set();
+    for (let i = 0; i < listItems.length; i += 1) {
+      const item = listItems[i] && listItems[i].listItemViewModel;
+      if (!item || typeof item !== 'object') continue;
+      const name = collabNameOf(item.title);
+      if (name === undefined || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
     }
     return names;
   }
@@ -3731,19 +3766,18 @@
 
     const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
     const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
+    const ownerData = owner?.videoOwnerRenderer || owner;
 
     const ownerUCID = getObjectByPath(
-      owner,
-      'videoOwnerRenderer.title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+      ownerData,
+      'title.runs[0].navigationEndpoint.browseEndpoint.browseId',
     );
-    let playerUCID = player.videoDetails.channelId;
-    if (ownerUCID && ownerUCID !== playerUCID) {
-      playerUCID = [playerUCID, ownerUCID];
-    }
+    const collaboratorIds = getCollaboratorChannelIds(ownerData, OWNER_COLLAB_LIST_ITEMS_PATHS);
+    const collaboratorNames = getCollaboratorChannelNames(ownerData, OWNER_COLLAB_LIST_ITEMS_PATHS);
     return {
       channelData: {
-        text: player.videoDetails.author,
-        id: playerUCID,
+        text: singleOrAll([player.videoDetails.author, ...collaboratorNames]),
+        id: singleOrAll([player.videoDetails.channelId, ownerUCID, ...collaboratorIds]),
       },
       videoData: {
         text: player.videoDetails.title,

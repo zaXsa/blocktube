@@ -120,35 +120,80 @@
     }
     return out;
   }
+  // Shared suffix of a "Collaborators" dialog: every listItemViewModel holds
+  // one channel (id under rendererContext.onTap, display name under title).
+  const COLLAB_DIALOG_LIST_ITEMS_SUFFIX =
+    'showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
+
   // Avatar-stack dialog holding every collaborator on a lockupViewModel
   // collab card (same listItemViewModel shape as the search-result byline
   // dialogs in rules.js).
-  const LOCKUP_COLLAB_LIST_ITEMS_PATH =
-    'metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
+  const LOCKUP_COLLAB_LIST_ITEMS_PATH = `metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`;
 
-  // Collect every collaborator channel id from a lockupViewModel avatar stack.
-  // Collab videos render one card per creator, and getFlattenByPath only
-  // returns the first channelId it resolves.
-  function getCollaboratorChannelIds(obj) {
-    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
+  // Watch-page videoOwnerRenderer: on a collaboration video the byline's own
+  // navigationEndpoint and its attributedTitle both open the same
+  // "Collaborators" dialog. The player payload only carries the first channel,
+  // so these lists are the sole source for every creator. Both paths are read
+  // because YouTube has shipped each shape.
+  const OWNER_COLLAB_LIST_ITEMS_PATHS = [
+    `navigationEndpoint.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`,
+    `attributedTitle.commandRuns.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`,
+  ];
+
+  // Gather every listItemViewModel from one or more dialog list paths. Paths
+  // are walked with getAllByPath so arrays along the way (commandRuns) fan
+  // out; duplicate lists are harmless because ids/names dedupe downstream.
+  function collabListItems(obj, listItemsPaths) {
+    const paths = listItemsPaths instanceof Array ? listItemsPaths : [listItemsPaths];
+    const items = [];
+    for (let p = 0; p < paths.length; p += 1) {
+      const lists = getAllByPath(obj, paths[p]);
+      for (let l = 0; l < lists.length; l += 1) {
+        const list = lists[l];
+        if (!(list instanceof Array)) continue;
+        for (let i = 0; i < list.length; i += 1) items.push(list[i]);
+      }
+    }
+    return items;
+  }
+
+  // Where a dialog listItemViewModel keeps its channel link. Search-result and
+  // lockup dialogs use rendererContext.onTap; the watch-page owner dialog has
+  // no rendererContext command, carrying the id on the title's commandRuns and
+  // on the leading avatar instead. Read all shapes and keep the first per item.
+  const COLLAB_ITEM_ID_PATHS = [
+    'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
+    'listItemViewModel.title.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId',
+    'listItemViewModel.leadingAccessory.avatarViewModel.endpoint.innertubeCommand.browseEndpoint.browseId',
+  ];
+
+  // Collect every collaborator channel id from a collaborator dialog. Defaults
+  // to the lockupViewModel avatar stack; callers on the watch page pass
+  // OWNER_COLLAB_LIST_ITEMS_PATHS. Collab videos list one channel per creator,
+  // and getFlattenByPath only returns the first channelId it resolves.
+  function getCollaboratorChannelIds(obj, listItemsPaths) {
+    const listItems = collabListItems(
+      obj,
+      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+    );
     const ids = [];
-    if (Array.isArray(listItems)) {
-      for (let i = 0; i < listItems.length; i += 1) {
-        const id = getObjectByPath(
-          listItems[i],
-          'listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId',
-        );
-        if (id !== undefined) ids.push(id);
+    const seen = new Set();
+    for (let i = 0; i < listItems.length; i += 1) {
+      const candidates = getFlattenByPathAll(listItems[i], COLLAB_ITEM_ID_PATHS);
+      for (let c = 0; c < candidates.length; c += 1) {
+        const id = candidates[c];
+        if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
       }
     }
     return ids;
   }
 
-  // Collect every collaborator channel NAME from a lockupViewModel avatar
-  // stack. The channelName rule is a single-name function
-  // (lockupChannelName), so without this a blocked name listed second never
-  // matches — the channelName half of the collab gap (channelId is covered
-  // by getCollaboratorChannelIds above).
+  // Collect every collaborator channel NAME from a collaborator dialog. The
+  // channelName rule is a single-name function (lockupChannelName), so without
+  // this a blocked name listed second never matches — the channelName half of
+  // the collab gap (channelId is covered by getCollaboratorChannelIds above).
   // Display name from a collaborator dialog item title: `content` first,
   // runs-joined text second. Undefined when the title carries no name.
   function collabNameOf(title) {
@@ -162,16 +207,20 @@
     return undefined;
   }
 
-  function getCollaboratorChannelNames(obj) {
-    const listItems = getObjectByPath(obj, LOCKUP_COLLAB_LIST_ITEMS_PATH);
+  function getCollaboratorChannelNames(obj, listItemsPaths) {
+    const listItems = collabListItems(
+      obj,
+      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+    );
     const names = [];
-    if (Array.isArray(listItems)) {
-      for (let i = 0; i < listItems.length; i += 1) {
-        const item = listItems[i] && listItems[i].listItemViewModel;
-        if (!item || typeof item !== 'object') continue;
-        const name = collabNameOf(item.title);
-        if (name !== undefined) names.push(name);
-      }
+    const seen = new Set();
+    for (let i = 0; i < listItems.length; i += 1) {
+      const item = listItems[i] && listItems[i].listItemViewModel;
+      if (!item || typeof item !== 'object') continue;
+      const name = collabNameOf(item.title);
+      if (name === undefined || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
     }
     return names;
   }

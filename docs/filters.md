@@ -66,7 +66,9 @@ Blocking a channel (by name or ID) blocks its videos, comments, playlists, and
 community posts — anywhere they appear, including direct visits (you are sent
 back to the YouTube homepage). On collaboration videos (several creators on
 one card) a match on ANY collaborator blocks the video, and `Block Channel`
-on such a card blocks every collaborator at once.
+on such a card blocks every collaborator at once. The same applies on the
+watch page: `Block Channel` under a collaboration video blocks every creator
+listed in its Collaborators dialog, not just the first one.
 
 Each comment's `...` menu also carries BlockTube entries next to YouTube's
 Report: `Block Channel` (same as adding the commenter's ID to the Channel ID
