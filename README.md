@@ -92,6 +92,12 @@ Discard, and an `Unsaved changes` flag):
   opens an editor prefilled with the comment so you can trim it to a keyword
   or save it as `/regex/`; visible matches are blocked immediately, no reload.
 
+* How are collaboration videos handled?  
+  A collaboration video lists several creators. BlockTube treats every creator
+  as a match: blocking any one of their channel IDs or names blocks the video
+  wherever it appears. `Block Channel` also blocks every creator at once,
+  both on a collaboration card and under the video on the watch page.
+
 * What is the behaviour when browsing blocked channel?  
   User will be redirected to YouTube homepage.
 
