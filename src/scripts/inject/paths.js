@@ -225,6 +225,38 @@
     return names;
   }
 
+  // Every collaborator as an id/name PAIR, read from the same dialog item so
+  // an individual "Block <creator>" menu entry targets exactly that channel.
+  // The helpers above collect ids and names separately because matching only
+  // needs one field; menu entries need the pairing, and index-zipping two
+  // independently deduped lists would misattribute creators. Items without an
+  // id are skipped (nothing to block); a missing name stays undefined and the
+  // label falls back to the id.
+  function getCollaboratorChannels(obj, listItemsPaths) {
+    const listItems = collabListItems(
+      obj,
+      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+    );
+    const channels = [];
+    const seenIds = new Set();
+    for (let i = 0; i < listItems.length; i += 1) {
+      const item = listItems[i];
+      const candidates = getFlattenByPathAll(item, COLLAB_ITEM_ID_PATHS);
+      let id;
+      for (let c = 0; c < candidates.length; c += 1) {
+        if (typeof candidates[c] === 'string' && candidates[c].length > 0) {
+          id = candidates[c];
+          break;
+        }
+      }
+      if (id === undefined || seenIds.has(id)) continue;
+      seenIds.add(id);
+      const name = collabNameOf(item && item.listItemViewModel && item.listItemViewModel.title);
+      channels.push({ id, text: name });
+    }
+    return channels;
+  }
+
   const pathCache = new Map();
 
   function compilePathSegment(v) {

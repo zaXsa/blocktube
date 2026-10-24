@@ -120,6 +120,83 @@
     return seen;
   }
 
+  // Individual creator entries read as `Block <creator>` so they align with
+  // the sibling rows ("Block Channel" / "Block All Channels"). The tap
+  // handler resolves the creator through the custom payload; the label is
+  // only used as a fallback when a renderer drops it (exact-match against
+  // the known creator list, so "Block <name>" cannot be confused with
+  // "Block Channel" and friends even though they share the "Block " prefix).
+  const INDIVIDUAL_LABEL_PREFIX = 'Block ';
+
+  // Sanitize a collaborator pair list for menu entries: an entry needs a
+  // blockable id, duplicate ids collapse, and a missing name stays undefined
+  // (the label falls back to the id). Pairing happens in paths.js, per dialog
+  // item — never by zipping two independently deduped lists.
+  function usableChannelPairs(pairs) {
+    const channels = [];
+    const seen = new Set();
+    if (!(pairs instanceof Array)) return channels;
+    for (let i = 0; i < pairs.length; i += 1) {
+      const pair = pairs[i];
+      if (!pair || typeof pair.id !== 'string' || pair.id.length === 0) continue;
+      if (seen.has(pair.id)) continue;
+      seen.add(pair.id);
+      channels.push({
+        id: pair.id,
+        text: typeof pair.text === 'string' && pair.text.length > 0 ? pair.text : undefined,
+      });
+    }
+    return channels;
+  }
+
+  // The label shown for one creator's entry.
+  function individualChannelLabel(channel) {
+    return (
+      INDIVIDUAL_LABEL_PREFIX +
+      (typeof channel.text === 'string' && channel.text.length > 0 ? channel.text : channel.id)
+    );
+  }
+
+  // Resolve a `Block <creator>` label back to the channel it names. Only
+  // used as a fallback when the renderer element no longer exposes the custom
+  // payload; the match requires the remainder to equal a known creator, so
+  // labels that happen to share the "Block " prefix (e.g. "Block Channel")
+  // never resolve here.
+  function individualChannelFromLabel(channels, menuAction) {
+    if (typeof menuAction !== 'string' || !menuAction.startsWith(INDIVIDUAL_LABEL_PREFIX)) {
+      return undefined;
+    }
+    const wanted = menuAction.slice(INDIVIDUAL_LABEL_PREFIX.length).trim();
+    if (wanted.length === 0 || !(channels instanceof Array)) return undefined;
+    for (let i = 0; i < channels.length; i += 1) {
+      const channel = channels[i];
+      if (!channel || typeof channel.id !== 'string') continue;
+      const label =
+        typeof channel.text === 'string' && channel.text.length > 0
+          ? channel.text
+          : channel.id;
+      if (label === wanted) return channel;
+    }
+    return undefined;
+  }
+
+  // Labels for the channel action: one channel keeps the existing "Block
+  // Channel" (no behaviour change for normal videos). A collaboration gets
+  // "Block All Channels" plus, when the option is on, one entry per creator.
+  // `make(label, channel?)` builds the surface-specific row; `channel` is set
+  // only for individual entries.
+  function channelBlockEntries(channels, showIndividuals, make) {
+    const list = usableChannelPairs(channels);
+    const collab = list.length > 1;
+    const entries = [make(collab ? 'Block All Channels' : 'Block Channel')];
+    if (collab && showIndividuals) {
+      for (let i = 0; i < list.length; i += 1) {
+        entries.push(make(individualChannelLabel(list[i]), list[i]));
+      }
+    }
+    return entries;
+  }
+
   // The channel and video a renderer describes, resolved through its filter
   // rule paths. Both block entries ("Block Channel" / "Block Video") carry
   // this pair as _btOriginalData for menuOnTap to consume later. Collab
@@ -160,6 +237,71 @@
     const id = singleOrAll(ids) || pageChannel?.id;
     const text = singleOrAll(names) || pageChannel?.name;
     return { id, text };
+  }
+
+  // Creators listed by a lockup card's avatar-stack dialog, as reliable
+  // id/name pairs. Only dialogs supply the pairing, so individual entries are
+  // offered exactly where one creator can be told from another.
+  function lockupChannelsFrom(renderer) {
+    return usableChannelPairs(getCollaboratorChannels(renderer));
+  }
+
+  // Watch-page videoOwnerRenderer data: on a collaboration video the byline
+  // dialog lists every creator. Prefer the same data payload (the menu is
+  // built while filtering, before the owner element is in the DOM), then the
+  // live element.
+  function watchOwnerData(container, attr, currentObj) {
+    if (attr === 'videoSecondaryInfoRenderer') {
+      const owner = getObjectByPath(currentObj, 'owner.videoOwnerRenderer');
+      if (owner) return owner;
+    }
+    const sibling = getObjectByPath(
+      container,
+      'videoSecondaryInfoRenderer.owner.videoOwnerRenderer',
+    );
+    if (sibling) return sibling;
+    const inResponse = findOwnerRendererData(container);
+    if (inResponse) return inResponse;
+    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData?.();
+    return owner?.videoOwnerRenderer || owner;
+  }
+
+  // Watch-page primary creator as an id/name pair. The owner renderer's title
+  // carries the linked channel; the dialog lists every creator, but tolerate a
+  // shape that lists only co-creators by always folding the owner back in.
+  function ownerChannelPair(ownerData) {
+    const id = getObjectByPath(
+      ownerData,
+      'title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+    );
+    if (typeof id !== 'string' || id.length === 0) return undefined;
+    const name = getObjectByPath(ownerData, 'title.runs[0].text');
+    return { id, text: typeof name === 'string' && name.length > 0 ? name : undefined };
+  }
+
+  // Every creator on a watch-page collaboration, as reliable pairs. The
+  // dialog names creators precisely, so it wins when it lists the owner too;
+  // the owner is folded in only for a shape that lists co-creators alone.
+  function watchChannelPairs(ownerData) {
+    const pairs = getCollaboratorChannels(ownerData, OWNER_COLLAB_LIST_ITEMS_PATHS);
+    const owner = ownerChannelPair(ownerData);
+    if (!owner || pairs.some((pair) => pair.id === owner.id)) {
+      return usableChannelPairs(pairs);
+    }
+    return usableChannelPairs([owner].concat(pairs));
+  }
+
+  // Reliable creator pairs for the surface whose menu is being built. Lockup
+  // sheets read the avatar-stack dialog; watch-page menus read the owner
+  // dialog; every other renderer has no paired source, so it gets no
+  // individual entries (its "block all" still resolves at tap time).
+  function menuChannelPairs(currentObj, attr, container) {
+    if (attr === 'lockupViewModel') return lockupChannelsFrom(currentObj);
+    if (attr === 'videoPrimaryInfoRenderer' || attr === 'videoSecondaryInfoRenderer') {
+      return watchChannelPairs(watchOwnerData(container, attr, currentObj));
+    }
+    return [];
   }
 
   function lockupVideoFrom(renderer) {
@@ -511,6 +653,10 @@
       metadata: {
         channelId,
         channelName,
+        // Reliable per-creator pairs from the avatar-stack dialog, used by the
+        // individual "Block <creator>" entries when a right-hand tap cannot
+        // read the row payload (label fallback, see menuOnTap).
+        channels: lockupChannelsFrom(renderer),
         videoId,
         videoName,
         removeObject: true,
@@ -783,6 +929,8 @@
     currentObj,
     store,
     isReelOverlay,
+    attr,
+    container,
   ) {
     if (isReelOverlay) {
       injectReelOverlayButtons(items, hasChannel, hasVideo, store);
@@ -792,7 +940,7 @@
       injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store);
       return;
     }
-    injectStandardMenuButtons(items, hasChannel, hasVideo, store);
+    injectStandardMenuButtons(items, hasChannel, hasVideo, store, currentObj, attr, container);
   }
 
   // Watch-page reel entries: clone a native row and retitle it — the popup's listItem
@@ -887,7 +1035,23 @@
     const cleanChannelContext = createCleanContext(items, store, true, currentObj);
     const cleanVideoContext = createCleanContext(items, store, false, currentObj);
 
-    const blockChannelItem = createLockupButtonItem('Block Channel', cleanChannelContext);
+    // Collab cards expose the avatar-stack dialog, which pairs every creator
+    // with its own id. Individual entries reuse the same clean context: the
+    // native hide command is identical, only the payload differs.
+    const channelItems = channelBlockEntries(
+      hasChannel && !isWhitelistMenuMode(store) ? lockupChannelsFrom(currentObj) : [],
+      showMenuEntry(OPT.MENU_COLLAB_INDIVIDUAL, store),
+      (label, channel) =>
+        createLockupButtonItem(
+          label,
+          cleanChannelContext,
+          'NOT_INTERESTED',
+          channel,
+          channel
+            ? { removeParent: false, stopPlayer: false, isShorts: false, isWatch: false }
+            : undefined,
+        ),
+    );
     const blockVideoItem = createLockupButtonItem('Block Video', cleanVideoContext);
 
     if (isWhitelistMenuMode(store)) {
@@ -910,7 +1074,12 @@
       createCleanContext(items, store, true, currentObj, true),
       'CHECK',
     );
-    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
+      // Appended below YouTube's own hide row ("Not interested" / "Don't
+      // recommend channel"), which stays intact: blocking a channel is a
+      // separate action from the native feedback command.
+      for (const item of channelItems) items.push(item);
+    }
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
   }
@@ -1034,7 +1203,13 @@
     return cleanContext;
   }
 
-  function createLockupButtonItem(title, rendererContext, imageName = 'NOT_INTERESTED') {
+  function createLockupButtonItem(
+    title,
+    rendererContext,
+    imageName = 'NOT_INTERESTED',
+    originalData,
+    effect,
+  ) {
     const item = {
       listItemViewModel: {
         title: { content: title },
@@ -1044,17 +1219,39 @@
         rendererContext,
       },
     };
+    if (originalData) {
+      item.listItemViewModel._btOriginalData = originalData;
+      item.listItemViewModel._btMenuAction = 'block_channel';
+      item.listItemViewModel._btEffect = effect;
+    }
 
     return item;
   }
 
-  function injectStandardMenuButtons(items, hasChannel, hasVideo, store) {
+  function injectStandardMenuButtons(items, hasChannel, hasVideo, store, currentObj, attr, container) {
     const allowMode = isWhitelistMenuMode(store);
-    const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
     const allowChannelItem = createStandardBlockItem('Allow Channel', 'CHECK');
     const removeChannelItem = createStandardBlockItem('Remove from Whitelist', 'REMOVE');
 
+    // Watch-page menus are the only standard menus with a paired creator
+    // source; individual entries carry their own payload and the watch-page
+    // effect (stop playback, never tear down the page).
+    const channelItems = channelBlockEntries(
+      hasChannel && !allowMode ? menuChannelPairs(currentObj, attr, container) : [],
+      showMenuEntry(OPT.MENU_COLLAB_INDIVIDUAL, store),
+      (label, channel) =>
+        createStandardBlockItem(
+          label,
+          'NOT_INTERESTED',
+          channel,
+          channel
+            ? { removeParent: false, stopPlayer: true, isShorts: false, isWatch: false }
+            : undefined,
+        ),
+    );
+
+    let channelEndpoint;
     if (store.options[OPT.BLOCK_FEEDBACK]) {
       for (const item of items) {
         const endpoint = item?.menuServiceItemRenderer?.serviceEndpoint;
@@ -1064,8 +1261,15 @@
         if (iconType === 'NOT_INTERESTED' && hasVideo) {
           blockVideoItem.menuServiceItemRenderer.serviceEndpoint = deepClone(endpoint);
         } else if (iconType === 'REMOVE' && hasChannel) {
-          blockChannelItem.menuServiceItemRenderer.serviceEndpoint = deepClone(endpoint);
+          channelEndpoint = endpoint;
         }
+      }
+    }
+    // The native channel-feedback command applies to every channel entry, so
+    // "Block All Channels" and each individual creator confirm the same way.
+    if (channelEndpoint) {
+      for (const item of channelItems) {
+        item.menuServiceItemRenderer.serviceEndpoint = deepClone(channelEndpoint);
       }
     }
 
@@ -1079,21 +1283,30 @@
     // Block mode additionally offers allowlisting, so the allowlist can be
     // built while browsing normally (an empty allowlist hides everything, so
     // there would be nothing left to allowlist from).
-    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
+      for (const item of channelItems) items.push(item);
+    }
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
   }
 
   // Desktop overflow menu: a minimal menuServiceItemRenderer entry appended to
   // the video's existing overflow menu (endpoint cloned from a feedback item
-  // when block_feedback is on, see injectStandardMenuButtons).
-  function createStandardBlockItem(text, iconType = 'NOT_INTERESTED') {
-    return {
-      menuServiceItemRenderer: {
-        text: { runs: [{ text }] },
-        icon: { iconType },
-      },
+  // when block_feedback is on, see injectStandardMenuButtons). Individual
+  // creator entries also carry their target + effect on the renderer data,
+  // which menuOnTap reads off the tapped element — the same seam mobile taps
+  // use (see menuOnTapMobile).
+  function createStandardBlockItem(text, iconType = 'NOT_INTERESTED', originalData, effect) {
+    const renderer = {
+      text: { runs: [{ text }] },
+      icon: { iconType },
     };
+    if (originalData) {
+      renderer._btOriginalData = originalData;
+      renderer._btMenuAction = 'block_channel';
+      renderer._btEffect = effect;
+    }
+    return { menuServiceItemRenderer: renderer };
   }
 
   function deepClone(obj) {
@@ -1101,14 +1314,24 @@
     return JSON.parse(JSON.stringify(obj));
   }
 
-  function addContextMenus(obj, keys) {
+  function addContextMenus(obj, keys, root) {
     const extracted = findAndExtractMenuItems(obj, keys);
     if (!extracted) return;
 
     const { items, hasChannel, hasVideo, isLockupViewModel, isReelOverlay, sheet, attr } =
       extracted;
 
-    injectBlockMenuItems(items, hasChannel, hasVideo, isLockupViewModel, obj[attr], storageData, isReelOverlay);
+    injectBlockMenuItems(
+      items,
+      hasChannel,
+      hasVideo,
+      isLockupViewModel,
+      obj[attr],
+      storageData,
+      isReelOverlay,
+      attr,
+      root || obj,
+    );
 
     // Reactive renderers re-render on property assignment, not in-place array mutation:
     // if the reel popup bound the items array before our push (eager pre-render), a plain
@@ -1251,9 +1474,10 @@
     ytdApp.dispatchEvent(buildLegacyToastEvent(msg, duration, ytdApp));
   }
 
-  // Map a mobile menu action to its block-list type. Undefined for unknown
-  // actions (the tap is ignored).
-  function mobileActionToBlockType(menuAction) {
+  // Map an injected menu action to its block-list type. Undefined for unknown
+  // actions (the tap is ignored). Shared by mobile rows and desktop injected
+  // entries, which both carry `_btMenuAction` on the renderer data.
+  function menuActionToBlockType(menuAction) {
     switch (menuAction) {
       case 'block_channel': {
         return BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL;
@@ -1318,7 +1542,7 @@
       return;
     }
 
-    const type = mobileActionToBlockType(data._btMenuAction);
+    const type = menuActionToBlockType(data._btMenuAction);
     if (type === undefined) return;
 
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
@@ -1347,22 +1571,58 @@
   // Video-player tags whose menu blocks the now-playing video + channel.
   const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
 
+  // The live owner renderer's data (`videoOwnerRenderer`). Both the tap path
+  // and the injection-time pair lookup read it; YouTube nests the renderer
+  // under videoOwnerRenderer but accept a direct shape too.
+  function ownerRendererData() {
+    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData?.();
+    return owner?.videoOwnerRenderer || owner;
+  }
+
+  // Watch-page owner renderer anywhere in the response being filtered. Menu
+  // injection runs before the page renders, and the primary info renderer sits
+  // in a different branch than the secondary info renderer that holds the
+  // owner — so neither the sibling lookup nor the DOM is available yet. The
+  // walk is cached per response root: one scan, not one per renderer.
+  const ownerRendererCache = new WeakMap();
+
+  function findOwnerRendererData(root) {
+    if (!root || typeof root !== 'object') return undefined;
+    if (ownerRendererCache.has(root)) return ownerRendererCache.get(root);
+    const found = searchOwnerRenderer(root, 0);
+    ownerRendererCache.set(root, found);
+    return found;
+  }
+
+  function searchOwnerRenderer(node, depth) {
+    if (!node || typeof node !== 'object' || depth > 20) return undefined;
+    if (!(node instanceof Array) && has.call(node, 'videoOwnerRenderer')) {
+      return node.videoOwnerRenderer;
+    }
+    const keys = Object.keys(node);
+    for (let i = 0; i < keys.length; i += 1) {
+      const value = node[keys[i]];
+      if (!value || typeof value !== 'object') continue;
+      const found = searchOwnerRenderer(value, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
   // Resolve channel/video from the now-playing player + owner renderers. The
   // player payload carries only the first creator, so a collaboration video
   // also contributes every channel from the owner's "Collaborators" dialog.
   // One Block Channel tap therefore blocks the whole collab, matching a feed
-  // card tap (see lockupChannelFrom) and a channel selection.
+  // card tap (see lockupChannelFrom) and a channel selection. `channels` keeps
+  // the dialog's id/name pairing for individual creator entries (see
+  // channelBlockEntries).
   function playerMenuBlockData() {
     const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
-    const playerData = pageManager.data || pageManager.getCurrentData();
-    const player = playerData.playerResponse;
+    const playerData = pageManager && (pageManager.data || pageManager.getCurrentData?.());
+    const player = playerData && playerData.playerResponse;
 
-    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
-    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
-    // ytInitialData nests the renderer under videoOwnerRenderer; accept a
-    // direct renderer shape too so tests and future layouts both resolve.
-    const ownerData = owner?.videoOwnerRenderer || owner;
-
+    const ownerData = ownerRendererData();
     const ownerUCID = getObjectByPath(
       ownerData,
       'title.runs[0].navigationEndpoint.browseEndpoint.browseId',
@@ -1375,14 +1635,20 @@
       ownerData,
       OWNER_COLLAB_LIST_ITEMS_PATHS,
     );
+
+    // A menu can be prepared before the player/owner data lands (watch data
+    // is filtered before the page renders). Fail open with nothing blockable
+    // rather than throwing; the tap re-resolves this at click time.
+    const details = (player && player.videoDetails) || {};
     return {
       channelData: {
-        text: singleOrAll([player.videoDetails.author, ...collaboratorNames]),
-        id: singleOrAll([player.videoDetails.channelId, ownerUCID, ...collaboratorIds]),
+        text: singleOrAll([details.author, ...collaboratorNames]),
+        id: singleOrAll([details.channelId, ownerUCID, ...collaboratorIds]),
       },
+      channels: watchChannelPairs(ownerData),
       videoData: {
-        text: player.videoDetails.title,
-        id: player.videoDetails.videoId,
+        text: details.title,
+        id: details.videoId,
       },
       removeParent: false,
       stopPlayer: true,
@@ -1414,6 +1680,7 @@
         id: parentData.blockTube?.metadata?.channelId,
         text: parentData.blockTube?.metadata?.channelName,
       },
+      channels: usableChannelPairs(parentData.blockTube?.metadata?.channels),
       videoData,
       removeParent: false,
       stopPlayer: false,
@@ -1424,10 +1691,17 @@
 
   // Resolve channel/video through the rule paths for the menu's renderer.
   function ruleMenuBlockData(parentData) {
-    const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
+    const data = parentData || {};
+    const extracted = channelAndVideoFrom(data, data._btOriginalAttr);
+    // Only the lockup avatar-stack dialog supplies reliable pairs; generic
+    // renderers' id/name rule arrays are collected independently, so zipping
+    // them could block the wrong creator. No pairs means no individual rows.
+    const channels =
+      data._btOriginalAttr === 'lockupViewModel' ? lockupChannelsFrom(data) : [];
     return {
       channelData: extracted.channel,
       videoData: extracted.video,
+      channels,
       removeParent: true,
       stopPlayer: false,
       isShorts: false,
@@ -1440,6 +1714,7 @@
   function menuLabelToBlockTarget(menuAction, channelData, videoData) {
     switch (menuAction) {
       case 'Block Channel':
+      case 'Block All Channels':
         return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, data: channelData };
       case 'Allow Channel':
         return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW, data: channelData };
@@ -1452,18 +1727,25 @@
     }
   }
 
-  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
-    // Video player context menu
-    let resolved;
-    if (PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
-      resolved = playerMenuBlockData();
-    } else if (isDataFromRightHandSide) {
-      resolved = stampedMenuBlockData(parentData);
-    } else {
-      resolved = ruleMenuBlockData(parentData);
+  // Resolve what the surface behind a tapped menu row describes: the player
+  // context (DOM), a stamped lockup sheet, or the rule paths. Shared by the
+  // label switch and the injected-entry path (which carries its own payload
+  // but still needs nothing else). Undefined only for a missing parent.
+  function resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide) {
+    if (parentDom && PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
+      return playerMenuBlockData();
     }
+    if (isDataFromRightHandSide) return stampedMenuBlockData(parentData);
+    return ruleMenuBlockData(parentData);
+  }
 
-    const result = menuLabelToBlockTarget(menuAction, resolved.channelData, resolved.videoData);
+  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
+    const resolved = resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide);
+    const result = menuLabelToBlockTarget(
+      menuAction,
+      resolved.channelData,
+      resolved.videoData,
+    );
     if (!result) return null;
 
     return {
@@ -1472,6 +1754,7 @@
       stopPlayer: resolved.stopPlayer,
       isShorts: resolved.isShorts === true,
       isWatch: resolved.isWatch === true,
+      channels: resolved.channels || [],
     };
   }
 
@@ -1529,13 +1812,13 @@
       eventSink.parentComponent ||
       eventSink.parentElement.__dataHost?.hostElement ||
       eventSink.parentElement?.parentElement;
-    const parentData = parentDom?.data;
-
-    if (!parentDom || !parentData) {
+    if (!parentDom) {
       console.warn('Failed to extract parentDom or parentData');
       return {};
     }
-    return { parentDom, parentData };
+    // Player-tag menus resolve their data from the live page, not from this
+    // component, so a parent without data is still a usable anchor.
+    return { parentDom, parentData: parentDom.data || {} };
   }
 
   function getParentDomAndData(isDataFromRightHandSide, element) {
@@ -1573,7 +1856,13 @@
 
   // Desktop menu labels that carry a block/allow action. Anything else is a
   // native entry — prevent the tap-through and ignore it.
-  const MENU_TAP_ACTIONS = ['Block Channel', 'Block Video', 'Allow Channel', 'Remove from Whitelist'];
+  const MENU_TAP_ACTIONS = [
+    'Block Channel',
+    'Block All Channels',
+    'Block Video',
+    'Allow Channel',
+    'Remove from Whitelist',
+  ];
 
   // Menu-tap types that take the card off the page (allow taps keep it so it
   // can be watched right away).
@@ -1681,14 +1970,16 @@
         // Remove correct component based on parentDom
         removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
       } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
+        // The player element may already be gone (menu opened from a cached
+        // or prefetched payload); stopping playback is best-effort.
+        document.getElementById('movie_player')?.stopVideo();
       }
     } else if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) {
       if (removeParent) {
         // Remove correct component based on parentDom
         removeParentHelper(isDataFromRightHandSide, parentDom);
       } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
+        document.getElementById('movie_player')?.stopVideo();
       }
     }
   }
@@ -1719,12 +2010,35 @@
     }
   }
 
+  // The custom payload carried by an injected per-creator entry, read off the
+  // tapped renderer element. youtube binds the click to the renderer and
+  // exposes its data as `data` (mobile taps already rely on this); accept the
+  // wrapped shapes too so a renderer change cannot silently drop the payload.
+  function injectedMenuEntry(context) {
+    const data = getObjectByPath(context, '__instance.props.data') || context?.data;
+    if (!data) return null;
+    let entry = data;
+    if (!entry._btOriginalData) {
+      if (data.menuServiceItemRenderer) entry = data.menuServiceItemRenderer;
+      else if (data.listItemViewModel) entry = data.listItemViewModel;
+    }
+    if (!entry || !entry._btOriginalData || !entry._btMenuAction) return null;
+    return {
+      action: entry._btMenuAction,
+      data: entry._btOriginalData,
+      effect: entry._btEffect,
+    };
+  }
+
   function menuOnTap(event) {
     if (storageData === undefined) return;
 
     const { isDataFromRightHandSide, menuAction } = getActionMenuData(this);
+    const injected = injectedMenuEntry(this);
+    const individualLabel =
+      typeof menuAction === 'string' && menuAction.startsWith(INDIVIDUAL_LABEL_PREFIX);
 
-    if (!MENU_TAP_ACTIONS.includes(menuAction)) {
+    if (!injected && !MENU_TAP_ACTIONS.includes(menuAction) && !individualLabel) {
       event.preventDefault();
       return;
     }
@@ -1740,13 +2054,47 @@
     // Get the parent dom and data from this
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
-    // Get the data and type which is used for blocking the video
-    const { type, data, removeParent, stopPlayer, isShorts, isWatch } = getBlockData(
-      parentDom,
-      parentData,
-      isDataFromRightHandSide,
-      menuAction,
-    );
+    // Injected creator entries carry their own single-channel payload + card
+    // effect; native entries resolve through the surface (live player data,
+    // stamped sheet, or rule paths). The label fallback keeps a creator entry
+    // working even when the renderer dropped the custom fields.
+    let target;
+    let effect;
+    if (injected) {
+      target = {
+        type: menuActionToBlockType(injected.action),
+        data: injected.data,
+      };
+      effect = injected.effect || {};
+    } else {
+      const resolved = resolveMenuBlockData(
+        parentDom,
+        parentData,
+        isDataFromRightHandSide,
+      );
+      effect = resolved;
+      target = menuLabelToBlockTarget(
+        menuAction,
+        resolved.channelData,
+        resolved.videoData,
+      );
+      if (!target && individualLabel) {
+        const channel = individualChannelFromLabel(resolved.channels, menuAction);
+        if (channel) {
+          target = { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, data: channel };
+        }
+      }
+    }
+
+    if (!target || target.type === undefined) {
+      event.preventDefault();
+      return;
+    }
+    const { type, data } = target;
+    const removeParent = effect.removeParent === true;
+    const stopPlayer = effect.stopPlayer === true;
+    const isShorts = effect.isShorts === true;
+    const isWatch = effect.isWatch === true;
 
     // Notify system what data should be added to the block list. Shorts taps
     // carry their provenance along: the options-page entry then reads

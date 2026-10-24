@@ -41,6 +41,7 @@
       MENU_BLOCK_CHANNEL: 'menu_block_channel',
       MENU_BLOCK_VIDEO: 'menu_block_video',
       MENU_BLOCK_COMMENT: 'menu_block_comment',
+      MENU_COLLAB_INDIVIDUAL: 'menu_collab_individual',
       SAVE_SHORTCUT: 'save_shortcut',
     }),
     // Block-list types the CONTEXT_BLOCK path may write (page -> content ->

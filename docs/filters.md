@@ -65,10 +65,24 @@ write it as regex instead of a bare keyword:
 Blocking a channel (by name or ID) blocks its videos, comments, playlists, and
 community posts — anywhere they appear, including direct visits (you are sent
 back to the YouTube homepage). On collaboration videos (several creators on
-one card) a match on ANY collaborator blocks the video, and `Block Channel`
-on such a card blocks every collaborator at once. The same applies on the
-watch page: `Block Channel` under a collaboration video blocks every creator
-listed in its Collaborators dialog, not just the first one.
+one card) a match on ANY collaborator blocks the video, and
+`Block All Channels` on such a card blocks every collaborator at once. The
+same applies on the watch page: `Block All Channels` under a collaboration
+video blocks every creator listed in its Collaborators dialog, not just the
+first one.
+
+With `Show individual creators in collaboration menus` enabled (the default),
+each collaborator also gets a `Block <creator>` entry, which blocks only that
+one channel. Turn the option off to keep a single block-all entry.
+
+Limitation: this does not work on a channel page's **Videos** tab. The browse
+response for that tab carries no per-video collaborator data — collaborator
+names appear only as static byline text ("… and N more") and the only channel
+id sent is the page owner's — so per-creator entries are structurally
+impossible there. Cards on that tab fall back to a single `Block Channel`
+entry, which blocks the page's channel and hides the entire Videos tab. To
+target one collab video from a channel page, use a more specific filter
+(e.g. video-name) instead.
 
 Each comment's `...` menu also carries BlockTube entries next to YouTube's
 Report: `Block Channel` (same as adding the commenter's ID to the Channel ID

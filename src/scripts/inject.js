@@ -47,6 +47,7 @@
       MENU_BLOCK_CHANNEL: 'menu_block_channel',
       MENU_BLOCK_VIDEO: 'menu_block_video',
       MENU_BLOCK_COMMENT: 'menu_block_comment',
+      MENU_COLLAB_INDIVIDUAL: 'menu_collab_individual',
       SAVE_SHORTCUT: 'save_shortcut',
     }),
     BLOCK_TYPES: Object.freeze({
@@ -696,6 +697,31 @@
       names.push(name);
     }
     return names;
+  }
+
+  function getCollaboratorChannels(obj, listItemsPaths) {
+    const listItems = collabListItems(
+      obj,
+      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+    );
+    const channels = [];
+    const seenIds = new Set();
+    for (let i = 0; i < listItems.length; i += 1) {
+      const item = listItems[i];
+      const candidates = getFlattenByPathAll(item, COLLAB_ITEM_ID_PATHS);
+      let id;
+      for (let c = 0; c < candidates.length; c += 1) {
+        if (typeof candidates[c] === 'string' && candidates[c].length > 0) {
+          id = candidates[c];
+          break;
+        }
+      }
+      if (id === undefined || seenIds.has(id)) continue;
+      seenIds.add(id);
+      const name = collabNameOf(item && item.listItemViewModel && item.listItemViewModel.title);
+      channels.push({ id, text: name });
+    }
+    return channels;
   }
 
   const pathCache = new Map();
@@ -1588,7 +1614,9 @@
   function maybeAddContextMenus(filterCtx, obj, keys) {
     if (!filterCtx.contextMenus) return;
     try {
-      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+      !isMobileInterface
+        ? addContextMenus(obj, keys, filterCtx.object)
+        : addContextMenusMobile(obj, keys);
     } catch (e) {
       console.error('addContextMenus Exception');
       console.error(e);
@@ -2691,6 +2719,60 @@
     return seen;
   }
 
+  const INDIVIDUAL_LABEL_PREFIX = 'Block ';
+
+  function usableChannelPairs(pairs) {
+    const channels = [];
+    const seen = new Set();
+    if (!(pairs instanceof Array)) return channels;
+    for (let i = 0; i < pairs.length; i += 1) {
+      const pair = pairs[i];
+      if (!pair || typeof pair.id !== 'string' || pair.id.length === 0) continue;
+      if (seen.has(pair.id)) continue;
+      seen.add(pair.id);
+      channels.push({
+        id: pair.id,
+        text: typeof pair.text === 'string' && pair.text.length > 0 ? pair.text : undefined,
+      });
+    }
+    return channels;
+  }
+
+  function individualChannelLabel(channel) {
+    return (
+      INDIVIDUAL_LABEL_PREFIX +
+      (typeof channel.text === 'string' && channel.text.length > 0 ? channel.text : channel.id)
+    );
+  }
+
+  function individualChannelFromLabel(channels, menuAction) {
+    if (typeof menuAction !== 'string' || !menuAction.startsWith(INDIVIDUAL_LABEL_PREFIX)) {
+      return undefined;
+    }
+    const wanted = menuAction.slice(INDIVIDUAL_LABEL_PREFIX.length).trim();
+    if (wanted.length === 0 || !(channels instanceof Array)) return undefined;
+    for (let i = 0; i < channels.length; i += 1) {
+      const channel = channels[i];
+      if (!channel || typeof channel.id !== 'string') continue;
+      const label =
+        typeof channel.text === 'string' && channel.text.length > 0 ? channel.text : channel.id;
+      if (label === wanted) return channel;
+    }
+    return undefined;
+  }
+
+  function channelBlockEntries(channels, showIndividuals, make) {
+    const list = usableChannelPairs(channels);
+    const collab = list.length > 1;
+    const entries = [make(collab ? 'Block All Channels' : 'Block Channel')];
+    if (collab && showIndividuals) {
+      for (let i = 0; i < list.length; i += 1) {
+        entries.push(make(individualChannelLabel(list[i]), list[i]));
+      }
+    }
+    return entries;
+  }
+
   function channelAndVideoFrom(parentData, attrKey) {
     if (attrKey === 'lockupViewModel') {
       return { channel: lockupChannelFrom(parentData), video: lockupVideoFrom(parentData) };
@@ -2720,6 +2802,54 @@
     const id = singleOrAll(ids) || pageChannel?.id;
     const text = singleOrAll(names) || pageChannel?.name;
     return { id, text };
+  }
+
+  function lockupChannelsFrom(renderer) {
+    return usableChannelPairs(getCollaboratorChannels(renderer));
+  }
+
+  function watchOwnerData(container, attr, currentObj) {
+    if (attr === 'videoSecondaryInfoRenderer') {
+      const owner = getObjectByPath(currentObj, 'owner.videoOwnerRenderer');
+      if (owner) return owner;
+    }
+    const sibling = getObjectByPath(
+      container,
+      'videoSecondaryInfoRenderer.owner.videoOwnerRenderer',
+    );
+    if (sibling) return sibling;
+    const inResponse = findOwnerRendererData(container);
+    if (inResponse) return inResponse;
+    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData?.();
+    return owner?.videoOwnerRenderer || owner;
+  }
+
+  function ownerChannelPair(ownerData) {
+    const id = getObjectByPath(
+      ownerData,
+      'title.runs[0].navigationEndpoint.browseEndpoint.browseId',
+    );
+    if (typeof id !== 'string' || id.length === 0) return undefined;
+    const name = getObjectByPath(ownerData, 'title.runs[0].text');
+    return { id, text: typeof name === 'string' && name.length > 0 ? name : undefined };
+  }
+
+  function watchChannelPairs(ownerData) {
+    const pairs = getCollaboratorChannels(ownerData, OWNER_COLLAB_LIST_ITEMS_PATHS);
+    const owner = ownerChannelPair(ownerData);
+    if (!owner || pairs.some((pair) => pair.id === owner.id)) {
+      return usableChannelPairs(pairs);
+    }
+    return usableChannelPairs([owner].concat(pairs));
+  }
+
+  function menuChannelPairs(currentObj, attr, container) {
+    if (attr === 'lockupViewModel') return lockupChannelsFrom(currentObj);
+    if (attr === 'videoPrimaryInfoRenderer' || attr === 'videoSecondaryInfoRenderer') {
+      return watchChannelPairs(watchOwnerData(container, attr, currentObj));
+    }
+    return [];
   }
 
   function lockupVideoFrom(renderer) {
@@ -3030,6 +3160,7 @@
       metadata: {
         channelId,
         channelName,
+        channels: lockupChannelsFrom(renderer),
         videoId,
         videoName,
         removeObject: true,
@@ -3258,6 +3389,8 @@
     currentObj,
     store,
     isReelOverlay,
+    attr,
+    container,
   ) {
     if (isReelOverlay) {
       injectReelOverlayButtons(items, hasChannel, hasVideo, store);
@@ -3267,7 +3400,7 @@
       injectLockupViewModelButtons(items, hasChannel, hasVideo, currentObj, store);
       return;
     }
-    injectStandardMenuButtons(items, hasChannel, hasVideo, store);
+    injectStandardMenuButtons(items, hasChannel, hasVideo, store, currentObj, attr, container);
   }
 
   function isOurReelEntry(item) {
@@ -3348,7 +3481,20 @@
     const cleanChannelContext = createCleanContext(items, store, true, currentObj);
     const cleanVideoContext = createCleanContext(items, store, false, currentObj);
 
-    const blockChannelItem = createLockupButtonItem('Block Channel', cleanChannelContext);
+    const channelItems = channelBlockEntries(
+      hasChannel && !isWhitelistMenuMode(store) ? lockupChannelsFrom(currentObj) : [],
+      showMenuEntry(OPT.MENU_COLLAB_INDIVIDUAL, store),
+      (label, channel) =>
+        createLockupButtonItem(
+          label,
+          cleanChannelContext,
+          'NOT_INTERESTED',
+          channel,
+          channel
+            ? { removeParent: false, stopPlayer: false, isShorts: false, isWatch: false }
+            : undefined,
+        ),
+    );
     const blockVideoItem = createLockupButtonItem('Block Video', cleanVideoContext);
 
     if (isWhitelistMenuMode(store)) {
@@ -3366,7 +3512,9 @@
       createCleanContext(items, store, true, currentObj, true),
       'CHECK',
     );
-    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
+      for (const item of channelItems) items.push(item);
+    }
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
   }
@@ -3479,7 +3627,13 @@
     return cleanContext;
   }
 
-  function createLockupButtonItem(title, rendererContext, imageName = 'NOT_INTERESTED') {
+  function createLockupButtonItem(
+    title,
+    rendererContext,
+    imageName = 'NOT_INTERESTED',
+    originalData,
+    effect,
+  ) {
     const item = {
       listItemViewModel: {
         title: { content: title },
@@ -3489,17 +3643,44 @@
         rendererContext,
       },
     };
+    if (originalData) {
+      item.listItemViewModel._btOriginalData = originalData;
+      item.listItemViewModel._btMenuAction = 'block_channel';
+      item.listItemViewModel._btEffect = effect;
+    }
 
     return item;
   }
 
-  function injectStandardMenuButtons(items, hasChannel, hasVideo, store) {
+  function injectStandardMenuButtons(
+    items,
+    hasChannel,
+    hasVideo,
+    store,
+    currentObj,
+    attr,
+    container,
+  ) {
     const allowMode = isWhitelistMenuMode(store);
-    const blockChannelItem = createStandardBlockItem('Block Channel');
     const blockVideoItem = createStandardBlockItem('Block Video');
     const allowChannelItem = createStandardBlockItem('Allow Channel', 'CHECK');
     const removeChannelItem = createStandardBlockItem('Remove from Whitelist', 'REMOVE');
 
+    const channelItems = channelBlockEntries(
+      hasChannel && !allowMode ? menuChannelPairs(currentObj, attr, container) : [],
+      showMenuEntry(OPT.MENU_COLLAB_INDIVIDUAL, store),
+      (label, channel) =>
+        createStandardBlockItem(
+          label,
+          'NOT_INTERESTED',
+          channel,
+          channel
+            ? { removeParent: false, stopPlayer: true, isShorts: false, isWatch: false }
+            : undefined,
+        ),
+    );
+
+    let channelEndpoint;
     if (store.options[OPT.BLOCK_FEEDBACK]) {
       for (const item of items) {
         const endpoint = item?.menuServiceItemRenderer?.serviceEndpoint;
@@ -3509,8 +3690,13 @@
         if (iconType === 'NOT_INTERESTED' && hasVideo) {
           blockVideoItem.menuServiceItemRenderer.serviceEndpoint = deepClone(endpoint);
         } else if (iconType === 'REMOVE' && hasChannel) {
-          blockChannelItem.menuServiceItemRenderer.serviceEndpoint = deepClone(endpoint);
+          channelEndpoint = endpoint;
         }
+      }
+    }
+    if (channelEndpoint) {
+      for (const item of channelItems) {
+        item.menuServiceItemRenderer.serviceEndpoint = deepClone(channelEndpoint);
       }
     }
 
@@ -3519,25 +3705,31 @@
       return;
     }
 
-    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) items.push(blockChannelItem);
+    if (hasChannel && showMenuEntry(OPT.MENU_BLOCK_CHANNEL, store)) {
+      for (const item of channelItems) items.push(item);
+    }
     if (hasVideo && showMenuEntry(OPT.MENU_BLOCK_VIDEO, store)) items.push(blockVideoItem);
     if (hasChannel && showMenuEntry(OPT.MENU_ALLOW_CHANNEL, store)) items.push(allowChannelItem);
   }
 
-  function createStandardBlockItem(text, iconType = 'NOT_INTERESTED') {
-    return {
-      menuServiceItemRenderer: {
-        text: { runs: [{ text }] },
-        icon: { iconType },
-      },
+  function createStandardBlockItem(text, iconType = 'NOT_INTERESTED', originalData, effect) {
+    const renderer = {
+      text: { runs: [{ text }] },
+      icon: { iconType },
     };
+    if (originalData) {
+      renderer._btOriginalData = originalData;
+      renderer._btMenuAction = 'block_channel';
+      renderer._btEffect = effect;
+    }
+    return { menuServiceItemRenderer: renderer };
   }
 
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
   }
 
-  function addContextMenus(obj, keys) {
+  function addContextMenus(obj, keys, root) {
     const extracted = findAndExtractMenuItems(obj, keys);
     if (!extracted) return;
 
@@ -3552,6 +3744,8 @@
       obj[attr],
       storageData,
       isReelOverlay,
+      attr,
+      root || obj,
     );
 
     if (attr === 'reelPlayerOverlayRenderer') {
@@ -3671,7 +3865,7 @@
     ytdApp.dispatchEvent(buildLegacyToastEvent(msg, duration, ytdApp));
   }
 
-  function mobileActionToBlockType(menuAction) {
+  function menuActionToBlockType(menuAction) {
     switch (menuAction) {
       case 'block_channel': {
         return BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL;
@@ -3731,7 +3925,7 @@
       return;
     }
 
-    const type = mobileActionToBlockType(data._btMenuAction);
+    const type = menuActionToBlockType(data._btMenuAction);
     if (type === undefined) return;
 
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: data._btOriginalData });
@@ -3759,29 +3953,60 @@
 
   const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
 
+  function ownerRendererData() {
+    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData?.();
+    return owner?.videoOwnerRenderer || owner;
+  }
+
+  const ownerRendererCache = new WeakMap();
+
+  function findOwnerRendererData(root) {
+    if (!root || typeof root !== 'object') return undefined;
+    if (ownerRendererCache.has(root)) return ownerRendererCache.get(root);
+    const found = searchOwnerRenderer(root, 0);
+    ownerRendererCache.set(root, found);
+    return found;
+  }
+
+  function searchOwnerRenderer(node, depth) {
+    if (!node || typeof node !== 'object' || depth > 20) return undefined;
+    if (!(node instanceof Array) && has.call(node, 'videoOwnerRenderer')) {
+      return node.videoOwnerRenderer;
+    }
+    const keys = Object.keys(node);
+    for (let i = 0; i < keys.length; i += 1) {
+      const value = node[keys[i]];
+      if (!value || typeof value !== 'object') continue;
+      const found = searchOwnerRenderer(value, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
   function playerMenuBlockData() {
     const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
-    const playerData = pageManager.data || pageManager.getCurrentData();
-    const player = playerData.playerResponse;
+    const playerData = pageManager && (pageManager.data || pageManager.getCurrentData?.());
+    const player = playerData && playerData.playerResponse;
 
-    const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
-    const owner = ownerRenderer?.data || ownerRenderer?.getCurrentData();
-    const ownerData = owner?.videoOwnerRenderer || owner;
-
+    const ownerData = ownerRendererData();
     const ownerUCID = getObjectByPath(
       ownerData,
       'title.runs[0].navigationEndpoint.browseEndpoint.browseId',
     );
     const collaboratorIds = getCollaboratorChannelIds(ownerData, OWNER_COLLAB_LIST_ITEMS_PATHS);
     const collaboratorNames = getCollaboratorChannelNames(ownerData, OWNER_COLLAB_LIST_ITEMS_PATHS);
+
+    const details = (player && player.videoDetails) || {};
     return {
       channelData: {
-        text: singleOrAll([player.videoDetails.author, ...collaboratorNames]),
-        id: singleOrAll([player.videoDetails.channelId, ownerUCID, ...collaboratorIds]),
+        text: singleOrAll([details.author, ...collaboratorNames]),
+        id: singleOrAll([details.channelId, ownerUCID, ...collaboratorIds]),
       },
+      channels: watchChannelPairs(ownerData),
       videoData: {
-        text: player.videoDetails.title,
-        id: player.videoDetails.videoId,
+        text: details.title,
+        id: details.videoId,
       },
       removeParent: false,
       stopPlayer: true,
@@ -3805,6 +4030,7 @@
         id: parentData.blockTube?.metadata?.channelId,
         text: parentData.blockTube?.metadata?.channelName,
       },
+      channels: usableChannelPairs(parentData.blockTube?.metadata?.channels),
       videoData,
       removeParent: false,
       stopPlayer: false,
@@ -3814,10 +4040,13 @@
   }
 
   function ruleMenuBlockData(parentData) {
-    const extracted = channelAndVideoFrom(parentData, parentData._btOriginalAttr);
+    const data = parentData || {};
+    const extracted = channelAndVideoFrom(data, data._btOriginalAttr);
+    const channels = data._btOriginalAttr === 'lockupViewModel' ? lockupChannelsFrom(data) : [];
     return {
       channelData: extracted.channel,
       videoData: extracted.video,
+      channels,
       removeParent: true,
       stopPlayer: false,
       isShorts: false,
@@ -3828,6 +4057,7 @@
   function menuLabelToBlockTarget(menuAction, channelData, videoData) {
     switch (menuAction) {
       case 'Block Channel':
+      case 'Block All Channels':
         return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, data: channelData };
       case 'Allow Channel':
         return { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW, data: channelData };
@@ -3840,16 +4070,16 @@
     }
   }
 
-  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
-    let resolved;
-    if (PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
-      resolved = playerMenuBlockData();
-    } else if (isDataFromRightHandSide) {
-      resolved = stampedMenuBlockData(parentData);
-    } else {
-      resolved = ruleMenuBlockData(parentData);
+  function resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide) {
+    if (parentDom && PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
+      return playerMenuBlockData();
     }
+    if (isDataFromRightHandSide) return stampedMenuBlockData(parentData);
+    return ruleMenuBlockData(parentData);
+  }
 
+  function getBlockData(parentDom, parentData, isDataFromRightHandSide, menuAction) {
+    const resolved = resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide);
     const result = menuLabelToBlockTarget(menuAction, resolved.channelData, resolved.videoData);
     if (!result) return null;
 
@@ -3859,6 +4089,7 @@
       stopPlayer: resolved.stopPlayer,
       isShorts: resolved.isShorts === true,
       isWatch: resolved.isWatch === true,
+      channels: resolved.channels || [],
     };
   }
 
@@ -3908,13 +4139,11 @@
       eventSink.parentComponent ||
       eventSink.parentElement.__dataHost?.hostElement ||
       eventSink.parentElement?.parentElement;
-    const parentData = parentDom?.data;
-
-    if (!parentDom || !parentData) {
+    if (!parentDom) {
       console.warn('Failed to extract parentDom or parentData');
       return {};
     }
-    return { parentDom, parentData };
+    return { parentDom, parentData: parentDom.data || {} };
   }
 
   function getParentDomAndData(isDataFromRightHandSide, element) {
@@ -3949,6 +4178,7 @@
 
   const MENU_TAP_ACTIONS = [
     'Block Channel',
+    'Block All Channels',
     'Block Video',
     'Allow Channel',
     'Remove from Whitelist',
@@ -4032,13 +4262,13 @@
       if (removeParent) {
         removeParentHelper(isDataFromRightHandSide, parentDom, 'Removed from whitelist');
       } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
+        document.getElementById('movie_player')?.stopVideo();
       }
     } else if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.ALLOW) {
       if (removeParent) {
         removeParentHelper(isDataFromRightHandSide, parentDom);
       } else if (stopPlayer) {
-        document.getElementById('movie_player').stopVideo();
+        document.getElementById('movie_player')?.stopVideo();
       }
     }
   }
@@ -4063,12 +4293,31 @@
     }
   }
 
+  function injectedMenuEntry(context) {
+    const data = getObjectByPath(context, '__instance.props.data') || context?.data;
+    if (!data) return null;
+    let entry = data;
+    if (!entry._btOriginalData) {
+      if (data.menuServiceItemRenderer) entry = data.menuServiceItemRenderer;
+      else if (data.listItemViewModel) entry = data.listItemViewModel;
+    }
+    if (!entry || !entry._btOriginalData || !entry._btMenuAction) return null;
+    return {
+      action: entry._btMenuAction,
+      data: entry._btOriginalData,
+      effect: entry._btEffect,
+    };
+  }
+
   function menuOnTap(event) {
     if (storageData === undefined) return;
 
     const { isDataFromRightHandSide, menuAction } = getActionMenuData(this);
+    const injected = injectedMenuEntry(this);
+    const individualLabel =
+      typeof menuAction === 'string' && menuAction.startsWith(INDIVIDUAL_LABEL_PREFIX);
 
-    if (!MENU_TAP_ACTIONS.includes(menuAction)) {
+    if (!injected && !MENU_TAP_ACTIONS.includes(menuAction) && !individualLabel) {
       event.preventDefault();
       return;
     }
@@ -4083,12 +4332,35 @@
 
     const { parentDom, parentData } = getParentDomAndData(isDataFromRightHandSide, this);
 
-    const { type, data, removeParent, stopPlayer, isShorts, isWatch } = getBlockData(
-      parentDom,
-      parentData,
-      isDataFromRightHandSide,
-      menuAction,
-    );
+    let target;
+    let effect;
+    if (injected) {
+      target = {
+        type: menuActionToBlockType(injected.action),
+        data: injected.data,
+      };
+      effect = injected.effect || {};
+    } else {
+      const resolved = resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide);
+      effect = resolved;
+      target = menuLabelToBlockTarget(menuAction, resolved.channelData, resolved.videoData);
+      if (!target && individualLabel) {
+        const channel = individualChannelFromLabel(resolved.channels, menuAction);
+        if (channel) {
+          target = { type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, data: channel };
+        }
+      }
+    }
+
+    if (!target || target.type === undefined) {
+      event.preventDefault();
+      return;
+    }
+    const { type, data } = target;
+    const removeParent = effect.removeParent === true;
+    const stopPlayer = effect.stopPlayer === true;
+    const isShorts = effect.isShorts === true;
+    const isWatch = effect.isWatch === true;
 
     const blockInfo = isShorts || isWatch ? { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS } : data;
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });

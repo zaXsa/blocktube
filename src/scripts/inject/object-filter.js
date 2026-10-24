@@ -775,7 +775,9 @@
   function maybeAddContextMenus(filterCtx, obj, keys) {
     if (!filterCtx.contextMenus) return;
     try {
-      !isMobileInterface ? addContextMenus(obj, keys) : addContextMenusMobile(obj, keys);
+      !isMobileInterface
+        ? addContextMenus(obj, keys, filterCtx.object)
+        : addContextMenusMobile(obj, keys);
     } catch (e) {
       console.error('addContextMenus Exception');
       console.error(e);

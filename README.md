@@ -95,8 +95,15 @@ Discard, and an `Unsaved changes` flag):
 * How are collaboration videos handled?  
   A collaboration video lists several creators. BlockTube treats every creator
   as a match: blocking any one of their channel IDs or names blocks the video
-  wherever it appears. `Block Channel` also blocks every creator at once,
-  both on a collaboration card and under the video on the watch page.
+  wherever it appears. On a collaboration card or under the video on the watch
+  page the menu entry reads `Block All Channels` and blocks every creator at
+  once. With `Show individual creators in collaboration menus` enabled (the
+  default) each creator also gets a `Block <creator>` entry that blocks only
+  that channel.
+  Exception: on a channel page's **Videos** tab YouTube sends no per-video
+  collaborator data, so cards there have no per-creator entries and only offer
+  `Block Channel`, which blocks the channel's page as a whole. To block one
+  collab video from there, use a more specific filter (e.g. video-name).
 
 * What is the behaviour when browsing blocked channel?  
   User will be redirected to YouTube homepage.
