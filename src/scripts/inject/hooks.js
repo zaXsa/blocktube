@@ -488,6 +488,13 @@
     if (!hooksStarted) {
       startHook();
     }
+    // Live-chat `...` tracking must be live BEFORE the first popup response —
+    // the popup fetch is triggered by the very click that must be tracked, so
+    // arming it only on the response would leave that first popup's author
+    // unknown (and its Report-params fallback can resolve to the stream owner).
+    try {
+      if (typeof startLiveChatMenuTracking === 'function') startLiveChatMenuTracking();
+    } catch (e) {}
     // The comment `...` menu entries (comment-dom.js) need the real
     // options for their labels, so the observer starts with storage in
     // place. Guarded by typeof: the fragment may be absent in stripped builds.

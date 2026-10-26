@@ -1309,6 +1309,585 @@
     return { menuServiceItemRenderer: renderer };
   }
 
+  // Recognize a live-chat popup row we injected earlier (double-filter/preload
+  // dedupe guard). Native rows never carry the custom action field.
+  function isOurLiveChatEntry(item) {
+    const renderer = item && item.menuServiceItemRenderer;
+    return !!(renderer && renderer._btMenuAction === 'block_channel');
+  }
+
+  // The channel id hidden in one of the live-chat menu endpoint params: a
+  // base64 protobuf with ids as length-delimited ASCII strings. YouTube also
+  // percent-encodes the '=' padding and mixes standard/base64url alphabets
+  // between surfaces, so normalize all three before decoding. First match only
+  // — callers pick which params blob to read (see liveChatChannelIdFromMenuItems).
+  function liveChatChannelIdFromParams(params) {
+    if (typeof params !== 'string' || params.length === 0) return undefined;
+    try {
+      const decoded = atob(
+        params
+          .replace(/%3D/gi, '=')
+          .replace(/%2B/gi, '+')
+          .replace(/%2F/gi, '/')
+          .replace(/-/g, '+')
+          .replace(/_/g, '/'),
+      );
+      const match = decoded.match(/UC[A-Za-z0-9_-]{22}/);
+      return match ? match[0] : undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  // The message author's channel id out of the native popup rows. YouTube's
+  // own "Block" row (logged in) targets the author in
+  // moderateLiveChatEndpoint params, so that is the first-choice fallback when
+  // the `...` click anchor was missed. The Report form is the last resort: its
+  // UC order is not dependable (it can carry the enclosing stream's owner
+  // first — user-verified misblock), so it must never outrank the tapped
+  // message's own renderer data or the native Block target.
+  function liveChatChannelIdFromMenuItems(items) {
+    let reportId;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i] || {};
+      const renderer = item.menuServiceItemRenderer || item.menuNavigationItemRenderer;
+      const blockId = liveChatChannelIdFromParams(
+        getObjectByPath(
+          renderer,
+          'navigationEndpoint.confirmDialogEndpoint.content.confirmDialogRenderer.confirmButton.buttonRenderer.serviceEndpoint.moderateLiveChatEndpoint.params',
+        ) ||
+          getObjectByPath(renderer, 'serviceEndpoint.moderateLiveChatEndpoint.params'),
+      );
+      if (blockId) return blockId;
+      if (reportId === undefined) {
+        reportId = liveChatChannelIdFromParams(
+          getObjectByPath(renderer, 'serviceEndpoint.getReportFormEndpoint.params'),
+        );
+      }
+    }
+    return reportId;
+  }
+
+  // Live chat `...` popup ("Chat actions"): the menu content arrives as a
+  // dedicated /get_item_context_menu fetch made when the button is tapped —
+  // too late for the usual contextMenuObjects injection, so the response is
+  // enriched directly. A standard "Block Channel" row (same
+  // menuServiceItemRenderer shape desktop menus use) renders natively, and the
+  // custom payload rides the renderer data into menuOnTap. Whitelist mode
+  // offers nothing here (no allowlist/removal entries for live chat), and
+  // native rows (Report, YouTube's own Block) stay untouched.
+  //
+  // The author id does NOT come from this response reliably: the Report
+  // params embed the message author and the enclosing stream's channel in an
+  // order that cannot be trusted (a user-verified misblock showed the stream
+  // owner first), and logged-out/incognito popups omit Report/Block entirely
+  // (no params to decode at all). The tapped message's own renderer
+  // (authorExternalChannelId, snapshotted by the capture-phase tracker at `...`
+  // press time) is the authoritative source and is stamped onto the row here,
+  // while the native Block/Report params remain fallbacks for a missed click.
+  // The row is appended even when YouTube's own rows are absent, which is the
+  // incognito case.
+  function addLiveChatContextMenus(resp) {
+    startLiveChatMenuTracking();
+    const menu = getObjectByPath(
+      resp || {},
+      'liveChatItemContextMenuSupportedRenderers.menuRenderer',
+    );
+    if (!menu || !Array.isArray(menu.items)) return;
+    if (isWhitelistMenuMode()) return;
+    if (!showMenuEntry(OPT.MENU_BLOCK_CHANNEL)) return;
+
+    const items = menu.items;
+    if (items.some(isOurLiveChatEntry)) return;
+
+    // Keep the fallback decision in step with this response (see the fallback
+    // timer notes): native rows mean YouTube's popup owns the surface, none
+    // means our own row gets a short grace to render.
+    syncLiveChatFallbackWithResponse(items);
+
+    const anchor = freshLiveChatMenuAnchor();
+    const channelId =
+      (anchor && typeof anchor.id === 'string' && anchor.id) ||
+      liveChatChannelIdFromMenuItems(items);
+    if (!channelId) return;
+
+    // Keep the author name when the anchor supplied the id: the block entry's
+    // annotation and toast read better with it (the popup response carries no
+    // name of its own).
+    const payload =
+      anchor && anchor.id === channelId && anchor.text
+        ? { id: channelId, text: anchor.text }
+        : { id: channelId };
+    items.push(
+      createStandardBlockItem('Block Channel', 'NOT_INTERESTED', payload, {
+        isLiveChat: true,
+      }),
+    );
+  }
+
+  // Live-chat message renderers whose element data carries the author's
+  // channel id (authorExternalChannelId), regardless of the message kind
+  // (text, membership, Super Chat, Super Sticker). Shared by the click tracker
+  // and the post-tap sweep.
+  const LIVE_CHAT_MESSAGE_TAGS = [
+    'yt-live-chat-text-message-renderer',
+    'yt-live-chat-membership-item-renderer',
+    'yt-live-chat-paid-message-renderer',
+    'yt-live-chat-legacy-paid-message-renderer',
+    'yt-live-chat-paid-sticker-renderer',
+    'yt-live-chat-purchase-message-renderer',
+  ];
+
+  // The message whose `...` press most recently opened a popup. Renderers
+  // recycle, so the author id/name are snapshotted at press time — the element
+  // reference would not survive until the response/tap. The TTL mirrors the
+  // comment tracker: a popup only opens as an immediate consequence of a
+  // press, so an older snapshot must not serve a popup whose press was missed.
+  let liveChatMenuAnchor = null;
+  const LIVE_CHAT_ANCHOR_TTL_MS = 5000;
+
+  // The current anchor when it is still fresh enough for the popup being
+  // processed; stale snapshots are dropped instead of blocking the wrong author.
+  function freshLiveChatMenuAnchor() {
+    if (!liveChatMenuAnchor) return null;
+    try {
+      if (Date.now() - liveChatMenuAnchor.time > LIVE_CHAT_ANCHOR_TTL_MS) {
+        liveChatMenuAnchor = null;
+        return null;
+      }
+    } catch (e) {
+      return null;
+    }
+    return liveChatMenuAnchor;
+  }
+
+  // Authored-message data (text/membership/Super Chat renderers all carry
+  // authorExternalChannelId + authorName) from one live-chat element. The
+  // stored name drops YouTube's leading `@` handle marker: it is part of the
+  // display handle, not the channel name (same normalization the comment menu
+  // applies to annotations).
+  function liveChatAuthorDataFromElement(el) {
+    try {
+      if (!el) return undefined;
+      const data =
+        el.data || (typeof el.getCurrentData === 'function' ? el.getCurrentData() : undefined);
+      const id = data && data.authorExternalChannelId;
+      if (typeof id !== 'string' || id.length === 0) return undefined;
+      const rawText =
+        getObjectByPath(data, 'authorName.simpleText') ||
+        getObjectByPath(data, 'authorName.runs[0].text');
+      const text =
+        typeof rawText === 'string' ? rawText.replace(/^@+/, '').trim() || rawText : rawText;
+      return { id, text };
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  // Snapshot the author of the message whose `...` was just pressed. The popup
+  // fetch is an immediate consequence of that press, so the snapshot owns the
+  // response that follows. Capture phase, so it settles before YouTube's own
+  // button handling.
+  function noteLiveChatMenuAnchor(message) {
+    const data = liveChatAuthorDataFromElement(message);
+    liveChatMenuAnchor = data ? { ...data, time: Date.now() } : null;
+  }
+
+  // Event-path-aware message lookup for a `...` press. Chat menu buttons live
+  // behind shadow roots, so `event.target` is retargeted to the host while
+  // composedPath() still carries the inner button and the authored message.
+  function liveChatMessageFromEventPath(path) {
+    for (let i = 0; i < path.length; i += 1) {
+      const node = path[i];
+      if (!node || typeof node.tagName !== 'string') continue;
+      if (LIVE_CHAT_MESSAGE_TAGS.includes(node.tagName.toLowerCase())) return node;
+    }
+    return undefined;
+  }
+
+  // Find the menu/`...` button in a press path. Live chat labels it "Chat
+  // actions" (localized, so the /more|action|menu/ match is only a bonus) on a
+  // stable `yt-icon-button#menu-button`; the id and the icon-button tag are what
+  // actually cover every locale. Undefined when the press is not on a menu
+  // button (message body, username, popup row). The icon-button rule is scoped
+  // by the caller to presses inside an authored message, where the only icon
+  // buttons are chat actions (the `...`, plus pin/remove for moderators) — the
+  // Super Sticker "Buy" control is a regular button and stays out.
+  function liveChatMenuButtonFromEventPath(path) {
+    for (let i = 0; i < path.length; i += 1) {
+      const node = path[i];
+      if (!node || typeof node.getAttribute !== 'function') continue;
+      if (node.id === 'menu-button') return node;
+      const label = node.getAttribute('aria-label') || '';
+      if (/more|action|menu/i.test(label)) return node;
+      const tag = typeof node.tagName === 'string' ? node.tagName.toLowerCase() : '';
+      if (tag.includes('icon-button')) return node;
+    }
+    return undefined;
+  }
+
+  // Capture-phase tracker: a press inside an authored message snapshots that
+  // message, so the popup fetch that follows (an immediate consequence of the
+  // press) can stamp the row with the right author. Presses on the popup's own
+  // rows are outside every message and deliberately leave the anchor alone —
+  // clearing there is what made Block fall back to the stream-owner params. A
+  // menu press outside any chat message still drops the anchor (video menus
+  // also say "More actions"), so a stale author cannot serve that popup.
+  function trackLiveChatMenuAnchor(event) {
+    try {
+      const path =
+        event && typeof event.composedPath === 'function'
+          ? event.composedPath()
+          : [event && event.target];
+      if (!path || path.length === 0) return;
+      const message = liveChatMessageFromEventPath(path);
+      const button = liveChatMenuButtonFromEventPath(path);
+      if (message) {
+        noteLiveChatMenuAnchor(message);
+        // Logged-out/incognito chat omits every native action, and YouTube may
+        // then not open its popup at all. Arm our own single-row menu; it only
+        // appears if the native one did not open (see armLiveChatFallbackMenu).
+        if (button) armLiveChatFallbackMenu(button, message);
+        else cancelLiveChatFallbackPending();
+      } else if (button) {
+        liveChatMenuAnchor = null;
+        cancelLiveChatFallbackPending();
+      }
+    } catch (e) {}
+  }
+
+  // One capture listener per frame, installed when storage arms the page
+  // (hooks.js storageReceived) — NOT when the first popup response arrives:
+  // that would leave the first `...` press untracked, and its popup would be
+  // stamped from the untrustworthy Report params (stream-owner misblock).
+  // Idempotent; addLiveChatContextMenus also calls it as a safety net.
+  let liveChatTrackingInstalled = false;
+  function startLiveChatMenuTracking() {
+    if (liveChatTrackingInstalled) return;
+    try {
+      if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
+        return;
+      }
+      liveChatTrackingInstalled = true;
+      document.addEventListener('click', trackLiveChatMenuAnchor, true);
+    } catch (e) {
+      liveChatTrackingInstalled = false;
+    }
+  }
+
+  // !! Live-chat fallback menu (logged-out/incognito)
+  //
+  // Incognito/logged-out chat omits Report and YouTube's own Block rows; there
+  // the `...` press can end with no popup at all, so there is no menu to append
+  // a row to. Deciding this on the press alone was wrong: a logged-in popup
+  // response can take longer than any fixed press delay, so the fallback showed
+  // first and the native menu replaced it a moment later. The pending decision
+  // now follows the popup response:
+  //   - response WITH rows  -> YouTube's popup is coming; stand down for good.
+  //   - response with NONE  -> no native rows to render; show ours shortly,
+  //                            unless a usable popup did open (our row may
+  //                            have made an empty response renderable).
+  //   - no response at all  -> show ours after a longer timeout.
+  const LIVE_CHAT_FALLBACK_TIMEOUT_MS = 1500;
+  const LIVE_CHAT_FALLBACK_RENDER_MS = 400;
+  let liveChatFallbackPending = null;
+  let liveChatFallbackMenu = null;
+
+  function cancelLiveChatFallbackPending() {
+    const pending = liveChatFallbackPending;
+    liveChatFallbackPending = null;
+    if (!pending) return;
+    try {
+      if (pending.timer) clearTimeout(pending.timer);
+    } catch (e) {}
+  }
+
+  // (Re)arm the pending decision. Deliberately does NOT cancel the pending
+  // record: a popup response that carries no rows shortens the wait instead.
+  function scheduleLiveChatFallback(pending, delay) {
+    try {
+      if (pending.timer) clearTimeout(pending.timer);
+    } catch (e) {}
+    try {
+      pending.timer = setTimeout(function () {
+        if (liveChatFallbackPending !== pending) return;
+        liveChatFallbackPending = null;
+        if (liveChatNativeMenuOpen()) return;
+        showLiveChatFallbackMenu(pending.button, pending.author);
+      }, delay);
+    } catch (e) {
+      liveChatFallbackPending = null;
+    }
+  }
+
+  // Fold one popup response into the pending decision: rows mean the native
+  // popup will render (and already carries our appended row), so the fallback
+  // stands down for good — this is what stops the menu flashing over a
+  // perfectly good native popup whose fetch was just slow. A row-less response
+  // is the logged-out/incognito case: our appended row may be the only thing
+  // that makes YouTube render the popup, so shorten the wait and re-check.
+  function syncLiveChatFallbackWithResponse(items) {
+    if (items.length > 0) {
+      cancelLiveChatFallbackPending();
+      closeLiveChatFallbackMenu();
+    } else if (liveChatFallbackPending) {
+      scheduleLiveChatFallback(liveChatFallbackPending, LIVE_CHAT_FALLBACK_RENDER_MS);
+    }
+  }
+
+  function closeLiveChatFallbackMenu() {
+    const open = liveChatFallbackMenu;
+    liveChatFallbackMenu = null;
+    if (!open) return;
+    try {
+      if (open.cleanup) open.cleanup();
+    } catch (e) {}
+    try {
+      if (open.root && typeof open.root.remove === 'function') open.root.remove();
+    } catch (e) {}
+  }
+
+  // A visible *usable* native menu popup in this document. Live chat renders
+  // its actions menu with YouTube's usual popup wrappers; a visible one that
+  // actually carries rows means the press worked and our fallback must stay out
+  // of the way. The row requirement matters for the failed incognito case: an
+  // empty popup shell can be laid out (and would otherwise suppress the
+  // fallback, leaving the user with a blank menu). `except` skips our own
+  // fallback root (which also carries role="menu").
+  const LIVE_CHAT_MENU_ROW_SELECTOR = [
+    'ytd-menu-service-item-renderer',
+    'ytd-menu-navigation-item-renderer',
+    'tp-yt-paper-item',
+    '[role="menuitem"]',
+    '[role="menuitemradio"]',
+  ].join(', ');
+
+  function liveChatNativeMenuOpen(except) {
+    try {
+      if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') {
+        return false;
+      }
+      const nodes = document.querySelectorAll(
+        'ytd-menu-popup-renderer, tp-yt-iron-dropdown, [role="menu"]',
+      );
+      for (let i = 0; i < nodes.length; i += 1) {
+        const node = nodes[i];
+        if (node === except) continue;
+        try {
+          if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') continue;
+          const rect =
+            typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null;
+          if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+          const rows =
+            typeof node.querySelector === 'function'
+              ? node.querySelector(LIVE_CHAT_MENU_ROW_SELECTOR)
+              : null;
+          if (rows) return true;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function liveChatFallbackIsDark() {
+    try {
+      if (document.documentElement && document.documentElement.hasAttribute('dark')) return true;
+    } catch (e) {}
+    try {
+      if (typeof window.matchMedia === 'function') {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function positionLiveChatFallbackMenu(root, button) {
+    try {
+      const margin = 8;
+      const rect =
+        button && typeof button.getBoundingClientRect === 'function'
+          ? button.getBoundingClientRect()
+          : null;
+      const width = root.offsetWidth || 160;
+      const height = root.offsetHeight || 40;
+      const vw = window.innerWidth || (document.documentElement || {}).clientWidth || 0;
+      const vh = window.innerHeight || (document.documentElement || {}).clientHeight || 0;
+      let left = rect ? rect.left : margin;
+      let top = rect ? rect.bottom + 4 : margin;
+      if (rect && vh > 0 && top + height > vh - margin) top = rect.top - height - 4;
+      if (vw > 0) left = Math.min(left, vw - width - margin);
+      left = Math.max(margin, left);
+      top = Math.max(margin, top);
+      root.style.left = `${Math.round(left)}px`;
+      root.style.top = `${Math.round(top)}px`;
+    } catch (e) {}
+  }
+
+  // Post the same block payload the native-row tap produces, then run the same
+  // visible effect (toast + sweep of the author's already-rendered messages).
+  function blockLiveChatAuthor(author) {
+    if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
+    try {
+      if (window.blockTubeReloadRequired) {
+        window.blockTubeExports.openToast(
+          'BlockTube was updated, this tab needs to be reloaded to use this function',
+          5000,
+        );
+        return;
+      }
+    } catch (e) {}
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
+      type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL,
+      info: { id: author.id, text: author.text, via: BLOCKTUBE_CONSTS.VIA.LIVE_CHAT },
+    });
+    applyLiveChatTapEffect(BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, author);
+  }
+
+  // Fallback menu chrome, styled to sit on YouTube's popup surface in the
+  // current theme (the chat frame carries `dark` on <html> in dark mode).
+  function styleLiveChatFallbackRoot(root, dark) {
+    root.style.position = 'fixed';
+    root.style.zIndex = '2147483000';
+    root.style.minWidth = '160px';
+    root.style.padding = '4px 0';
+    root.style.background = dark ? '#282828' : '#ffffff';
+    root.style.color = dark ? '#f1f1f1' : '#0f0f0f';
+    root.style.border = `1px solid ${dark ? '#3f3f3f' : '#e5e5e5'}`;
+    root.style.borderRadius = '8px';
+    root.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.3)';
+    root.style.font = '14px Roboto, Arial, sans-serif';
+  }
+
+  function createLiveChatFallbackRow(dark, onActivate) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.setAttribute('role', 'menuitem');
+    row.textContent = 'Block Channel';
+    row.style.display = 'block';
+    row.style.width = '100%';
+    row.style.padding = '10px 16px';
+    row.style.background = 'transparent';
+    row.style.color = 'inherit';
+    row.style.border = '0';
+    row.style.textAlign = 'left';
+    row.style.cursor = 'pointer';
+    row.style.font = 'inherit';
+    row.style.whiteSpace = 'nowrap';
+    const setHover = (on) => {
+      try {
+        row.style.background = on ? (dark ? '#3f3f3f' : '#f2f2f2') : 'transparent';
+      } catch (e) {}
+    };
+    row.addEventListener('mouseenter', () => setHover(true));
+    row.addEventListener('mouseleave', () => setHover(false));
+    row.addEventListener('click', onActivate);
+    return row;
+  }
+
+  // Dismissal wiring: Escape, a press outside the panel, remount/resize, and a
+  // watcher that yields to a native popup landing late. Returns the cleanup
+  // closeLiveChatFallbackMenu() runs.
+  function wireLiveChatFallbackDismissal(root) {
+    const onDocClick = function (event) {
+      try {
+        if (root.contains && typeof root.contains === 'function' && root.contains(event.target)) {
+          return;
+        }
+      } catch (e) {}
+      closeLiveChatFallbackMenu();
+    };
+    const onKey = function (event) {
+      if (event && (event.key === 'Escape' || event.key === 'Esc')) closeLiveChatFallbackMenu();
+    };
+    document.addEventListener('click', onDocClick, true);
+    document.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', closeLiveChatFallbackMenu);
+    // A slow native popup can still land after the fallback appeared; close
+    // ours the moment a real popup becomes visible underneath/over it.
+    let watch = 0;
+    try {
+      watch = setInterval(function () {
+        if (liveChatNativeMenuOpen(root)) closeLiveChatFallbackMenu();
+      }, 250);
+    } catch (e) {}
+    return function cleanup() {
+      document.removeEventListener('click', onDocClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', closeLiveChatFallbackMenu);
+      try {
+        if (watch) clearInterval(watch);
+      } catch (e) {}
+    };
+  }
+
+  // Fallback row activation: exactly the payload/effect a native-row tap
+  // produces, then close our menu first so the sweep/toast runs on a clean UI.
+  function activateLiveChatFallback(author, event) {
+    try {
+      event.preventDefault();
+      event.stopPropagation();
+    } catch (e) {}
+    closeLiveChatFallbackMenu();
+    blockLiveChatAuthor(author);
+  }
+
+  function showLiveChatFallbackMenu(button, author) {
+    closeLiveChatFallbackMenu();
+    try {
+      if (typeof document === 'undefined' || !document.body) return;
+      if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
+      const dark = liveChatFallbackIsDark();
+      const root = document.createElement('div');
+      root.setAttribute('role', 'menu');
+      root.setAttribute('aria-label', 'Chat actions');
+      styleLiveChatFallbackRoot(root, dark);
+      const row = createLiveChatFallbackRow(dark, (event) => activateLiveChatFallback(author, event));
+      root.appendChild(row);
+      document.body.appendChild(root);
+      positionLiveChatFallbackMenu(root, button);
+      liveChatFallbackMenu = {
+        root,
+        button,
+        cleanup: wireLiveChatFallbackDismissal(root),
+      };
+      try {
+        row.focus({ preventScroll: true });
+      } catch (e) {}
+    } catch (e) {}
+  }
+
+  // Two path nodes identifying the same `...` trigger. The tracker may return
+  // the icon-button host on one press and its inner button on the next, so a
+  // strict identity check would miss the toggle.
+  function sameMenuTrigger(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    try {
+      if (typeof a.contains === 'function' && a.contains(b)) return true;
+      if (typeof b.contains === 'function' && b.contains(a)) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  function armLiveChatFallbackMenu(button, message) {
+    if (isWhitelistMenuMode()) return;
+    if (!showMenuEntry(OPT.MENU_BLOCK_CHANNEL)) return;
+    // Pressing the same `...` again dismisses our menu, mirroring how the
+    // native popup toggles off. Escape and outside clicks also close it.
+    if (liveChatFallbackMenu && sameMenuTrigger(liveChatFallbackMenu.button, button)) {
+      cancelLiveChatFallbackPending();
+      closeLiveChatFallbackMenu();
+      return;
+    }
+    const author = liveChatAuthorDataFromElement(message);
+    if (!author) return;
+    cancelLiveChatFallbackPending();
+    closeLiveChatFallbackMenu();
+    const pending = { author, button };
+    liveChatFallbackPending = pending;
+    scheduleLiveChatFallback(pending, LIVE_CHAT_FALLBACK_TIMEOUT_MS);
+  }
+
   function deepClone(obj) {
     // Simple deep clone (for plain objects, no functions/cycles)
     return JSON.parse(JSON.stringify(obj));
@@ -1984,6 +2563,51 @@
     }
   }
 
+  // Best-effort removal of one author's already-rendered messages from the
+  // current chat. Messages fetched afterwards are covered by the new filter
+  // rule through the normal get_live_chat path. Fail-open: a sweep miss simply
+  // leaves older rows to the next data load.
+  function sweepLiveChatAuthor(channelId) {
+    if (
+      !channelId ||
+      typeof document === 'undefined' ||
+      typeof document.querySelectorAll !== 'function'
+    ) {
+      return;
+    }
+    let nodes;
+    try {
+      nodes = document.querySelectorAll(LIVE_CHAT_MESSAGE_TAGS.join(','));
+    } catch (e) {
+      return;
+    }
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      try {
+        const item =
+          node.data ||
+          (typeof node.getCurrentData === 'function' ? node.getCurrentData() : undefined);
+        if (
+          item &&
+          item.authorExternalChannelId === channelId &&
+          typeof node.remove === 'function'
+        ) {
+          node.remove();
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Visible effect of a live-chat "Block Channel" tap: a toast plus the sweep
+  // above (the popup closes on selection, which is YouTube's own feedback).
+  function applyLiveChatTapEffect(type, data) {
+    try {
+      openToast('Channel blocked', 3000);
+    } catch (e) {}
+    if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL) return;
+    sweepLiveChatAuthor(data && typeof data.id === 'string' ? data.id : undefined);
+  }
+
   // Forward the tap to YouTube's own handler when the menu entry carries a
   // service endpoint (native feedback flow).
   function forwardMenuTap(event) {
@@ -2090,24 +2714,41 @@
       event.preventDefault();
       return;
     }
+
+    // Live-chat popup taps: the row was already stamped with the tapped
+    // message's author at injection time (the `...` click anchor), and this
+    // tap-time override covers a replay/preloaded response that was enriched
+    // before the anchor settled. The popup's own Report params are never
+    // trusted first: they can carry the stream owner (user-verified misblock).
+    if (effect && effect.isLiveChat === true) {
+      const live = freshLiveChatMenuAnchor();
+      if (live && typeof live.id === 'string' && live.id.length > 0) {
+        target = { type: target.type, data: { id: live.id, text: live.text } };
+      }
+    }
+
     const { type, data } = target;
     const removeParent = effect.removeParent === true;
     const stopPlayer = effect.stopPlayer === true;
     const isShorts = effect.isShorts === true;
     const isWatch = effect.isWatch === true;
 
-    // Notify system what data should be added to the block list. Shorts taps
-    // carry their provenance along: the options-page entry then reads
-    // "Blocked by short context menu" instead of "context menu", so the
-    // surface a block came from stays visible.
-    const blockInfo =
-      isShorts || isWatch
-        ? { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS }
-        : data;
+    // Notify system what data should be added to the block list. Shorts and
+    // live-chat taps carry their provenance along: the options-page entry then
+    // reads "Blocked by short context menu" / "Blocked by live chat menu"
+    // instead of "context menu", so the surface a block came from stays visible.
+    let blockInfo = data;
+    if (isShorts || isWatch) blockInfo = { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS };
+    else if (effect && effect.isLiveChat === true) {
+      blockInfo = { ...data, via: BLOCKTUBE_CONSTS.VIA.LIVE_CHAT };
+    }
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
     dismissShortsTap(type, data, parentData, isShorts, isWatch);
+    // Live-chat popup taps: toast + sweep of already-rendered messages from
+    // the author just blocked (future fetches filter through the new rule).
+    if (effect && effect.isLiveChat === true) applyLiveChatTapEffect(type, data);
     // Forward the tap to YouTube's own handler, except on the Shorts watch
     // page: reel entries clone a native row purely so the popup renders them,
     // and their command is neutralized at clone time — but never execute

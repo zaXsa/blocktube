@@ -26,7 +26,11 @@ Work while focused in one of the filter textareas:
   the Shorts watch-page `...` sheet (`// Blocked by short context menu (…)`
   `(…)` — shelf channel blocks leave the name empty, `()`, because shelf
   cards carry a channel id but no channel name), or the Add box
-  (`// Blocked by direct add () (…)`). Allowlist entries use the same shape
+  (`// Blocked by direct add () (…)`). A live-chat `Chat actions` popup block
+  records its own origin, `// Blocked by live chat menu (name) (…)`, and names
+  the author from the message itself without the leading `@` (falling back to
+  the channel ID when the name is missing). Allowlist entries use the same
+  shape
   (`// Allowlisted by context menu (…) (…)` when you allow a channel).
   Removing one via `Remove from Whitelist` writes no comment: the entry is
   dropped and its now-orphaned annotation goes with it. They are annotations, not rules: the
@@ -91,6 +95,19 @@ list), `Block comment text…` (appends to the Comment content list), plus
 video menus. In whitelist mode the menu offers `Remove from Whitelist`
 instead. The entries honor the `General` menu toggles (`Show "Block comment
 text" in comment menus` gates the text entry).
+
+Live-chat messages have their own `...` (`Chat actions`) popup. It carries
+a single BlockTube entry — `Block Channel` (Channel ID list, same as the
+comment menu's) — with no allowlist/removal entries and no comment-text
+entry. Blocking clears the author's messages already on screen, and the
+entry is annotated `// Blocked by live chat menu (author name) (date)` — no
+leading `@` — falling back to the channel ID when the name is unavailable. The
+author resolves from the pressed message, not from YouTube's Report/Block rows. In
+logged-out/incognito sessions YouTube omits those rows and may not open its
+popup (or opens an empty one); BlockTube then shows its own one-row
+`Block Channel` menu on `...` instead — pressing `...` again, Escape, or a
+click elsewhere dismisses it. In whitelist mode neither menu gets BlockTube
+entries.
 
 `Block comment text…` opens an editor prefilled with the comment: trim it to
 the words you want blocked — a plain line is stored as a case-insensitive

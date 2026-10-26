@@ -7,7 +7,7 @@ Filter and block unwanted content from YouTube™.
 
 * Block videos via: **Video Title** / **Channel Name** / **Channel ID** / **Video ID**
 * Block comments via **User** / **Comment content**
-* Block videos/channels via context menus on videos, Shorts, and the comment `...` menu (allowlist entries included)
+* Block videos/channels via context menus on videos, Shorts, the comment `...` menu (allowlist entries included), and the live-chat `Chat actions` popup (`Block Channel` only, no allowlist entries there)
 * Blocked videos are removed from feeds, search, and suggestions (watch-page blocks show a message instead; `%`-watched matches are hidden only; `Disable direct access blocking` and the history-page opt-out exempt some surfaces)
 * Works on `m.youtube.com` (mobile layout) as well as desktop
 * Block complete channels (channel pages redirect to home)
@@ -91,6 +91,14 @@ Discard, and an `Unsaved changes` flag):
   `Allow Channel` (in whitelist mode, `Remove from Whitelist`). The text entry
   opens an editor prefilled with the comment so you can trim it to a keyword
   or save it as `/regex/`; visible matches are blocked immediately, no reload.
+  On live-chat messages the `...` (`Chat actions`) popup offers a
+  `Block Channel` entry too — blocks only (no allowlist entries there), and it
+  also clears that author's messages already on screen. The author is read from
+  the message itself. If YouTube omits its own Report/Block rows
+  (logged-out/incognito) and never opens its popup — or opens an empty one —
+  BlockTube shows a small one-row `Block Channel` menu on `...` instead. Each
+  block is annotated `// Blocked by live chat menu (author name) (date)` — the
+  name without its leading `@`, or the channel ID when no name is available.
 
 * How are collaboration videos handled?  
   A collaboration video lists several creators. BlockTube treats every creator

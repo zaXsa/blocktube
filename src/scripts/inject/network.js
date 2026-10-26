@@ -27,6 +27,14 @@
       maybeRevealShortsPrehide(resp);
     } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       ObjectFilter(resp, filterRules.comments, [], true);
+    } else if (url.pathname.endsWith('/live_chat/get_item_context_menu')) {
+      // The live chat `...` ("Chat actions") popup: its menu content is a
+      // dedicated fetch made when the button is tapped — confirmed via live
+      // capture as /youtubei/v1/live_chat/get_item_context_menu (params in
+      // the query, NOT a get_live_chat_item_context_menu path, which does
+      // not exist). Entries appended here render natively with the rest of
+      // the popup (see addLiveChatContextMenus).
+      addLiveChatContextMenus(resp);
     }
   }
 

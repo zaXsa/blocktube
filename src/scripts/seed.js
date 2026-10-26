@@ -83,6 +83,11 @@
     '/youtubei/v1/reel/reel_item_watch',
     '/youtubei/v1/reel/reel_watch_sequence',
     '/youtubei/v1/live_chat/get_live_chat',
+    // Live-chat `...` popup menu ("Chat actions"): confirmed by live capture —
+    // the popup content is POSTed to
+    // /youtubei/v1/live_chat/get_item_context_menu?params=...&pbj=1
+    // (NOT .../get_live_chat_item_context_menu — that name never exists).
+    'live_chat/get_item_context_menu',
   ];
 
   const hooks = {
@@ -400,14 +405,53 @@
     resolve(new Response(JSON.stringify(jsonResp), { status: resp.status, headers }));
   }
 
+  // Defer one parsed response until the page is armed, but never hang the
+  // caller: if the storage round-trip stays closed (incognito sessions have
+  // been observed stalling it), pass the RAW response through after a short
+  // grace period. That stall showed up as the live-chat popup never opening
+  // despite its request succeeding.
+  function whenBlockTubeReady(callback) {
+    if (window.blockTubeDispatched) {
+      callback(true);
+      return;
+    }
+    let settled = false;
+    let timer = 0;
+    const finish = function (armed) {
+      if (settled) return;
+      settled = true;
+      try {
+        if (timer) clearTimeout(timer);
+      } catch (e) {}
+      callback(armed);
+    };
+    try {
+      if (typeof setTimeout === 'function') {
+        timer = setTimeout(function () {
+          finish(false);
+        }, 1500);
+      }
+    } catch (e) {}
+    try {
+      window.addEventListener(
+        'blockTubeReady',
+        function () {
+          finish(true);
+        },
+        { once: true },
+      );
+    } catch (e) {
+      finish(false);
+    }
+  }
+
   // Handle one parsed fetch JSON body: filter once armed (deferred otherwise),
   // or pass the raw response through when the body isn't parseable JSON.
   function handleFetchJson(url, jsonResp, resp, resolve) {
-    const sendFiltered = function () {
-      sendFilteredFetch(url, jsonResp, resp, resolve);
-    };
-    if (window.blockTubeDispatched) sendFiltered();
-    else window.addEventListener('blockTubeReady', sendFiltered, { once: true });
+    whenBlockTubeReady(function (armed) {
+      if (armed) sendFilteredFetch(url, jsonResp, resp, resolve);
+      else resolve(resp);
+    });
   }
 
   // Handle one fetch response: non-JSON bodies (error pages, redirects, 204s)

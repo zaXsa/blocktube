@@ -113,15 +113,20 @@
     }).format(new Date());
     const viaComment = info && info.via === BLOCKTUBE_CONSTS.VIA.COMMENT;
     const viaShorts = info && info.via === BLOCKTUBE_CONSTS.VIA.SHORTS;
+    const viaLiveChat = info && info.via === BLOCKTUBE_CONSTS.VIA.LIVE_CHAT;
     const rawText = blockAnnotationText(info);
-    const stripped = viaComment ? rawText.replace(/^@+/, '').trim() : rawText;
+    // Handles (`@name`) are not part of the stored name on these surfaces:
+    // the comment menu supplies one, and live-chat author names carry it.
+    const stripped = viaComment || viaLiveChat ? rawText.replace(/^@+/, '').trim() : rawText;
     const text = stripped || rawText;
     const verb = blockProvenanceVerb(blockType);
     const origin = viaComment
       ? BLOCKTUBE_CONSTS.ORIGINS.COMMENT
       : viaShorts
         ? BLOCKTUBE_CONSTS.ORIGINS.SHORT
-        : BLOCKTUBE_CONSTS.ORIGINS.CONTEXT;
+        : viaLiveChat
+          ? BLOCKTUBE_CONSTS.ORIGINS.LIVE_CHAT
+          : BLOCKTUBE_CONSTS.ORIGINS.CONTEXT;
     return `// ${verb} by ${origin} (${text}) (${now})`;
   }
 

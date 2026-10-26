@@ -60,6 +60,7 @@
     VIA: Object.freeze({
       SHORTS: 'shorts',
       COMMENT: 'comment',
+      LIVE_CHAT: 'liveChat',
     }),
     VERBS: Object.freeze({
       ALLOW: 'Allowlisted',
@@ -70,6 +71,7 @@
       CONTEXT: 'context menu',
       SHORT: 'short context menu',
       COMMENT: 'comment menu',
+      LIVE_CHAT: 'live chat menu',
       DIRECT: 'direct add',
     }),
     SHORTS: Object.freeze({
@@ -2410,6 +2412,8 @@
       maybeRevealShortsPrehide(resp);
     } else if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       ObjectFilter(resp, filterRules.comments, [], true);
+    } else if (url.pathname.endsWith('/live_chat/get_item_context_menu')) {
+      addLiveChatContextMenus(resp);
     }
   }
 
@@ -3725,6 +3729,458 @@
     return { menuServiceItemRenderer: renderer };
   }
 
+  function isOurLiveChatEntry(item) {
+    const renderer = item && item.menuServiceItemRenderer;
+    return !!(renderer && renderer._btMenuAction === 'block_channel');
+  }
+
+  function liveChatChannelIdFromParams(params) {
+    if (typeof params !== 'string' || params.length === 0) return undefined;
+    try {
+      const decoded = atob(
+        params
+          .replace(/%3D/gi, '=')
+          .replace(/%2B/gi, '+')
+          .replace(/%2F/gi, '/')
+          .replace(/-/g, '+')
+          .replace(/_/g, '/'),
+      );
+      const match = decoded.match(/UC[A-Za-z0-9_-]{22}/);
+      return match ? match[0] : undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function liveChatChannelIdFromMenuItems(items) {
+    let reportId;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i] || {};
+      const renderer = item.menuServiceItemRenderer || item.menuNavigationItemRenderer;
+      const blockId = liveChatChannelIdFromParams(
+        getObjectByPath(
+          renderer,
+          'navigationEndpoint.confirmDialogEndpoint.content.confirmDialogRenderer.confirmButton.buttonRenderer.serviceEndpoint.moderateLiveChatEndpoint.params',
+        ) || getObjectByPath(renderer, 'serviceEndpoint.moderateLiveChatEndpoint.params'),
+      );
+      if (blockId) return blockId;
+      if (reportId === undefined) {
+        reportId = liveChatChannelIdFromParams(
+          getObjectByPath(renderer, 'serviceEndpoint.getReportFormEndpoint.params'),
+        );
+      }
+    }
+    return reportId;
+  }
+
+  function addLiveChatContextMenus(resp) {
+    startLiveChatMenuTracking();
+    const menu = getObjectByPath(
+      resp || {},
+      'liveChatItemContextMenuSupportedRenderers.menuRenderer',
+    );
+    if (!menu || !Array.isArray(menu.items)) return;
+    if (isWhitelistMenuMode()) return;
+    if (!showMenuEntry(OPT.MENU_BLOCK_CHANNEL)) return;
+
+    const items = menu.items;
+    if (items.some(isOurLiveChatEntry)) return;
+
+    syncLiveChatFallbackWithResponse(items);
+
+    const anchor = freshLiveChatMenuAnchor();
+    const channelId =
+      (anchor && typeof anchor.id === 'string' && anchor.id) ||
+      liveChatChannelIdFromMenuItems(items);
+    if (!channelId) return;
+
+    const payload =
+      anchor && anchor.id === channelId && anchor.text
+        ? { id: channelId, text: anchor.text }
+        : { id: channelId };
+    items.push(
+      createStandardBlockItem('Block Channel', 'NOT_INTERESTED', payload, {
+        isLiveChat: true,
+      }),
+    );
+  }
+
+  const LIVE_CHAT_MESSAGE_TAGS = [
+    'yt-live-chat-text-message-renderer',
+    'yt-live-chat-membership-item-renderer',
+    'yt-live-chat-paid-message-renderer',
+    'yt-live-chat-legacy-paid-message-renderer',
+    'yt-live-chat-paid-sticker-renderer',
+    'yt-live-chat-purchase-message-renderer',
+  ];
+
+  let liveChatMenuAnchor = null;
+  const LIVE_CHAT_ANCHOR_TTL_MS = 5000;
+
+  function freshLiveChatMenuAnchor() {
+    if (!liveChatMenuAnchor) return null;
+    try {
+      if (Date.now() - liveChatMenuAnchor.time > LIVE_CHAT_ANCHOR_TTL_MS) {
+        liveChatMenuAnchor = null;
+        return null;
+      }
+    } catch (e) {
+      return null;
+    }
+    return liveChatMenuAnchor;
+  }
+
+  function liveChatAuthorDataFromElement(el) {
+    try {
+      if (!el) return undefined;
+      const data =
+        el.data || (typeof el.getCurrentData === 'function' ? el.getCurrentData() : undefined);
+      const id = data && data.authorExternalChannelId;
+      if (typeof id !== 'string' || id.length === 0) return undefined;
+      const rawText =
+        getObjectByPath(data, 'authorName.simpleText') ||
+        getObjectByPath(data, 'authorName.runs[0].text');
+      const text =
+        typeof rawText === 'string' ? rawText.replace(/^@+/, '').trim() || rawText : rawText;
+      return { id, text };
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function noteLiveChatMenuAnchor(message) {
+    const data = liveChatAuthorDataFromElement(message);
+    liveChatMenuAnchor = data ? { ...data, time: Date.now() } : null;
+  }
+
+  function liveChatMessageFromEventPath(path) {
+    for (let i = 0; i < path.length; i += 1) {
+      const node = path[i];
+      if (!node || typeof node.tagName !== 'string') continue;
+      if (LIVE_CHAT_MESSAGE_TAGS.includes(node.tagName.toLowerCase())) return node;
+    }
+    return undefined;
+  }
+
+  function liveChatMenuButtonFromEventPath(path) {
+    for (let i = 0; i < path.length; i += 1) {
+      const node = path[i];
+      if (!node || typeof node.getAttribute !== 'function') continue;
+      if (node.id === 'menu-button') return node;
+      const label = node.getAttribute('aria-label') || '';
+      if (/more|action|menu/i.test(label)) return node;
+      const tag = typeof node.tagName === 'string' ? node.tagName.toLowerCase() : '';
+      if (tag.includes('icon-button')) return node;
+    }
+    return undefined;
+  }
+
+  function trackLiveChatMenuAnchor(event) {
+    try {
+      const path =
+        event && typeof event.composedPath === 'function'
+          ? event.composedPath()
+          : [event && event.target];
+      if (!path || path.length === 0) return;
+      const message = liveChatMessageFromEventPath(path);
+      const button = liveChatMenuButtonFromEventPath(path);
+      if (message) {
+        noteLiveChatMenuAnchor(message);
+        if (button) armLiveChatFallbackMenu(button, message);
+        else cancelLiveChatFallbackPending();
+      } else if (button) {
+        liveChatMenuAnchor = null;
+        cancelLiveChatFallbackPending();
+      }
+    } catch (e) {}
+  }
+
+  let liveChatTrackingInstalled = false;
+  function startLiveChatMenuTracking() {
+    if (liveChatTrackingInstalled) return;
+    try {
+      if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
+        return;
+      }
+      liveChatTrackingInstalled = true;
+      document.addEventListener('click', trackLiveChatMenuAnchor, true);
+    } catch (e) {
+      liveChatTrackingInstalled = false;
+    }
+  }
+
+  // !! Live-chat fallback menu (logged-out/incognito)
+  const LIVE_CHAT_FALLBACK_TIMEOUT_MS = 1500;
+  const LIVE_CHAT_FALLBACK_RENDER_MS = 400;
+  let liveChatFallbackPending = null;
+  let liveChatFallbackMenu = null;
+
+  function cancelLiveChatFallbackPending() {
+    const pending = liveChatFallbackPending;
+    liveChatFallbackPending = null;
+    if (!pending) return;
+    try {
+      if (pending.timer) clearTimeout(pending.timer);
+    } catch (e) {}
+  }
+
+  function scheduleLiveChatFallback(pending, delay) {
+    try {
+      if (pending.timer) clearTimeout(pending.timer);
+    } catch (e) {}
+    try {
+      pending.timer = setTimeout(function () {
+        if (liveChatFallbackPending !== pending) return;
+        liveChatFallbackPending = null;
+        if (liveChatNativeMenuOpen()) return;
+        showLiveChatFallbackMenu(pending.button, pending.author);
+      }, delay);
+    } catch (e) {
+      liveChatFallbackPending = null;
+    }
+  }
+
+  function syncLiveChatFallbackWithResponse(items) {
+    if (items.length > 0) {
+      cancelLiveChatFallbackPending();
+      closeLiveChatFallbackMenu();
+    } else if (liveChatFallbackPending) {
+      scheduleLiveChatFallback(liveChatFallbackPending, LIVE_CHAT_FALLBACK_RENDER_MS);
+    }
+  }
+
+  function closeLiveChatFallbackMenu() {
+    const open = liveChatFallbackMenu;
+    liveChatFallbackMenu = null;
+    if (!open) return;
+    try {
+      if (open.cleanup) open.cleanup();
+    } catch (e) {}
+    try {
+      if (open.root && typeof open.root.remove === 'function') open.root.remove();
+    } catch (e) {}
+  }
+
+  const LIVE_CHAT_MENU_ROW_SELECTOR = [
+    'ytd-menu-service-item-renderer',
+    'ytd-menu-navigation-item-renderer',
+    'tp-yt-paper-item',
+    '[role="menuitem"]',
+    '[role="menuitemradio"]',
+  ].join(', ');
+
+  function liveChatNativeMenuOpen(except) {
+    try {
+      if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') {
+        return false;
+      }
+      const nodes = document.querySelectorAll(
+        'ytd-menu-popup-renderer, tp-yt-iron-dropdown, [role="menu"]',
+      );
+      for (let i = 0; i < nodes.length; i += 1) {
+        const node = nodes[i];
+        if (node === except) continue;
+        try {
+          if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') continue;
+          const rect =
+            typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null;
+          if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+          const rows =
+            typeof node.querySelector === 'function'
+              ? node.querySelector(LIVE_CHAT_MENU_ROW_SELECTOR)
+              : null;
+          if (rows) return true;
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function liveChatFallbackIsDark() {
+    try {
+      if (document.documentElement && document.documentElement.hasAttribute('dark')) return true;
+    } catch (e) {}
+    try {
+      if (typeof window.matchMedia === 'function') {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function positionLiveChatFallbackMenu(root, button) {
+    try {
+      const margin = 8;
+      const rect =
+        button && typeof button.getBoundingClientRect === 'function'
+          ? button.getBoundingClientRect()
+          : null;
+      const width = root.offsetWidth || 160;
+      const height = root.offsetHeight || 40;
+      const vw = window.innerWidth || (document.documentElement || {}).clientWidth || 0;
+      const vh = window.innerHeight || (document.documentElement || {}).clientHeight || 0;
+      let left = rect ? rect.left : margin;
+      let top = rect ? rect.bottom + 4 : margin;
+      if (rect && vh > 0 && top + height > vh - margin) top = rect.top - height - 4;
+      if (vw > 0) left = Math.min(left, vw - width - margin);
+      left = Math.max(margin, left);
+      top = Math.max(margin, top);
+      root.style.left = `${Math.round(left)}px`;
+      root.style.top = `${Math.round(top)}px`;
+    } catch (e) {}
+  }
+
+  function blockLiveChatAuthor(author) {
+    if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
+    try {
+      if (window.blockTubeReloadRequired) {
+        window.blockTubeExports.openToast(
+          'BlockTube was updated, this tab needs to be reloaded to use this function',
+          5000,
+        );
+        return;
+      }
+    } catch (e) {}
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, {
+      type: BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL,
+      info: { id: author.id, text: author.text, via: BLOCKTUBE_CONSTS.VIA.LIVE_CHAT },
+    });
+    applyLiveChatTapEffect(BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL, author);
+  }
+
+  function styleLiveChatFallbackRoot(root, dark) {
+    root.style.position = 'fixed';
+    root.style.zIndex = '2147483000';
+    root.style.minWidth = '160px';
+    root.style.padding = '4px 0';
+    root.style.background = dark ? '#282828' : '#ffffff';
+    root.style.color = dark ? '#f1f1f1' : '#0f0f0f';
+    root.style.border = `1px solid ${dark ? '#3f3f3f' : '#e5e5e5'}`;
+    root.style.borderRadius = '8px';
+    root.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.3)';
+    root.style.font = '14px Roboto, Arial, sans-serif';
+  }
+
+  function createLiveChatFallbackRow(dark, onActivate) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.setAttribute('role', 'menuitem');
+    row.textContent = 'Block Channel';
+    row.style.display = 'block';
+    row.style.width = '100%';
+    row.style.padding = '10px 16px';
+    row.style.background = 'transparent';
+    row.style.color = 'inherit';
+    row.style.border = '0';
+    row.style.textAlign = 'left';
+    row.style.cursor = 'pointer';
+    row.style.font = 'inherit';
+    row.style.whiteSpace = 'nowrap';
+    const setHover = (on) => {
+      try {
+        row.style.background = on ? (dark ? '#3f3f3f' : '#f2f2f2') : 'transparent';
+      } catch (e) {}
+    };
+    row.addEventListener('mouseenter', () => setHover(true));
+    row.addEventListener('mouseleave', () => setHover(false));
+    row.addEventListener('click', onActivate);
+    return row;
+  }
+
+  function wireLiveChatFallbackDismissal(root) {
+    const onDocClick = function (event) {
+      try {
+        if (root.contains && typeof root.contains === 'function' && root.contains(event.target)) {
+          return;
+        }
+      } catch (e) {}
+      closeLiveChatFallbackMenu();
+    };
+    const onKey = function (event) {
+      if (event && (event.key === 'Escape' || event.key === 'Esc')) closeLiveChatFallbackMenu();
+    };
+    document.addEventListener('click', onDocClick, true);
+    document.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', closeLiveChatFallbackMenu);
+    let watch = 0;
+    try {
+      watch = setInterval(function () {
+        if (liveChatNativeMenuOpen(root)) closeLiveChatFallbackMenu();
+      }, 250);
+    } catch (e) {}
+    return function cleanup() {
+      document.removeEventListener('click', onDocClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', closeLiveChatFallbackMenu);
+      try {
+        if (watch) clearInterval(watch);
+      } catch (e) {}
+    };
+  }
+
+  function activateLiveChatFallback(author, event) {
+    try {
+      event.preventDefault();
+      event.stopPropagation();
+    } catch (e) {}
+    closeLiveChatFallbackMenu();
+    blockLiveChatAuthor(author);
+  }
+
+  function showLiveChatFallbackMenu(button, author) {
+    closeLiveChatFallbackMenu();
+    try {
+      if (typeof document === 'undefined' || !document.body) return;
+      if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
+      const dark = liveChatFallbackIsDark();
+      const root = document.createElement('div');
+      root.setAttribute('role', 'menu');
+      root.setAttribute('aria-label', 'Chat actions');
+      styleLiveChatFallbackRoot(root, dark);
+      const row = createLiveChatFallbackRow(dark, (event) =>
+        activateLiveChatFallback(author, event),
+      );
+      root.appendChild(row);
+      document.body.appendChild(root);
+      positionLiveChatFallbackMenu(root, button);
+      liveChatFallbackMenu = {
+        root,
+        button,
+        cleanup: wireLiveChatFallbackDismissal(root),
+      };
+      try {
+        row.focus({ preventScroll: true });
+      } catch (e) {}
+    } catch (e) {}
+  }
+
+  function sameMenuTrigger(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    try {
+      if (typeof a.contains === 'function' && a.contains(b)) return true;
+      if (typeof b.contains === 'function' && b.contains(a)) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  function armLiveChatFallbackMenu(button, message) {
+    if (isWhitelistMenuMode()) return;
+    if (!showMenuEntry(OPT.MENU_BLOCK_CHANNEL)) return;
+    if (liveChatFallbackMenu && sameMenuTrigger(liveChatFallbackMenu.button, button)) {
+      cancelLiveChatFallbackPending();
+      closeLiveChatFallbackMenu();
+      return;
+    }
+    const author = liveChatAuthorDataFromElement(message);
+    if (!author) return;
+    cancelLiveChatFallbackPending();
+    closeLiveChatFallbackMenu();
+    const pending = { author, button };
+    liveChatFallbackPending = pending;
+    scheduleLiveChatFallback(pending, LIVE_CHAT_FALLBACK_TIMEOUT_MS);
+  }
+
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
   }
@@ -4273,6 +4729,45 @@
     }
   }
 
+  function sweepLiveChatAuthor(channelId) {
+    if (
+      !channelId ||
+      typeof document === 'undefined' ||
+      typeof document.querySelectorAll !== 'function'
+    ) {
+      return;
+    }
+    let nodes;
+    try {
+      nodes = document.querySelectorAll(LIVE_CHAT_MESSAGE_TAGS.join(','));
+    } catch (e) {
+      return;
+    }
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i];
+      try {
+        const item =
+          node.data ||
+          (typeof node.getCurrentData === 'function' ? node.getCurrentData() : undefined);
+        if (
+          item &&
+          item.authorExternalChannelId === channelId &&
+          typeof node.remove === 'function'
+        ) {
+          node.remove();
+        }
+      } catch (e) {}
+    }
+  }
+
+  function applyLiveChatTapEffect(type, data) {
+    try {
+      openToast('Channel blocked', 3000);
+    } catch (e) {}
+    if (type !== BLOCKTUBE_CONSTS.BLOCK_TYPES.CHANNEL) return;
+    sweepLiveChatAuthor(data && typeof data.id === 'string' ? data.id : undefined);
+  }
+
   function forwardMenuTap(event) {
     if (this.data.serviceEndpoint) {
       if (this.onTap) this.onTap(event);
@@ -4356,17 +4851,30 @@
       event.preventDefault();
       return;
     }
+
+    if (effect && effect.isLiveChat === true) {
+      const live = freshLiveChatMenuAnchor();
+      if (live && typeof live.id === 'string' && live.id.length > 0) {
+        target = { type: target.type, data: { id: live.id, text: live.text } };
+      }
+    }
+
     const { type, data } = target;
     const removeParent = effect.removeParent === true;
     const stopPlayer = effect.stopPlayer === true;
     const isShorts = effect.isShorts === true;
     const isWatch = effect.isWatch === true;
 
-    const blockInfo = isShorts || isWatch ? { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS } : data;
+    let blockInfo = data;
+    if (isShorts || isWatch) blockInfo = { ...data, via: BLOCKTUBE_CONSTS.VIA.SHORTS };
+    else if (effect && effect.isLiveChat === true) {
+      blockInfo = { ...data, via: BLOCKTUBE_CONSTS.VIA.LIVE_CHAT };
+    }
     postMessage(BLOCKTUBE_CONSTS.MESSAGES.CONTEXT_BLOCK_DATA, { type, info: blockInfo });
 
     applyMenuTapEffect(type, removeParent, stopPlayer, isDataFromRightHandSide, parentDom);
     dismissShortsTap(type, data, parentData, isShorts, isWatch);
+    if (effect && effect.isLiveChat === true) applyLiveChatTapEffect(type, data);
     if (!isWatch) forwardMenuTap.call(this, event);
   }
 
@@ -7033,6 +7541,9 @@
     if (!hooksStarted) {
       startHook();
     }
+    try {
+      if (typeof startLiveChatMenuTracking === 'function') startLiveChatMenuTracking();
+    } catch (e) {}
     try {
       if (typeof startCommentObserver === 'function') startCommentObserver();
     } catch (e) {}

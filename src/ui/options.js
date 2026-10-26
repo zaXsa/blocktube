@@ -710,13 +710,14 @@
     return jsEditors[key].getValue().split('\n');
   }
 
-  // `context menu` / `direct add` / `comment menu` / `short context menu` as
-  // the short "added via" tag.
+  // `context menu` / `direct add` / `comment menu` / `short context menu` /
+  // `live chat menu` (tagged `live chat`) as the short "added via" tag.
   function provenanceKind(kind) {
     if (kind === BLOCKTUBE_CONSTS.ORIGINS.CONTEXT) return 'context';
     if (kind === BLOCKTUBE_CONSTS.ORIGINS.DIRECT) return 'manual';
     if (kind === BLOCKTUBE_CONSTS.ORIGINS.COMMENT) return 'comment';
     if (kind === BLOCKTUBE_CONSTS.ORIGINS.SHORT) return 'shorts';
+    if (kind === BLOCKTUBE_CONSTS.ORIGINS.LIVE_CHAT) return 'live chat';
     return kind;
   }
 

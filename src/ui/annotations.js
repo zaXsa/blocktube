@@ -118,7 +118,8 @@
 
   // Row model for ID entity tables (OPTIONS_UI_PLAN.md Phase 8). Provenance looks like
   // `// Blocked by context menu (<text>) (<date>)` / `// Blocked by direct add () (<date>)`,
-  // comment-popup as `comment menu`, Shorts taps as `short context menu`; allowlist `Allowlisted`
+  // comment-popup as `comment menu`, Shorts taps as `short context menu`, live-chat
+  // `Chat actions` taps as `live chat menu`; allowlist `Allowlisted`
   // (`// Allowlisted by context menu …` / `direct add …`, via whitelist context-menu + Add-box flows).
   // Older entries predate the date: single-group `// Blocked by context menu (<text>)`. Text may
   // contain parens, so date is the LAST group; kind is the fixed word(s) after the prefix; rest stays unparsed.
@@ -147,6 +148,7 @@
       BLOCKTUBE_CONSTS.ORIGINS.CONTEXT,
       BLOCKTUBE_CONSTS.ORIGINS.DIRECT,
       BLOCKTUBE_CONSTS.ORIGINS.COMMENT,
+      BLOCKTUBE_CONSTS.ORIGINS.LIVE_CHAT,
     ];
     const kind = kinds.find((k) => rest === k || rest.startsWith(`${k} `));
     if (kind === undefined) return { kind: 'other', text: '', date: '', raw: line };

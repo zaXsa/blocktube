@@ -62,6 +62,7 @@
     VIA: Object.freeze({
       SHORTS: 'shorts',
       COMMENT: 'comment',
+      LIVE_CHAT: 'liveChat',
     }),
     // Provenance verbs for stored annotation lines (`// <Verb> by <origin>
     // (<text>) (<date>)`). Single source for the writer (content script),
@@ -80,6 +81,7 @@
       CONTEXT: 'context menu',
       SHORT: 'short context menu',
       COMMENT: 'comment menu',
+      LIVE_CHAT: 'live chat menu',
       DIRECT: 'direct add',
     }),
     // Shorts route constants. PATH_PREFIX is the `/shorts/` URL prefix every
