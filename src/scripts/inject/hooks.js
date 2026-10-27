@@ -579,7 +579,7 @@
         }
         case BLOCKTUBE_CONSTS.MESSAGES.RELOAD:
           window.blockTubeReloadRequired = true;
-          openToast('BlockTube was updated, Please reload this tab to reactivate it', 15000);
+          openToast(BLOCKTUBE_CONSTS.TOASTS.RELOAD_PAGE, 15000);
           break;
         default:
           break;

@@ -276,7 +276,7 @@
     if (storageData === undefined) return;
     if (window.blockTubeReloadRequired) {
       window.blockTubeExports.openToast(
-        'BlockTube was updated, this tab needs to be reloaded to use this function',
+        BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED,
         5000,
       );
       return;
@@ -395,10 +395,7 @@
   // Style one dialog node through CSSOM only (no <style>, no innerHTML),
   // so page CSP and Trusted Types stay out of the way.
   function styleDialogNode(node, styles) {
-    try {
-      const keys = Object.keys(styles);
-      for (let i = 0; i < keys.length; i += 1) node.style[keys[i]] = styles[keys[i]];
-    } catch (e) {}
+    assignStyleProps(node, styles);
     return node;
   }
 
@@ -971,10 +968,7 @@
     for (let i = 0; i < path.length; i += 1) {
       const node = path[i];
       if (!node || typeof node.getAttribute !== 'function') continue;
-      if (!sawMenuButton) {
-        const label = node.getAttribute('aria-label') || '';
-        if (/more|action|menu/i.test(label)) sawMenuButton = true;
-      }
+      if (!sawMenuButton && hasMenuLabel(node)) sawMenuButton = true;
       const tag = node.tagName || '';
       if (
         tag === 'YTD-COMMENT-THREAD-RENDERER' ||
@@ -991,9 +985,7 @@
   // match as commentFromEventPath above).
   function pathHasMenuButton(path) {
     for (let i = 0; i < path.length; i += 1) {
-      const node = path[i];
-      if (!node || typeof node.getAttribute !== 'function') continue;
-      if (/more|action|menu/i.test(node.getAttribute('aria-label') || '')) return true;
+      if (hasMenuLabel(path[i])) return true;
     }
     return false;
   }
@@ -1005,10 +997,7 @@
   // comments that proximity alone cannot tell them apart.
   function trackCommentMenuAnchor(event) {
     try {
-      const path =
-        event && typeof event.composedPath === 'function'
-          ? event.composedPath()
-          : [event && event.target];
+      const path = eventPathOf(event);
       if (!path || path.length === 0) return;
       const comment = commentFromEventPath(path);
       if (comment) {
@@ -1221,24 +1210,6 @@
       return btNativeTemplateCache;
     } catch (e) {}
     return null;
-  }
-
-  // Dark-theme check for the fallback menu: YouTube marks <html dark>
-  // in dark mode; matchMedia covers the rest. Plain boolean, never throws.
-  function btFallbackIsDark() {
-    try {
-      if (typeof document !== 'undefined' && document.documentElement) {
-        if (typeof document.documentElement.hasAttribute === 'function') {
-          if (document.documentElement.hasAttribute('dark')) return true;
-        }
-      }
-    } catch (e) {}
-    try {
-      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) return true;
-      }
-    } catch (e) {}
-    return false;
   }
 
   // Menu colors sampled from a real native comment popup
@@ -1570,7 +1541,7 @@
     try {
       rect = btn.getBoundingClientRect();
     } catch (e) {}
-    const dark = btNativeMenuTheme ? null : btFallbackIsDark();
+    const dark = btNativeMenuTheme ? null : pagePrefersDark();
     const rowColors = btFallbackRowColors(dark);
     const menu = btMakeFallbackMenu(rowColors, dark);
     const rows = btFillFallbackMenu(menu, entries, commentEl, rowColors);

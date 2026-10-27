@@ -314,7 +314,7 @@
 
   // Mobile renderers whose cards ship no block actions (see
   // buildBlockActionMenuItem): the menu entries are built from scratch.
-  const MOBILE_UP_NEXT_ATTRS = [
+  const MOBILE_UP_NEXT_ATTRS = new Set([
     'videoWithContextRenderer',
     'compactVideoRenderer',
     'movieRenderer',
@@ -322,7 +322,7 @@
     'playlistVideoRenderer',
     'reelItemRenderer',
     'commentRenderer',
-  ];
+  ]);
 
   // Resolve the mutable menu-items array for a mobile up-next card, creating
   // the actionMenu for comments. Undefined when the card has no menu at all.
@@ -510,7 +510,7 @@
     const parentData = obj[attr];
     const { channel: channelData, video: videoData } = channelAndVideoFrom(parentData, attr);
 
-    if (MOBILE_UP_NEXT_ATTRS.includes(attr)) {
+    if (MOBILE_UP_NEXT_ATTRS.has(attr)) {
       addMobileUpNextMenus(obj, attr, channelData, videoData);
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
       addMobileSlimMenus(obj, attr, channelData, videoData);
@@ -632,6 +632,30 @@
     return extractGenericMenuFlags(obj, attr);
   }
 
+  // Stamp a menu container with BlockTube tap metadata. Shared by every
+  // extraction branch below (lockup sheet, shorts sheet, reel overlay/topbar).
+  function stampBlockTubeMetadata(target, metadata) {
+    Object.defineProperty(target, 'blockTube', {
+      value: { metadata },
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  // Reel/Shorts watch metadata is identical for the overlay and topbar sheets.
+  function reelBlockMetadata(channel, video) {
+    return {
+      channelId: channel.id,
+      channelName: channel.text,
+      videoId: video.id,
+      videoName: video.text,
+      removeObject: true,
+      isShorts: true,
+      isWatch: true,
+    };
+  }
+
   // Specific extractor for lockupViewModel
   function extractFromLockupViewModel(renderer) {
     const path =
@@ -649,25 +673,16 @@
     const videoId = video.id;
     const videoName = video.text;
 
-    const metadataBlock = {
-      metadata: {
-        channelId,
-        channelName,
-        // Reliable per-creator pairs from the avatar-stack dialog, used by the
-        // individual "Block <creator>" entries when a right-hand tap cannot
-        // read the row payload (label fallback, see menuOnTap).
-        channels: lockupChannelsFrom(renderer),
-        videoId,
-        videoName,
-        removeObject: true,
-      },
-    };
-
-    Object.defineProperty(sheetmodel, 'blockTube', {
-      value: metadataBlock,
-      writable: true,
-      enumerable: true,
-      configurable: true,
+    stampBlockTubeMetadata(sheetmodel, {
+      channelId,
+      channelName,
+      // Reliable per-creator pairs from the avatar-stack dialog, used by the
+      // individual "Block <creator>" entries when a right-hand tap cannot
+      // read the row payload (label fallback, see menuOnTap).
+      channels: lockupChannelsFrom(renderer),
+      videoId,
+      videoName,
+      removeObject: true,
     });
 
     return items;
@@ -703,26 +718,17 @@
 
     const { channel, video } = channelAndVideoFrom(renderer, 'shortsLockupViewModel');
 
-    const metadataBlock = {
-      metadata: {
-        channelId: channel.id,
-        channelName: channel.text,
-        videoId: video.id,
-        videoName: video.text,
-        removeObject: true,
-        // Marks taps from a Shorts shelf card: their sheet has no native
-        // hide affordance, so menuOnTap dismisses the card from the DOM
-        // directly (see dismissShortsShelfCard) instead of relying on the
-        // cloned feedback command the way lockup cards do.
-        isShorts: true,
-      },
-    };
-
-    Object.defineProperty(sheetmodel, 'blockTube', {
-      value: metadataBlock,
-      writable: true,
-      enumerable: true,
-      configurable: true,
+    stampBlockTubeMetadata(sheetmodel, {
+      channelId: channel.id,
+      channelName: channel.text,
+      videoId: video.id,
+      videoName: video.text,
+      removeObject: true,
+      // Marks taps from a Shorts shelf card: their sheet has no native
+      // hide affordance, so menuOnTap dismisses the card from the DOM
+      // directly (see dismissShortsShelfCard) instead of relying on the
+      // cloned feedback command the way lockup cards do.
+      isShorts: true,
     });
 
     return items;
@@ -759,22 +765,7 @@
     const channel = reelOverlayChannelFrom(renderer);
     const video = currentShortsVideo();
 
-    Object.defineProperty(renderer, 'blockTube', {
-      value: {
-        metadata: {
-          channelId: channel.id,
-          channelName: channel.text,
-          videoId: video.id,
-          videoName: video.text,
-          removeObject: true,
-          isShorts: true,
-          isWatch: true,
-        },
-      },
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    stampBlockTubeMetadata(renderer, reelBlockMetadata(channel, video));
 
     return items;
   }
@@ -788,22 +779,7 @@
   // Stamp one reel topbar sheet with BlockTube tap metadata (channel/video
   // identity + Shorts flags), so the tap handler can attribute the block.
   function stampReelTopbarSheet(sheet, channel, video) {
-    Object.defineProperty(sheet, 'blockTube', {
-      value: {
-        metadata: {
-          channelId: channel.id,
-          channelName: channel.text,
-          videoId: video.id,
-          videoName: video.text,
-          removeObject: true,
-          isShorts: true,
-          isWatch: true,
-        },
-      },
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    stampBlockTubeMetadata(sheet, reelBlockMetadata(channel, video));
   }
 
   function extractReelTopbarMenuFlags(obj, attr) {
@@ -1324,16 +1300,7 @@
   function liveChatChannelIdFromParams(params) {
     if (typeof params !== 'string' || params.length === 0) return undefined;
     try {
-      const decoded = atob(
-        params
-          .replace(/%3D/gi, '=')
-          .replace(/%2B/gi, '+')
-          .replace(/%2F/gi, '/')
-          .replace(/-/g, '+')
-          .replace(/_/g, '/'),
-      );
-      const match = decoded.match(/UC[A-Za-z0-9_-]{22}/);
-      return match ? match[0] : undefined;
+      return ucChannelIdFromText(atob(normalizeBase64Params(params)));
     } catch (e) {
       return undefined;
     }
@@ -1437,6 +1404,7 @@
     'yt-live-chat-paid-sticker-renderer',
     'yt-live-chat-purchase-message-renderer',
   ];
+  const LIVE_CHAT_MESSAGE_TAG_SET = new Set(LIVE_CHAT_MESSAGE_TAGS);
 
   // The message whose `...` press most recently opened a popup. Renderers
   // recycle, so the author id/name are snapshotted at press time — the element
@@ -1500,7 +1468,7 @@
     for (let i = 0; i < path.length; i += 1) {
       const node = path[i];
       if (!node || typeof node.tagName !== 'string') continue;
-      if (LIVE_CHAT_MESSAGE_TAGS.includes(node.tagName.toLowerCase())) return node;
+      if (LIVE_CHAT_MESSAGE_TAG_SET.has(node.tagName.toLowerCase())) return node;
     }
     return undefined;
   }
@@ -1518,8 +1486,7 @@
       const node = path[i];
       if (!node || typeof node.getAttribute !== 'function') continue;
       if (node.id === 'menu-button') return node;
-      const label = node.getAttribute('aria-label') || '';
-      if (/more|action|menu/i.test(label)) return node;
+      if (hasMenuLabel(node)) return node;
       const tag = typeof node.tagName === 'string' ? node.tagName.toLowerCase() : '';
       if (tag.includes('icon-button')) return node;
     }
@@ -1535,10 +1502,7 @@
   // also say "More actions"), so a stale author cannot serve that popup.
   function trackLiveChatMenuAnchor(event) {
     try {
-      const path =
-        event && typeof event.composedPath === 'function'
-          ? event.composedPath()
-          : [event && event.target];
+      const path = eventPathOf(event);
       if (!path || path.length === 0) return;
       const message = liveChatMessageFromEventPath(path);
       const button = liveChatMenuButtonFromEventPath(path);
@@ -1689,18 +1653,6 @@
     return false;
   }
 
-  function liveChatFallbackIsDark() {
-    try {
-      if (document.documentElement && document.documentElement.hasAttribute('dark')) return true;
-    } catch (e) {}
-    try {
-      if (typeof window.matchMedia === 'function') {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches;
-      }
-    } catch (e) {}
-    return false;
-  }
-
   function positionLiveChatFallbackMenu(root, button) {
     try {
       const margin = 8;
@@ -1730,7 +1682,7 @@
     try {
       if (window.blockTubeReloadRequired) {
         window.blockTubeExports.openToast(
-          'BlockTube was updated, this tab needs to be reloaded to use this function',
+          BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED,
           5000,
         );
         return;
@@ -1836,7 +1788,7 @@
     try {
       if (typeof document === 'undefined' || !document.body) return;
       if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
-      const dark = liveChatFallbackIsDark();
+      const dark = pagePrefersDark();
       const root = document.createElement('div');
       root.setAttribute('role', 'menu');
       root.setAttribute('aria-label', 'Chat actions');
@@ -2110,7 +2062,7 @@
 
     if (window.blockTubeReloadRequired) {
       window.blockTubeExports.openToast(
-        'BlockTube was updated, this tab needs to be reloaded to use this function',
+        BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED,
         5000,
       );
       return;
@@ -2148,7 +2100,7 @@
   }
 
   // Video-player tags whose menu blocks the now-playing video + channel.
-  const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
+  const PLAYER_MENU_TAGS = new Set(['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA']);
 
   // The live owner renderer's data (`videoOwnerRenderer`). Both the tap path
   // and the injection-time pair lookup read it; YouTube nests the renderer
@@ -2311,7 +2263,7 @@
   // label switch and the injected-entry path (which carries its own payload
   // but still needs nothing else). Undefined only for a missing parent.
   function resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide) {
-    if (parentDom && PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
+    if (parentDom && PLAYER_MENU_TAGS.has(parentDom.tagName)) {
       return playerMenuBlockData();
     }
     if (isDataFromRightHandSide) return stampedMenuBlockData(parentData);
@@ -2410,12 +2362,19 @@
   // `message` is the inline placeholder left where the card was: "Blocked"
   // for blocks, "Removed from whitelist" for removals. Allow entries never
   // reach this helper — the card stays in place and only a toast confirms.
+  const PARENT_NODE_REMOVE_TAGS = new Set([
+    'YTD-BACKSTAGE-POST-RENDERER',
+    'YTD-POST-RENDERER',
+  ]);
+  const SELF_REMOVE_TAGS = new Set([
+    'YTD-PLAYLIST-PANEL-VIDEO-RENDERER',
+    'YTD-MOVIE-RENDERER',
+  ]);
+
   function removeParentHelper(isDataFromRightHandSide, parentDom, message = 'Blocked') {
-    if (['YTD-BACKSTAGE-POST-RENDERER', 'YTD-POST-RENDERER'].includes(parentDom.tagName)) {
+    if (PARENT_NODE_REMOVE_TAGS.has(parentDom.tagName)) {
       parentDom.parentNode.remove();
-    } else if (
-      ['YTD-PLAYLIST-PANEL-VIDEO-RENDERER', 'YTD-MOVIE-RENDERER'].includes(parentDom.tagName)
-    ) {
+    } else if (SELF_REMOVE_TAGS.has(parentDom.tagName)) {
       parentDom.remove();
     } else if ('YTD-COMMENT-RENDERER' === parentDom.tagName) {
       if (parentDom.parentNode.tagName === 'YTD-COMMENT-THREAD-RENDERER') {
@@ -2435,13 +2394,13 @@
 
   // Desktop menu labels that carry a block/allow action. Anything else is a
   // native entry — prevent the tap-through and ignore it.
-  const MENU_TAP_ACTIONS = [
+  const MENU_TAP_ACTIONS = new Set([
     'Block Channel',
     'Block All Channels',
     'Block Video',
     'Allow Channel',
     'Remove from Whitelist',
-  ];
+  ]);
 
   // Menu-tap types that take the card off the page (allow taps keep it so it
   // can be watched right away).
@@ -2662,14 +2621,14 @@
     const individualLabel =
       typeof menuAction === 'string' && menuAction.startsWith(INDIVIDUAL_LABEL_PREFIX);
 
-    if (!injected && !MENU_TAP_ACTIONS.includes(menuAction) && !individualLabel) {
+    if (!injected && !MENU_TAP_ACTIONS.has(menuAction) && !individualLabel) {
       event.preventDefault();
       return;
     }
 
     if (window.blockTubeReloadRequired) {
       window.blockTubeExports.openToast(
-        'BlockTube was updated, this tab needs to be reloaded to use this function',
+        BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED,
         5000,
       );
       return;

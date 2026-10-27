@@ -1,5 +1,9 @@
   // !! Custom filtering functions
 
+  // Neutral replacement thumbnail shared by playlist-row blocks and reel
+  // prefetch scrubbing (kept in one place so the two cannot drift).
+  const BLOCKED_THUMB_URL = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
+
   // Which field matched, filled in by matchFilterProperties so the error panel
   // can say what actually triggered the block.
   let matchedFilterField = null;
@@ -379,7 +383,7 @@
     vid.thumbnail = {
       thumbnails: [
         {
-          url: 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png',
+          url: BLOCKED_THUMB_URL,
         },
       ],
     };
@@ -435,7 +439,7 @@
   function scrubReelThumbUrl(item) {
     try {
       if (item && typeof item.url === 'string' && item.url.indexOf('i.ytimg.com') !== -1) {
-        item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
+        item.url = BLOCKED_THUMB_URL;
       }
     } catch (e) {}
   }

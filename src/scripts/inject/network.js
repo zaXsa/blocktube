@@ -1,7 +1,11 @@
+  // Endpoint tables hoisted out of fetchFilter: this runs on every intercepted
+  // response, so don't allocate a literal array per request.
+  const FEED_PATHS = new Set(['/youtubei/v1/search', '/youtubei/v1/browse']);
+
   function fetchFilter(url, resp) {
     if (storageData === undefined) return;
 
-    if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
+    if (FEED_PATHS.has(url.pathname)) {
       // Feed/search continuations ride /browse and /search; hand the filtered
       // instance to the pump so a shortened feed can nudge YouTube for more
       // (continuation.js, feature-detected for stripped builds).
@@ -9,7 +13,7 @@
       if (typeof maybePumpContinuation === 'function') maybePumpContinuation(filtered);
     } else if (url.pathname === '/youtubei/v1/get_watch') {
       filterGetWatchResponse(resp);
-    } else if (['/youtubei/v1/next'].includes(url.pathname)) {
+    } else if (url.pathname === '/youtubei/v1/next') {
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);

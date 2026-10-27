@@ -67,6 +67,10 @@
       REMOVE: 'Removed from whitelist',
       BLOCK: 'Blocked',
     }),
+    TOASTS: Object.freeze({
+      RELOAD_REQUIRED: 'BlockTube was updated, this tab needs to be reloaded to use this function',
+      RELOAD_PAGE: 'BlockTube was updated, Please reload this tab to reactivate it',
+    }),
     ORIGINS: Object.freeze({
       CONTEXT: 'context menu',
       SHORT: 'short context menu',
@@ -148,9 +152,10 @@
     related,
   });
 
+  const COLLAB_DIALOG_LIST_ITEMS_SUFFIX =
+    'showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
   const collabBylinePaths = ['shortBylineText', 'longBylineText', 'ownerText', 'bylineText'];
-  const collabDialogPath =
-    'runs.navigationEndpoint.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
+  const collabDialogPath = `runs.navigationEndpoint.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}.listItemViewModel`;
   const collabChannelIdPaths = collabBylinePaths.map(
     (path) =>
       `${path}.${collabDialogPath}.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
@@ -203,8 +208,10 @@
   };
 
   const lockupAvatarMedia = 'metadata.lockupMetadataViewModel.image';
+  const lockupTitlePath = 'metadata.lockupMetadataViewModel.title';
   const lockupMetadataContent =
     'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
+  const lockupStackDialog = `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`;
 
   const LOCKUP_BADGE_ICON_PATH =
     'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName';
@@ -371,7 +378,6 @@
       videoWithContextRenderer: paths({
         ...baseRules,
         title: 'headline',
-        vidLength: ['thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text'],
         viewCount: 'shortViewCountText',
       }),
 
@@ -383,7 +389,7 @@
 
       lockupViewModel: paths({
         videoId: 'contentId',
-        title: 'metadata.lockupMetadataViewModel.title.content',
+        title: `${lockupTitlePath}.content`,
         channelName: (renderer) => lockupChannelName(renderer),
         badges: `${lockupMetadataContent}[1].badges`,
         vidLength:
@@ -392,9 +398,9 @@
         channelId: [
           `${lockupAvatarMedia}.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
-          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
-          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
-          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupStackDialog}[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupStackDialog}[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupStackDialog}.listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
         ],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
@@ -528,14 +534,12 @@
     if (arr === null || arr === undefined) return undefined;
     if (arr.simpleText !== undefined) return arr.simpleText;
     if (!Array.isArray(arr.runs)) return arr;
-    return arr.runs
-      .reduce((res, v) => {
-        if (has.call(v, 'text')) {
-          res.push(v.text);
-        }
-        return res;
-      }, [])
-      .join(' ');
+    const texts = [];
+    for (let i = 0; i < arr.runs.length; i += 1) {
+      const run = arr.runs[i];
+      if (has.call(run, 'text')) texts.push(run.text);
+    }
+    return texts.join(' ');
   }
 
   function getFlattenByPath(obj, filterPath) {
@@ -623,10 +627,6 @@
     }
     return out;
   }
-  const COLLAB_DIALOG_LIST_ITEMS_SUFFIX =
-    'showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
-
-  const LOCKUP_COLLAB_LIST_ITEMS_PATH = `metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`;
 
   const OWNER_COLLAB_LIST_ITEMS_PATHS = [
     `navigationEndpoint.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`,
@@ -656,7 +656,7 @@
   function getCollaboratorChannelIds(obj, listItemsPaths) {
     const listItems = collabListItems(
       obj,
-      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+      listItemsPaths === undefined ? lockupStackDialog : listItemsPaths,
     );
     const ids = [];
     const seen = new Set();
@@ -686,7 +686,7 @@
   function getCollaboratorChannelNames(obj, listItemsPaths) {
     const listItems = collabListItems(
       obj,
-      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+      listItemsPaths === undefined ? lockupStackDialog : listItemsPaths,
     );
     const names = [];
     const seen = new Set();
@@ -704,7 +704,7 @@
   function getCollaboratorChannels(obj, listItemsPaths) {
     const listItems = collabListItems(
       obj,
-      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+      listItemsPaths === undefined ? lockupStackDialog : listItemsPaths,
     );
     const channels = [];
     const seenIds = new Set();
@@ -756,9 +756,11 @@
 
   function readPlainKey(node, key) {
     if (node instanceof Array) {
-      const found = node.find((o) => o !== null && o !== undefined && has.call(o, key));
-      if (found === undefined) return PATH_MISS;
-      return found[key];
+      for (let i = 0; i < node.length; i += 1) {
+        const el = node[i];
+        if (el !== null && el !== undefined && has.call(el, key)) return el[key];
+      }
+      return PATH_MISS;
     }
     if (!node || !has.call(node, key)) return PATH_MISS;
     return node[key];
@@ -817,10 +819,7 @@
     } catch (e) {}
     return { id, text };
   }
-  const LOCKUP_ROWS_PATH =
-    'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
   const PART_LINK_PATH = 'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId';
-  const LOCKUP_TITLE_PATH = 'metadata.lockupMetadataViewModel.title';
 
   function channelTextOf(text) {
     if (!text || typeof text !== 'object') return undefined;
@@ -877,13 +876,13 @@
   function lockupTitleChannelName(renderer) {
     const contentType = getObjectByPath(renderer, 'contentType');
     if (typeof contentType !== 'string' || !contentType.includes('CHANNEL')) return undefined;
-    const title = getObjectByPath(renderer, LOCKUP_TITLE_PATH);
+    const title = getObjectByPath(renderer, lockupTitlePath);
     if (typeof title === 'string') return title.length > 0 ? title : undefined;
     return channelTextOf(title);
   }
 
   function lockupChannelName(renderer) {
-    const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
+    const rows = getObjectByPath(renderer, lockupMetadataContent);
     if (Array.isArray(rows)) {
       const linked = lockupLinkedChannelName(rows);
       if (linked !== undefined) return linked;
@@ -916,18 +915,26 @@
     return out;
   }
 
-  function shortsLockupChannelId(renderer) {
-    const params = getObjectByPath(renderer, 'onTap.innertubeCommand.reelWatchEndpoint.params');
-    if (typeof params !== 'string' || params.length === 0) return undefined;
+  function normalizeBase64Params(params) {
     let encoded = params;
     try {
       encoded = decodeURIComponent(params);
     } catch (e) {}
-    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
-    const binary = base64ToLatin1(normalized);
-    if (typeof binary !== 'string') return undefined;
-    const match = binary.match(/UC[A-Za-z0-9_-]{22}/);
+    return encoded.replace(/-/g, '+').replace(/_/g, '/');
+  }
+
+  const UC_CHANNEL_ID_RE = /UC[A-Za-z0-9_-]{22}/;
+
+  function ucChannelIdFromText(text) {
+    if (typeof text !== 'string') return undefined;
+    const match = text.match(UC_CHANNEL_ID_RE);
     return match ? match[0] : undefined;
+  }
+
+  function shortsLockupChannelId(renderer) {
+    const params = getObjectByPath(renderer, 'onTap.innertubeCommand.reelWatchEndpoint.params');
+    if (typeof params !== 'string' || params.length === 0) return undefined;
+    return ucChannelIdFromText(base64ToLatin1(normalizeBase64Params(params)));
   }
 
   let pageChannel = null;
@@ -970,6 +977,13 @@
     }
   }
 
+  // prettier-ignore
+  const VIEW_COUNT_MULTIPLIERS = {
+  k: 1e3, thousand: 1e3,
+  m: 1e6, million:  1e6,
+  b: 1e9, billion:  1e9,
+};
+
   function parseViewCount(s) {
     if (typeof s !== 'string') return undefined;
 
@@ -994,22 +1008,72 @@
     const num = parseFloat(numStr.replace(/,/g, ''));
     if (Number.isNaN(num)) return undefined;
 
-    // prettier-ignore
-    const multipliers = {
-    k: 1e3, thousand: 1e3,
-    m: 1e6, million:  1e6,
-    b: 1e9, billion:  1e9,
-  };
-
-    const factor = multiplierStr ? multipliers[multiplierStr] : 1;
+    const factor = multiplierStr ? VIEW_COUNT_MULTIPLIERS[multiplierStr] : 1;
     if (factor === undefined) return undefined;
 
     return Math.round(num * factor);
   }
 
+  // !! Shared DOM/event helpers
+  function eventPathOf(event) {
+    if (event && typeof event.composedPath === 'function') return event.composedPath();
+    return [event && event.target];
+  }
+
+  function assignStyleProps(el, props) {
+    try {
+      const style = el.style;
+      for (const key of Object.keys(props)) style[key] = props[key];
+    } catch (e) {}
+  }
+
+  function pagePrefersDark() {
+    try {
+      if (typeof document !== 'undefined' && document.documentElement) {
+        if (typeof document.documentElement.hasAttribute === 'function') {
+          if (document.documentElement.hasAttribute('dark')) return true;
+        }
+      }
+    } catch (e) {}
+    try {
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  const MENU_LABEL_RE = /more|action|menu/i;
+
+  function hasMenuLabel(node) {
+    if (!node || typeof node.getAttribute !== 'function') return false;
+    return MENU_LABEL_RE.test(node.getAttribute('aria-label') || '');
+  }
+
   // ================== src/scripts/inject/object-filter.js ==================
 
   // !! ObjectFilter
+  const ruleNamesCache = new WeakMap();
+  const ruleFieldNamesCache = new WeakMap();
+
+  function ruleNamesFor(ruleConfig) {
+    let names = ruleNamesCache.get(ruleConfig);
+    if (names === undefined) {
+      names = new Set(Object.keys(ruleConfig));
+      ruleNamesCache.set(ruleConfig, names);
+    }
+    return names;
+  }
+
+  function ruleFieldNamesFor(properties) {
+    let names = ruleFieldNamesCache.get(properties);
+    if (names === undefined) {
+      names = Object.keys(properties);
+      ruleFieldNamesCache.set(properties, names);
+    }
+    return names;
+  }
+
   function ObjectFilter(object, ruleConfig, postActions = [], contextMenus = false) {
     if (!(this instanceof ObjectFilter))
       return new ObjectFilter(object, ruleConfig, postActions, contextMenus);
@@ -1017,7 +1081,7 @@
     this.object = object;
     rememberPageChannel(object);
     this.filterRules = ruleConfig;
-    this.ruleNamesSet = new Set(Object.keys(ruleConfig));
+    this.ruleNamesSet = ruleNamesFor(ruleConfig);
     this.contextMenus = contextMenus;
     this.blockedComments = [];
     this.deletedCount = 0;
@@ -1064,14 +1128,15 @@
     return !jsFilterEnabled;
   }
 
+  const PERCENT_WATCHED_EXEMPT_PATHS = new Set(['/feed/history', '/feed/library', '/playlist']);
+
   function isPercentWatchedBlocked(fieldName, value, rendererKey) {
-    const opts = storageData.options;
-    const threshold = opts[OPT.PERCENT_WATCHED_HIDE];
+    if (fieldName !== 'percentWatched') return false;
+    const threshold = storageData.options[OPT.PERCENT_WATCHED_HIDE];
     return (
-      fieldName === 'percentWatched' &&
       threshold &&
       rendererKey !== 'playlistPanelVideoRenderer' &&
-      !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
+      !PERCENT_WATCHED_EXEMPT_PATHS.has(document.location.pathname) &&
       parseInt(value) >= threshold
     );
   }
@@ -1084,7 +1149,14 @@
 
   function entriesMatchAnyValue(entries, values) {
     if (!Array.isArray(entries)) return false;
-    return entries.some((entry) => entry && values.some((v) => testFilterEntry(entry, v)));
+    for (let e = 0; e < entries.length; e += 1) {
+      const entry = entries[e];
+      if (!entry) continue;
+      for (let v = 0; v < values.length; v += 1) {
+        if (testFilterEntry(entry, values[v])) return true;
+      }
+    }
+    return false;
   }
 
   function displayFilterEntry(entry) {
@@ -1152,7 +1224,13 @@
     const allowlist = storageData.filterData.whitelist || [];
     if (allowlist.length === 0) return false;
     const collabIds = getCollaboratorChannelIds(obj);
-    return collabIds.some((id) => allowlist.some((entry) => entry && testFilterEntry(entry, id)));
+    for (let i = 0; i < collabIds.length; i += 1) {
+      for (let a = 0; a < allowlist.length; a += 1) {
+        const entry = allowlist[a];
+        if (entry && testFilterEntry(entry, collabIds[i])) return true;
+      }
+    }
+    return false;
   }
 
   function matchesDurationRange(vidLen, filterEntries) {
@@ -1181,11 +1259,12 @@
   function extractBadgeList(value) {
     const badges = [];
     if (Array.isArray(value)) {
-      value.forEach((br) => {
+      for (let i = 0; i < value.length; i += 1) {
+        const br = value[i];
         const rawStyle = br?.badgeViewModel?.badgeStyle || br?.metadataBadgeRenderer?.style;
         const mapped = BADGE_MAP[rawStyle];
         if (mapped) badges.push(mapped);
-      });
+      }
     }
     return badges;
   }
@@ -1337,7 +1416,9 @@
   }
 
   function scanFilterFields(filterPaths, obj, rendererKey, fd, whitelistMode, friendlyVideoObj) {
-    for (const fieldName of Object.keys(filterPaths)) {
+    const fieldNames = ruleFieldNamesFor(filterPaths);
+    for (let i = 0; i < fieldNames.length; i += 1) {
+      const fieldName = fieldNames[i];
       const filterPath = filterPaths[fieldName];
       const filterEntries = fd[fieldName];
       if (shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode)) continue;
@@ -1345,13 +1426,15 @@
       const value = resolveFieldValue(obj, filterPath, fieldName, rendererKey);
       if (value === undefined) continue;
 
+      const needsAllValues =
+        whitelistMode || (filterEntries !== undefined && filterEntries.length > 0);
       const { blocked, jsValue } = evaluateOneField(
         fieldName,
         value,
         filterEntries,
         obj,
         rendererKey,
-        collabCandidates(obj, filterPath, fieldName),
+        needsAllValues ? collabCandidates(obj, filterPath, fieldName) : undefined,
       );
       if (blocked) return true;
 
@@ -1391,14 +1474,15 @@
     return doBlock;
   };
 
+  const SHORTS_TIME_OVERLAY_PATHS = [
+    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
+    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
+  ];
+
   function hasShortsTimeOverlay(obj) {
     const style = BLOCKTUBE_CONSTS.SHORTS.MARKER;
-    const paths = [
-      'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
-      'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
-    ];
-    for (let idx = 0; idx < paths.length; idx += 1) {
-      if (getObjectByPath(obj, paths[idx]) === style) return true;
+    for (let idx = 0; idx < SHORTS_TIME_OVERLAY_PATHS.length; idx += 1) {
+      if (getObjectByPath(obj, SHORTS_TIME_OVERLAY_PATHS[idx]) === style) return true;
     }
     return false;
   }
@@ -1654,6 +1738,8 @@
   // ================== src/scripts/inject/custom-filters.js ==================
 
   // !! Custom filtering functions
+
+  const BLOCKED_THUMB_URL = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
 
   let matchedFilterField = null;
 
@@ -1945,7 +2031,7 @@
     vid.thumbnail = {
       thumbnails: [
         {
-          url: 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png',
+          url: BLOCKED_THUMB_URL,
         },
       ],
     };
@@ -1976,7 +2062,7 @@
   function scrubReelThumbUrl(item) {
     try {
       if (item && typeof item.url === 'string' && item.url.indexOf('i.ytimg.com') !== -1) {
-        item.url = 'https://s.ytimg.com/yts/img/meh_mini-vfl0Ugnu3.png';
+        item.url = BLOCKED_THUMB_URL;
       }
     } catch (e) {}
   }
@@ -2388,15 +2474,17 @@
 
   // ================== src/scripts/inject/network.js ==================
 
+  const FEED_PATHS = new Set(['/youtubei/v1/search', '/youtubei/v1/browse']);
+
   function fetchFilter(url, resp) {
     if (storageData === undefined) return;
 
-    if (['/youtubei/v1/search', '/youtubei/v1/browse'].includes(url.pathname)) {
+    if (FEED_PATHS.has(url.pathname)) {
       const filtered = ObjectFilter(resp, filterRules.main, [], true);
       if (typeof maybePumpContinuation === 'function') maybePumpContinuation(filtered);
     } else if (url.pathname === '/youtubei/v1/get_watch') {
       filterGetWatchResponse(resp);
-    } else if (['/youtubei/v1/next'].includes(url.pathname)) {
+    } else if (url.pathname === '/youtubei/v1/next') {
       const postActions = [fixAutoplay];
       if (playerHasBeenBlocked) postActions.push(redirectToNext);
       ObjectFilter(resp, mergedFilterRules, postActions, true);
@@ -2864,7 +2952,7 @@
     };
   }
 
-  const MOBILE_UP_NEXT_ATTRS = [
+  const MOBILE_UP_NEXT_ATTRS = new Set([
     'videoWithContextRenderer',
     'compactVideoRenderer',
     'movieRenderer',
@@ -2872,7 +2960,7 @@
     'playlistVideoRenderer',
     'reelItemRenderer',
     'commentRenderer',
-  ];
+  ]);
 
   function resolveMobileUpNextItems(obj, attr) {
     let items;
@@ -3040,7 +3128,7 @@
     const parentData = obj[attr];
     const { channel: channelData, video: videoData } = channelAndVideoFrom(parentData, attr);
 
-    if (MOBILE_UP_NEXT_ATTRS.includes(attr)) {
+    if (MOBILE_UP_NEXT_ATTRS.has(attr)) {
       addMobileUpNextMenus(obj, attr, channelData, videoData);
     } else if (attr === 'slimVideoMetadataSectionRenderer') {
       addMobileSlimMenus(obj, attr, channelData, videoData);
@@ -3144,6 +3232,27 @@
     return extractGenericMenuFlags(obj, attr);
   }
 
+  function stampBlockTubeMetadata(target, metadata) {
+    Object.defineProperty(target, 'blockTube', {
+      value: { metadata },
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+
+  function reelBlockMetadata(channel, video) {
+    return {
+      channelId: channel.id,
+      channelName: channel.text,
+      videoId: video.id,
+      videoName: video.text,
+      removeObject: true,
+      isShorts: true,
+      isWatch: true,
+    };
+  }
+
   function extractFromLockupViewModel(renderer) {
     const path =
       'metadata.lockupMetadataViewModel.menuButton.buttonViewModel.onTap.innertubeCommand.showSheetCommand.panelLoadingStrategy.inlineContent.sheetViewModel';
@@ -3160,22 +3269,13 @@
     const videoId = video.id;
     const videoName = video.text;
 
-    const metadataBlock = {
-      metadata: {
-        channelId,
-        channelName,
-        channels: lockupChannelsFrom(renderer),
-        videoId,
-        videoName,
-        removeObject: true,
-      },
-    };
-
-    Object.defineProperty(sheetmodel, 'blockTube', {
-      value: metadataBlock,
-      writable: true,
-      enumerable: true,
-      configurable: true,
+    stampBlockTubeMetadata(sheetmodel, {
+      channelId,
+      channelName,
+      channels: lockupChannelsFrom(renderer),
+      videoId,
+      videoName,
+      removeObject: true,
     });
 
     return items;
@@ -3204,22 +3304,13 @@
 
     const { channel, video } = channelAndVideoFrom(renderer, 'shortsLockupViewModel');
 
-    const metadataBlock = {
-      metadata: {
-        channelId: channel.id,
-        channelName: channel.text,
-        videoId: video.id,
-        videoName: video.text,
-        removeObject: true,
-        isShorts: true,
-      },
-    };
-
-    Object.defineProperty(sheetmodel, 'blockTube', {
-      value: metadataBlock,
-      writable: true,
-      enumerable: true,
-      configurable: true,
+    stampBlockTubeMetadata(sheetmodel, {
+      channelId: channel.id,
+      channelName: channel.text,
+      videoId: video.id,
+      videoName: video.text,
+      removeObject: true,
+      isShorts: true,
     });
 
     return items;
@@ -3246,43 +3337,13 @@
     const channel = reelOverlayChannelFrom(renderer);
     const video = currentShortsVideo();
 
-    Object.defineProperty(renderer, 'blockTube', {
-      value: {
-        metadata: {
-          channelId: channel.id,
-          channelName: channel.text,
-          videoId: video.id,
-          videoName: video.text,
-          removeObject: true,
-          isShorts: true,
-          isWatch: true,
-        },
-      },
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    stampBlockTubeMetadata(renderer, reelBlockMetadata(channel, video));
 
     return items;
   }
 
   function stampReelTopbarSheet(sheet, channel, video) {
-    Object.defineProperty(sheet, 'blockTube', {
-      value: {
-        metadata: {
-          channelId: channel.id,
-          channelName: channel.text,
-          videoId: video.id,
-          videoName: video.text,
-          removeObject: true,
-          isShorts: true,
-          isWatch: true,
-        },
-      },
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
+    stampBlockTubeMetadata(sheet, reelBlockMetadata(channel, video));
   }
 
   function extractReelTopbarMenuFlags(obj, attr) {
@@ -3737,16 +3798,7 @@
   function liveChatChannelIdFromParams(params) {
     if (typeof params !== 'string' || params.length === 0) return undefined;
     try {
-      const decoded = atob(
-        params
-          .replace(/%3D/gi, '=')
-          .replace(/%2B/gi, '+')
-          .replace(/%2F/gi, '/')
-          .replace(/-/g, '+')
-          .replace(/_/g, '/'),
-      );
-      const match = decoded.match(/UC[A-Za-z0-9_-]{22}/);
-      return match ? match[0] : undefined;
+      return ucChannelIdFromText(atob(normalizeBase64Params(params)));
     } catch (e) {
       return undefined;
     }
@@ -3813,6 +3865,7 @@
     'yt-live-chat-paid-sticker-renderer',
     'yt-live-chat-purchase-message-renderer',
   ];
+  const LIVE_CHAT_MESSAGE_TAG_SET = new Set(LIVE_CHAT_MESSAGE_TAGS);
 
   let liveChatMenuAnchor = null;
   const LIVE_CHAT_ANCHOR_TTL_MS = 5000;
@@ -3857,7 +3910,7 @@
     for (let i = 0; i < path.length; i += 1) {
       const node = path[i];
       if (!node || typeof node.tagName !== 'string') continue;
-      if (LIVE_CHAT_MESSAGE_TAGS.includes(node.tagName.toLowerCase())) return node;
+      if (LIVE_CHAT_MESSAGE_TAG_SET.has(node.tagName.toLowerCase())) return node;
     }
     return undefined;
   }
@@ -3867,8 +3920,7 @@
       const node = path[i];
       if (!node || typeof node.getAttribute !== 'function') continue;
       if (node.id === 'menu-button') return node;
-      const label = node.getAttribute('aria-label') || '';
-      if (/more|action|menu/i.test(label)) return node;
+      if (hasMenuLabel(node)) return node;
       const tag = typeof node.tagName === 'string' ? node.tagName.toLowerCase() : '';
       if (tag.includes('icon-button')) return node;
     }
@@ -3877,10 +3929,7 @@
 
   function trackLiveChatMenuAnchor(event) {
     try {
-      const path =
-        event && typeof event.composedPath === 'function'
-          ? event.composedPath()
-          : [event && event.target];
+      const path = eventPathOf(event);
       if (!path || path.length === 0) return;
       const message = liveChatMessageFromEventPath(path);
       const button = liveChatMenuButtonFromEventPath(path);
@@ -3996,18 +4045,6 @@
     return false;
   }
 
-  function liveChatFallbackIsDark() {
-    try {
-      if (document.documentElement && document.documentElement.hasAttribute('dark')) return true;
-    } catch (e) {}
-    try {
-      if (typeof window.matchMedia === 'function') {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches;
-      }
-    } catch (e) {}
-    return false;
-  }
-
   function positionLiveChatFallbackMenu(root, button) {
     try {
       const margin = 8;
@@ -4034,10 +4071,7 @@
     if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
     try {
       if (window.blockTubeReloadRequired) {
-        window.blockTubeExports.openToast(
-          'BlockTube was updated, this tab needs to be reloaded to use this function',
-          5000,
-        );
+        window.blockTubeExports.openToast(BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED, 5000);
         return;
       }
     } catch (e) {}
@@ -4132,7 +4166,7 @@
     try {
       if (typeof document === 'undefined' || !document.body) return;
       if (!author || typeof author.id !== 'string' || author.id.length === 0) return;
-      const dark = liveChatFallbackIsDark();
+      const dark = pagePrefersDark();
       const root = document.createElement('div');
       root.setAttribute('role', 'menu');
       root.setAttribute('aria-label', 'Chat actions');
@@ -4369,10 +4403,7 @@
     if (storageData === undefined) return;
 
     if (window.blockTubeReloadRequired) {
-      window.blockTubeExports.openToast(
-        'BlockTube was updated, this tab needs to be reloaded to use this function',
-        5000,
-      );
+      window.blockTubeExports.openToast(BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED, 5000);
       return;
     }
 
@@ -4407,7 +4438,7 @@
     return { isDataFromRightHandSide, menuAction };
   }
 
-  const PLAYER_MENU_TAGS = ['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA'];
+  const PLAYER_MENU_TAGS = new Set(['YTD-VIDEO-PRIMARY-INFO-RENDERER', 'YTD-WATCH-METADATA']);
 
   function ownerRendererData() {
     const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
@@ -4527,7 +4558,7 @@
   }
 
   function resolveMenuBlockData(parentDom, parentData, isDataFromRightHandSide) {
-    if (parentDom && PLAYER_MENU_TAGS.includes(parentDom.tagName)) {
+    if (parentDom && PLAYER_MENU_TAGS.has(parentDom.tagName)) {
       return playerMenuBlockData();
     }
     if (isDataFromRightHandSide) return stampedMenuBlockData(parentData);
@@ -4609,12 +4640,13 @@
     return getEventSinkParentData(element);
   }
 
+  const PARENT_NODE_REMOVE_TAGS = new Set(['YTD-BACKSTAGE-POST-RENDERER', 'YTD-POST-RENDERER']);
+  const SELF_REMOVE_TAGS = new Set(['YTD-PLAYLIST-PANEL-VIDEO-RENDERER', 'YTD-MOVIE-RENDERER']);
+
   function removeParentHelper(isDataFromRightHandSide, parentDom, message = 'Blocked') {
-    if (['YTD-BACKSTAGE-POST-RENDERER', 'YTD-POST-RENDERER'].includes(parentDom.tagName)) {
+    if (PARENT_NODE_REMOVE_TAGS.has(parentDom.tagName)) {
       parentDom.parentNode.remove();
-    } else if (
-      ['YTD-PLAYLIST-PANEL-VIDEO-RENDERER', 'YTD-MOVIE-RENDERER'].includes(parentDom.tagName)
-    ) {
+    } else if (SELF_REMOVE_TAGS.has(parentDom.tagName)) {
       parentDom.remove();
     } else if ('YTD-COMMENT-RENDERER' === parentDom.tagName) {
       if (parentDom.parentNode.tagName === 'YTD-COMMENT-THREAD-RENDERER') {
@@ -4632,13 +4664,13 @@
     }
   }
 
-  const MENU_TAP_ACTIONS = [
+  const MENU_TAP_ACTIONS = new Set([
     'Block Channel',
     'Block All Channels',
     'Block Video',
     'Allow Channel',
     'Remove from Whitelist',
-  ];
+  ]);
 
   function isCardRemovingTap(type) {
     return (
@@ -4812,16 +4844,13 @@
     const individualLabel =
       typeof menuAction === 'string' && menuAction.startsWith(INDIVIDUAL_LABEL_PREFIX);
 
-    if (!injected && !MENU_TAP_ACTIONS.includes(menuAction) && !individualLabel) {
+    if (!injected && !MENU_TAP_ACTIONS.has(menuAction) && !individualLabel) {
       event.preventDefault();
       return;
     }
 
     if (window.blockTubeReloadRequired) {
-      window.blockTubeExports.openToast(
-        'BlockTube was updated, this tab needs to be reloaded to use this function',
-        5000,
-      );
+      window.blockTubeExports.openToast(BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED, 5000);
       return;
     }
 
@@ -5074,10 +5103,7 @@
   }
 
   function shortsOverlayStyle(el, props) {
-    try {
-      const style = el.style;
-      for (const key of Object.keys(props)) style[key] = props[key];
-    } catch (e) {}
+    assignStyleProps(el, props);
   }
 
   function shortsOverlayEnsureHostPositioned(host) {
@@ -5216,17 +5242,18 @@
     } catch (e) {}
   }
 
+  function appendUniqueHost(hosts, host) {
+    if (host && hosts.indexOf(host) === -1) hosts.push(host);
+  }
+
   function shortsOverlayAllHosts() {
     const hosts = [];
     try {
       const reels = shortsOverlayQueryNodes('ytd-reel-video-renderer');
-      for (let i = 0; i < reels.length; i += 1) {
-        if (hosts.indexOf(reels[i]) === -1) hosts.push(reels[i]);
-      }
+      for (let i = 0; i < reels.length; i += 1) appendUniqueHost(hosts, reels[i]);
     } catch (e) {}
     try {
-      const player = shortsOverlayPlayerHost();
-      if (player && hosts.indexOf(player) === -1) hosts.push(player);
+      appendUniqueHost(hosts, shortsOverlayPlayerHost());
     } catch (e) {}
     return hosts;
   }
@@ -5234,12 +5261,10 @@
   function shortsOverlayCurrentHosts() {
     const hosts = [];
     try {
-      const reel = shortsOverlayReelHost();
-      if (reel) hosts.push(reel);
+      appendUniqueHost(hosts, shortsOverlayReelHost());
     } catch (e) {}
     try {
-      const player = shortsOverlayPlayerHost();
-      if (player && hosts.indexOf(player) === -1) hosts.push(player);
+      appendUniqueHost(hosts, shortsOverlayPlayerHost());
     } catch (e) {}
     return hosts;
   }
@@ -5834,10 +5859,7 @@
     } catch (e) {}
     if (storageData === undefined) return;
     if (window.blockTubeReloadRequired) {
-      window.blockTubeExports.openToast(
-        'BlockTube was updated, this tab needs to be reloaded to use this function',
-        5000,
-      );
+      window.blockTubeExports.openToast(BLOCKTUBE_CONSTS.TOASTS.RELOAD_REQUIRED, 5000);
       return;
     }
     const liveAnchor = freshCommentMenuAnchor() || anchorEl;
@@ -5929,10 +5951,7 @@
   }
 
   function styleDialogNode(node, styles) {
-    try {
-      const keys = Object.keys(styles);
-      for (let i = 0; i < keys.length; i += 1) node.style[keys[i]] = styles[keys[i]];
-    } catch (e) {}
+    assignStyleProps(node, styles);
     return node;
   }
 
@@ -6412,10 +6431,7 @@
     for (let i = 0; i < path.length; i += 1) {
       const node = path[i];
       if (!node || typeof node.getAttribute !== 'function') continue;
-      if (!sawMenuButton) {
-        const label = node.getAttribute('aria-label') || '';
-        if (/more|action|menu/i.test(label)) sawMenuButton = true;
-      }
+      if (!sawMenuButton && hasMenuLabel(node)) sawMenuButton = true;
       const tag = node.tagName || '';
       if (
         tag === 'YTD-COMMENT-THREAD-RENDERER' ||
@@ -6430,19 +6446,14 @@
 
   function pathHasMenuButton(path) {
     for (let i = 0; i < path.length; i += 1) {
-      const node = path[i];
-      if (!node || typeof node.getAttribute !== 'function') continue;
-      if (/more|action|menu/i.test(node.getAttribute('aria-label') || '')) return true;
+      if (hasMenuLabel(path[i])) return true;
     }
     return false;
   }
 
   function trackCommentMenuAnchor(event) {
     try {
-      const path =
-        event && typeof event.composedPath === 'function'
-          ? event.composedPath()
-          : [event && event.target];
+      const path = eventPathOf(event);
       if (!path || path.length === 0) return;
       const comment = commentFromEventPath(path);
       if (comment) {
@@ -6618,22 +6629,6 @@
       return btNativeTemplateCache;
     } catch (e) {}
     return null;
-  }
-
-  function btFallbackIsDark() {
-    try {
-      if (typeof document !== 'undefined' && document.documentElement) {
-        if (typeof document.documentElement.hasAttribute === 'function') {
-          if (document.documentElement.hasAttribute('dark')) return true;
-        }
-      }
-    } catch (e) {}
-    try {
-      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) return true;
-      }
-    } catch (e) {}
-    return false;
   }
 
   let btNativeMenuTheme = null;
@@ -6905,7 +6900,7 @@
     try {
       rect = btn.getBoundingClientRect();
     } catch (e) {}
-    const dark = btNativeMenuTheme ? null : btFallbackIsDark();
+    const dark = btNativeMenuTheme ? null : pagePrefersDark();
     const rowColors = btFallbackRowColors(dark);
     const menu = btMakeFallbackMenu(rowColors, dark);
     const rows = btFillFallbackMenu(menu, entries, commentEl, rowColors);
@@ -7603,7 +7598,7 @@
         }
         case BLOCKTUBE_CONSTS.MESSAGES.RELOAD:
           window.blockTubeReloadRequired = true;
-          openToast('BlockTube was updated, Please reload this tab to reactivate it', 15000);
+          openToast(BLOCKTUBE_CONSTS.TOASTS.RELOAD_PAGE, 15000);
           break;
         default:
           break;

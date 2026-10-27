@@ -74,6 +74,13 @@
       REMOVE: 'Removed from whitelist',
       BLOCK: 'Blocked',
     }),
+    // Page-side toast wording for the extension-updated guard (the inject
+    // bundle is stale until the tab reloads). Shared by every menu path so the
+    // message cannot drift between live chat, comments and desktop menus.
+    TOASTS: Object.freeze({
+      RELOAD_REQUIRED: 'BlockTube was updated, this tab needs to be reloaded to use this function',
+      RELOAD_PAGE: 'BlockTube was updated, Please reload this tab to reactivate it',
+    }),
     // Origin phrases for the same annotation lines: where a block came from.
     // Single source for the writer (content script), the parser (options-page
     // annotations) and the filter tags (options page).

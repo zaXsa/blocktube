@@ -197,10 +197,7 @@
   // innerHTML), so page CSP and Trusted Types stay out of the way — the same
   // constraint as the toast layer in context-menu.js.
   function shortsOverlayStyle(el, props) {
-    try {
-      const style = el.style;
-      for (const key of Object.keys(props)) style[key] = props[key];
-    } catch (e) {}
+    assignStyleProps(el, props);
   }
 
   // The player root must establish a positioning context for the absolute
@@ -385,17 +382,18 @@
 
   // Every Shorts media host currently in the DOM (prefetched neighbours
   // included — the same host set the seed.js guard covers).
+  function appendUniqueHost(hosts, host) {
+    if (host && hosts.indexOf(host) === -1) hosts.push(host);
+  }
+
   function shortsOverlayAllHosts() {
     const hosts = [];
     try {
       const reels = shortsOverlayQueryNodes('ytd-reel-video-renderer');
-      for (let i = 0; i < reels.length; i += 1) {
-        if (hosts.indexOf(reels[i]) === -1) hosts.push(reels[i]);
-      }
+      for (let i = 0; i < reels.length; i += 1) appendUniqueHost(hosts, reels[i]);
     } catch (e) {}
     try {
-      const player = shortsOverlayPlayerHost();
-      if (player && hosts.indexOf(player) === -1) hosts.push(player);
+      appendUniqueHost(hosts, shortsOverlayPlayerHost());
     } catch (e) {}
     return hosts;
   }
@@ -406,12 +404,10 @@
   function shortsOverlayCurrentHosts() {
     const hosts = [];
     try {
-      const reel = shortsOverlayReelHost();
-      if (reel) hosts.push(reel);
+      appendUniqueHost(hosts, shortsOverlayReelHost());
     } catch (e) {}
     try {
-      const player = shortsOverlayPlayerHost();
-      if (player && hosts.indexOf(player) === -1) hosts.push(player);
+      appendUniqueHost(hosts, shortsOverlayPlayerHost());
     } catch (e) {}
     return hosts;
   }

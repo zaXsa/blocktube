@@ -75,9 +75,12 @@
   // Search-result collaborator channels (YouTube Collaborations): a video with
   // several creators exposes the extra channels behind a byline dialog, not
   // the usual byline browseEndpoint. Based on upstream PR #674 by Sonicegorsan.
+  // The dialog-list suffix is shared with paths.js (owner/lockup dialogs) so
+  // the two fragments cannot drift apart; rules.js loads first.
+  const COLLAB_DIALOG_LIST_ITEMS_SUFFIX =
+    'showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
   const collabBylinePaths = ['shortBylineText', 'longBylineText', 'ownerText', 'bylineText'];
-  const collabDialogPath =
-    'runs.navigationEndpoint.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel';
+  const collabDialogPath = `runs.navigationEndpoint.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}.listItemViewModel`;
   const collabChannelIdPaths = collabBylinePaths.map(
     (path) =>
       `${path}.${collabDialogPath}.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
@@ -133,8 +136,11 @@
   // back across avatar -> first metadata row -> avatar stack; these prefixes
   // keep that intent readable in the big rule below.
   const lockupAvatarMedia = 'metadata.lockupMetadataViewModel.image';
+  const lockupTitlePath = 'metadata.lockupMetadataViewModel.title';
   const lockupMetadataContent =
     'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
+  // Avatar-stack dialog prefix for collab lockups (shared with paths.js).
+  const lockupStackDialog = `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`;
 
   // lockupViewModel tags YouTube-generated collections ('MIX', 'COURSE') with
   // a badge icon. Only collection lockups nest it, so the path discriminates.
@@ -316,7 +322,6 @@
       videoWithContextRenderer: paths({
         ...baseRules,
         title: 'headline',
-        vidLength: ['thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.text'],
         viewCount: 'shortViewCountText',
       }),
 
@@ -328,7 +333,7 @@
 
       lockupViewModel: paths({
         videoId: 'contentId',
-        title: 'metadata.lockupMetadataViewModel.title.content',
+        title: `${lockupTitlePath}.content`,
         // Function path: a static dotted path misreads the view count as the
         // channel on channel-less cards (channel tabs, channel shelves) — see
         // lockupChannelName in paths.js. Evaluated lazily, so the later
@@ -341,12 +346,12 @@
         channelId: [
           `${lockupAvatarMedia}.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
-          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
-          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupStackDialog}[0].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupStackDialog}[1].listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           // Fan-out across every stack entry so a third-or-later collaborator
           // still matches via getFlattenByPathAll (the indexed paths above
           // only cover the first two for the single-value reader).
-          `${lockupAvatarMedia}.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems.listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
+          `${lockupStackDialog}.listItemViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
         ],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',

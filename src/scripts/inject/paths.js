@@ -5,14 +5,14 @@
     if (arr === null || arr === undefined) return undefined;
     if (arr.simpleText !== undefined) return arr.simpleText;
     if (!Array.isArray(arr.runs)) return arr;
-    return arr.runs
-      .reduce((res, v) => {
-        if (has.call(v, 'text')) {
-          res.push(v.text);
-        }
-        return res;
-      }, [])
-      .join(' ');
+    // Plain loop: this runs for every field of every renderer, so avoid the
+    // per-call reduce/closure allocation.
+    const texts = [];
+    for (let i = 0; i < arr.runs.length; i += 1) {
+      const run = arr.runs[i];
+      if (has.call(run, 'text')) texts.push(run.text);
+    }
+    return texts.join(' ');
   }
 
   function getFlattenByPath(obj, filterPath) {
@@ -122,13 +122,8 @@
   }
   // Shared suffix of a "Collaborators" dialog: every listItemViewModel holds
   // one channel (id under rendererContext.onTap, display name under title).
-  const COLLAB_DIALOG_LIST_ITEMS_SUFFIX =
-    'showDialogCommand.panelLoadingStrategy.inlineContent.dialogViewModel.customContent.listViewModel.listItems';
-
-  // Avatar-stack dialog holding every collaborator on a lockupViewModel
-  // collab card (same listItemViewModel shape as the search-result byline
-  // dialogs in rules.js).
-  const LOCKUP_COLLAB_LIST_ITEMS_PATH = `metadata.lockupMetadataViewModel.image.avatarStackViewModel.rendererContext.commandContext.onTap.innertubeCommand.${COLLAB_DIALOG_LIST_ITEMS_SUFFIX}`;
+  // COLLAB_DIALOG_LIST_ITEMS_SUFFIX and lockupStackDialog are declared in
+  // rules.js (which loads first) so both fragments read the same path.
 
   // Watch-page videoOwnerRenderer: on a collaboration video the byline's own
   // navigationEndpoint and its attributedTitle both open the same
@@ -174,7 +169,7 @@
   function getCollaboratorChannelIds(obj, listItemsPaths) {
     const listItems = collabListItems(
       obj,
-      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+      listItemsPaths === undefined ? lockupStackDialog : listItemsPaths,
     );
     const ids = [];
     const seen = new Set();
@@ -210,7 +205,7 @@
   function getCollaboratorChannelNames(obj, listItemsPaths) {
     const listItems = collabListItems(
       obj,
-      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+      listItemsPaths === undefined ? lockupStackDialog : listItemsPaths,
     );
     const names = [];
     const seen = new Set();
@@ -235,7 +230,7 @@
   function getCollaboratorChannels(obj, listItemsPaths) {
     const listItems = collabListItems(
       obj,
-      listItemsPaths === undefined ? LOCKUP_COLLAB_LIST_ITEMS_PATH : listItemsPaths,
+      listItemsPaths === undefined ? lockupStackDialog : listItemsPaths,
     );
     const channels = [];
     const seenIds = new Set();
@@ -296,9 +291,12 @@
   // a hit.
   function readPlainKey(node, key) {
     if (node instanceof Array) {
-      const found = node.find((o) => o !== null && o !== undefined && has.call(o, key));
-      if (found === undefined) return PATH_MISS;
-      return found[key];
+      // Manual scan (not .find) — this is the hottest path segment walker.
+      for (let i = 0; i < node.length; i += 1) {
+        const el = node[i];
+        if (el !== null && el !== undefined && has.call(el, key)) return el[key];
+      }
+      return PATH_MISS;
     }
     if (!node || !has.call(node, key)) return PATH_MISS;
     return node[key];
@@ -368,10 +366,8 @@
     } catch (e) {}
     return { id, text };
   }
-  const LOCKUP_ROWS_PATH =
-    'metadata.lockupMetadataViewModel.metadata.contentMetadataViewModel.metadataRows';
+  // lockupMetadataContent / lockupTitlePath come from rules.js (loaded first).
   const PART_LINK_PATH = 'text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId';
-  const LOCKUP_TITLE_PATH = 'metadata.lockupMetadataViewModel.title';
 
   // A metadata text node -> channel name, or undefined. Prefers `content`,
   // falls back to runs-joined text (flattenRuns also covers simpleText).
@@ -445,7 +441,7 @@
   function lockupTitleChannelName(renderer) {
     const contentType = getObjectByPath(renderer, 'contentType');
     if (typeof contentType !== 'string' || !contentType.includes('CHANNEL')) return undefined;
-    const title = getObjectByPath(renderer, LOCKUP_TITLE_PATH);
+    const title = getObjectByPath(renderer, lockupTitlePath);
     if (typeof title === 'string') return title.length > 0 ? title : undefined;
     return channelTextOf(title);
   }
@@ -457,7 +453,7 @@
   // in order. Stack is explicit attribution (not positional), so never misreads
   // view count; without it link-less collab rows yield undefined, skipping channelName, letting collaborators through.
   function lockupChannelName(renderer) {
-    const rows = getObjectByPath(renderer, LOCKUP_ROWS_PATH);
+    const rows = getObjectByPath(renderer, lockupMetadataContent);
     if (Array.isArray(rows)) {
       const linked = lockupLinkedChannelName(rows);
       if (linked !== undefined) return linked;
@@ -476,7 +472,8 @@
   // onTap.innertubeCommand.reelWatchEndpoint.params (URL-encoded base64 embedding
   // UC-prefixed id). Decoded as latin1 and scanned for id, so framing changes
   // outside id bytes cannot break read. No channel name on card (overlayMetadata
-  // title + view count only). Minimal base64->latin1 (no atob/Buffer shared); undefined on bad input.
+  // title + view count only). Minimal base64->latin1 (no atob/Buffer shared);
+  // undefined on bad input.
   function base64ToLatin1(input) {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const clean = String(input).replace(/[^A-Za-z0-9+/=]/g, '');
@@ -496,21 +493,32 @@
     return out;
   }
 
+  // Protobuf params (Shorts reel + live-chat menus) are base64 with either
+  // alphabet; normalize URL-safe characters and percent-encoding first.
+  function normalizeBase64Params(params) {
+    let encoded = params;
+    try {
+      encoded = decodeURIComponent(params);
+    } catch (e) {}
+    return encoded.replace(/-/g, '+').replace(/_/g, '/');
+  }
+
+  const UC_CHANNEL_ID_RE = /UC[A-Za-z0-9_-]{22}/;
+
+  // First UC-prefixed id inside decoded base64 text, or undefined.
+  function ucChannelIdFromText(text) {
+    if (typeof text !== 'string') return undefined;
+    const match = text.match(UC_CHANNEL_ID_RE);
+    return match ? match[0] : undefined;
+  }
+
   function shortsLockupChannelId(renderer) {
     const params = getObjectByPath(
       renderer,
       'onTap.innertubeCommand.reelWatchEndpoint.params',
     );
     if (typeof params !== 'string' || params.length === 0) return undefined;
-    let encoded = params;
-    try {
-      encoded = decodeURIComponent(params);
-    } catch (e) {}
-    const normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
-    const binary = base64ToLatin1(normalized);
-    if (typeof binary !== 'string') return undefined;
-    const match = binary.match(/UC[A-Za-z0-9_-]{22}/);
-    return match ? match[0] : undefined;
+    return ucChannelIdFromText(base64ToLatin1(normalizeBase64Params(params)));
   }
 
   // Channel owning current page (channel pages only), remembered from last
@@ -564,6 +572,15 @@
     }
   }
 
+// Suffix -> multiplier table, hoisted so parseViewCount doesn't rebuild it
+// for every view count it normalizes.
+// prettier-ignore
+const VIEW_COUNT_MULTIPLIERS = {
+  k: 1e3, thousand: 1e3,
+  m: 1e6, million:  1e6,
+  b: 1e9, billion:  1e9,
+};
+
 /**
  * Parses a view count string (e.g., "1.5M views", "No views", "100K", "2 million views") into an integer.
  * @param {string} s - The input string to parse.
@@ -597,16 +614,53 @@ function parseViewCount(s) {
   const num = parseFloat(numStr.replace(/,/g, ''));
   if (Number.isNaN(num)) return undefined;
 
-  // Map suffixes to their corresponding numeric multipliers (kept column-aligned below).
-  // prettier-ignore
-  const multipliers = {
-    k: 1e3, thousand: 1e3,
-    m: 1e6, million:  1e6,
-    b: 1e9, billion:  1e9,
-  };
-
-  const factor = multiplierStr ? multipliers[multiplierStr] : 1;
+  // Map suffixes to their corresponding numeric multipliers.
+  const factor = multiplierStr ? VIEW_COUNT_MULTIPLIERS[multiplierStr] : 1;
   if (factor === undefined) return undefined;
 
   return Math.round(num * factor);
 }
+
+  // !! Shared DOM/event helpers
+  // Composed path of a press event (falls back to the target). Used by the
+  // live-chat and comment anchor trackers so both read the same way.
+  function eventPathOf(event) {
+    if (event && typeof event.composedPath === 'function') return event.composedPath();
+    return [event && event.target];
+  }
+
+  // Assign a style-property map to an element, ignoring hostile/absent nodes.
+  // Shared by the shorts overlay and the comment/live-chat dialogs (both used
+  // to carry their own copy of this loop).
+  function assignStyleProps(el, props) {
+    try {
+      const style = el.style;
+      for (const key of Object.keys(props)) style[key] = props[key];
+    } catch (e) {}
+  }
+
+  // Page theme probe: YouTube's `dark` attribute first, then the OS setting.
+  // Shared by the live-chat and comment fallback menus (previously duplicated).
+  function pagePrefersDark() {
+    try {
+      if (typeof document !== 'undefined' && document.documentElement) {
+        if (typeof document.documentElement.hasAttribute === 'function') {
+          if (document.documentElement.hasAttribute('dark')) return true;
+        }
+      }
+    } catch (e) {}
+    try {
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  const MENU_LABEL_RE = /more|action|menu/i;
+
+  // True when a node's aria-label marks it as a menu/`...` control.
+  function hasMenuLabel(node) {
+    if (!node || typeof node.getAttribute !== 'function') return false;
+    return MENU_LABEL_RE.test(node.getAttribute('aria-label') || '');
+  }

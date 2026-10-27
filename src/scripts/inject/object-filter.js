@@ -1,4 +1,28 @@
   // !! ObjectFilter
+  // Rule-name and field-name tables are derived from the (few, module-level)
+  // rule configs/rule objects. Cache them instead of rebuilding a Set/array
+  // for every ObjectFilter instance and every visited renderer.
+  const ruleNamesCache = new WeakMap();
+  const ruleFieldNamesCache = new WeakMap();
+
+  function ruleNamesFor(ruleConfig) {
+    let names = ruleNamesCache.get(ruleConfig);
+    if (names === undefined) {
+      names = new Set(Object.keys(ruleConfig));
+      ruleNamesCache.set(ruleConfig, names);
+    }
+    return names;
+  }
+
+  function ruleFieldNamesFor(properties) {
+    let names = ruleFieldNamesCache.get(properties);
+    if (names === undefined) {
+      names = Object.keys(properties);
+      ruleFieldNamesCache.set(properties, names);
+    }
+    return names;
+  }
+
   function ObjectFilter(object, ruleConfig, postActions = [], contextMenus = false) {
     if (!(this instanceof ObjectFilter))
       return new ObjectFilter(object, ruleConfig, postActions, contextMenus);
@@ -10,7 +34,7 @@
     this.filterRules = ruleConfig;
     // Precomputed rule-name table so matchFilterRule can scan the object's
     // own (few) keys instead of iterating every rule key per visited node.
-    this.ruleNamesSet = new Set(Object.keys(ruleConfig));
+    this.ruleNamesSet = ruleNamesFor(ruleConfig);
     this.contextMenus = contextMenus;
     this.blockedComments = [];
     // Continuation-pump telemetry (continuation.js): how many renderers this
@@ -77,14 +101,19 @@
 
   // Hide videos we already watched past the threshold (percent_watched_hide).
   // playlist rows and history/library/playlist pages are exempt.
+  const PERCENT_WATCHED_EXEMPT_PATHS = new Set([
+    '/feed/history',
+    '/feed/library',
+    '/playlist',
+  ]);
+
   function isPercentWatchedBlocked(fieldName, value, rendererKey) {
-    const opts = storageData.options;
-    const threshold = opts[OPT.PERCENT_WATCHED_HIDE];
+    if (fieldName !== 'percentWatched') return false;
+    const threshold = storageData.options[OPT.PERCENT_WATCHED_HIDE];
     return (
-      fieldName === 'percentWatched' &&
       threshold &&
       rendererKey !== 'playlistPanelVideoRenderer' &&
-      !['/feed/history', '/feed/library', '/playlist'].includes(document.location.pathname) &&
+      !PERCENT_WATCHED_EXEMPT_PATHS.has(document.location.pathname) &&
       parseInt(value) >= threshold
     );
   }
@@ -102,7 +131,14 @@
   // videos list several channels; the first one must not decide alone).
   function entriesMatchAnyValue(entries, values) {
     if (!Array.isArray(entries)) return false;
-    return entries.some((entry) => entry && values.some((v) => testFilterEntry(entry, v)));
+    for (let e = 0; e < entries.length; e += 1) {
+      const entry = entries[e];
+      if (!entry) continue;
+      for (let v = 0; v < values.length; v += 1) {
+        if (testFilterEntry(entry, values[v])) return true;
+      }
+    }
+    return false;
   }
 
   // Render one compiled filter entry the way the user wrote it, so the
@@ -189,9 +225,13 @@
     const allowlist = storageData.filterData.whitelist || [];
     if (allowlist.length === 0) return false;
     const collabIds = getCollaboratorChannelIds(obj);
-    return collabIds.some((id) =>
-      allowlist.some((entry) => entry && testFilterEntry(entry, id)),
-    );
+    for (let i = 0; i < collabIds.length; i += 1) {
+      for (let a = 0; a < allowlist.length; a += 1) {
+        const entry = allowlist[a];
+        if (entry && testFilterEntry(entry, collabIds[i])) return true;
+      }
+    }
+    return false;
   }
 
   // vidLength is a mandatory [min, max] duration range in seconds; a duration
@@ -225,11 +265,12 @@
   function extractBadgeList(value) {
     const badges = [];
     if (Array.isArray(value)) {
-      value.forEach((br) => {
+      for (let i = 0; i < value.length; i += 1) {
+        const br = value[i];
         const rawStyle = br?.badgeViewModel?.badgeStyle || br?.metadataBadgeRenderer?.style;
         const mapped = BADGE_MAP[rawStyle];
         if (mapped) badges.push(mapped);
-      });
+      }
     }
     return badges;
   }
@@ -434,7 +475,9 @@
   // Scan every field in filterPaths: resolve, evaluate, record JS values.
   // Returns the block flag; matchedFilterField is set on a property match.
   function scanFilterFields(filterPaths, obj, rendererKey, fd, whitelistMode, friendlyVideoObj) {
-    for (const fieldName of Object.keys(filterPaths)) {
+    const fieldNames = ruleFieldNamesFor(filterPaths);
+    for (let i = 0; i < fieldNames.length; i += 1) {
+      const fieldName = fieldNames[i];
       const filterPath = filterPaths[fieldName];
       const filterEntries = fd[fieldName];
       if (shouldSkipField(fieldName, filterPath, filterEntries, whitelistMode)) continue;
@@ -442,13 +485,18 @@
       const value = resolveFieldValue(obj, filterPath, fieldName, rendererKey);
       if (value === undefined) continue;
 
+      // Multi-channel fan-out is only needed when something can actually test
+      // the candidates (allowlist mode or real regex entries); skip the extra
+      // path walk for the common empty-filter/JS-only cases.
+      const needsAllValues =
+        whitelistMode || (filterEntries !== undefined && filterEntries.length > 0);
       const { blocked, jsValue } = evaluateOneField(
         fieldName,
         value,
         filterEntries,
         obj,
         rendererKey,
-        collabCandidates(obj, filterPath, fieldName),
+        needsAllValues ? collabCandidates(obj, filterPath, fieldName) : undefined,
       );
       if (blocked) return true;
 
@@ -494,14 +542,15 @@
   // with a textless time overlay, so the vidLength rule never sees them. Match
   // the overlay style instead. `overlayStyle` is a guess from the DOM
   // attribute; only `style` is confirmed. See the knowledge base.
+  const SHORTS_TIME_OVERLAY_PATHS = [
+    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
+    'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
+  ];
+
   function hasShortsTimeOverlay(obj) {
     const style = BLOCKTUBE_CONSTS.SHORTS.MARKER;
-    const paths = [
-      'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.overlayStyle',
-      'thumbnailOverlays.thumbnailOverlayTimeStatusRenderer.style',
-    ];
-    for (let idx = 0; idx < paths.length; idx += 1) {
-      if (getObjectByPath(obj, paths[idx]) === style) return true;
+    for (let idx = 0; idx < SHORTS_TIME_OVERLAY_PATHS.length; idx += 1) {
+      if (getObjectByPath(obj, SHORTS_TIME_OVERLAY_PATHS[idx]) === style) return true;
     }
     return false;
   }
