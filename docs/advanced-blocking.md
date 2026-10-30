@@ -60,6 +60,7 @@ mean "not applicable here", not "empty".
 Second argument is the YouTube renderer name being filtered, e.g.
 `videoRenderer`, `gridVideoRenderer`, `compactVideoRenderer`,
 `lockupViewModel` (new grid), `videoCardRenderer`, `shortsLockupViewModel`,
+`structuredDescriptionVideoLockupRenderer` (watch-page description infocards),
 `reelItemRenderer`, `movieRenderer` / `compactMovieRenderer`,
 `playlistPanelVideoRenderer`, `commentRenderer`, `commentEntityPayload`,
 `liveChatTextMessageRenderer`, and others. The same video appears under

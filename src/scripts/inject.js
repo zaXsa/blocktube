@@ -392,9 +392,11 @@
         title: `${lockupTitlePath}.content`,
         channelName: (renderer) => lockupChannelName(renderer),
         badges: `${lockupMetadataContent}[1].badges`,
-        vidLength:
-          'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
-        viewCount: `${lockupMetadataContent}[1].metadataParts.text.content`,
+        vidLength: (renderer) => lockupVidLength(renderer),
+        viewCount: [
+          (renderer) => lockupViewCount(renderer),
+          `${lockupMetadataContent}[1].metadataParts.text.content`,
+        ],
         channelId: [
           `${lockupAvatarMedia}.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
@@ -404,7 +406,10 @@
         ],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
-        publishTimeText: `${lockupMetadataContent}[1].metadataParts[1].text.content`,
+        publishTimeText: [
+          (renderer) => lockupPublishTime(renderer),
+          `${lockupMetadataContent}[1].metadataParts[1].text.content`,
+        ],
       }),
 
       videoCardRenderer: paths({
@@ -416,6 +421,15 @@
         channelId: ['bylineText.runs.navigationEndpoint.browseEndpoint.browseId'],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
+      }),
+
+      structuredDescriptionVideoLockupRenderer: paths({
+        videoId: 'navigationEndpoint.watchEndpoint.videoId',
+        title: 'title',
+        channelName: 'shortBylineText',
+        vidLength: 'lengthText',
+        viewCount: (renderer) => descriptionViews(renderer),
+        publishTimeText: (renderer) => descriptionPublishTime(renderer),
       }),
 
       chipCloudChipRenderer: paths({
@@ -550,7 +564,13 @@
     const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
     let value;
     for (let idx = 0; idx < filterPathArr.length; idx += 1) {
-      value = getObjectByPath(obj, filterPathArr[idx]);
+      const candidate = filterPathArr[idx];
+      if (typeof candidate === 'function') {
+        value = candidate(obj);
+        if (value !== undefined) return flattenRuns(value);
+        continue;
+      }
+      value = getObjectByPath(obj, candidate);
       if (value !== undefined) return flattenRuns(value);
     }
   }
@@ -894,6 +914,87 @@
     const stackNames = getCollaboratorChannelNames(renderer);
     if (stackNames.length > 0) return stackNames[0];
     return lockupTitleChannelName(renderer);
+  }
+
+  function lockupViewPartIndex(parts) {
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i];
+      if (!part || typeof part !== 'object') continue;
+      const iconName = part.leadingIcon && part.leadingIcon.name;
+      if (iconName === 'PLAY_ARROW_OUTLINED') return i;
+      const label = part.accessibilityLabel;
+      if (typeof label === 'string' && /\bviews?\b|\bwatching\b/i.test(label)) return i;
+    }
+    return -1;
+  }
+
+  function lockupViewCount(renderer) {
+    const rows = getObjectByPath(renderer, lockupMetadataContent);
+    if (!Array.isArray(rows)) return undefined;
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      const idx = lockupViewPartIndex(parts);
+      if (idx !== -1) return channelTextOf(parts[idx].text);
+    }
+    return undefined;
+  }
+
+  function lockupPublishTime(renderer) {
+    const rows = getObjectByPath(renderer, lockupMetadataContent);
+    if (!Array.isArray(rows)) return undefined;
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      const idx = lockupViewPartIndex(parts);
+      if (idx === -1) continue;
+      const next = parts[idx + 1];
+      return next && typeof next === 'object' ? channelTextOf(next.text) : undefined;
+    }
+    return undefined;
+  }
+
+  const LOCKUP_DURATION_RE = /^\d+(?::\d+){1,2}$/;
+
+  function lockupDurationIn(overlays, viewModelKey, badgesKey) {
+    for (let i = 0; i < overlays.length; i += 1) {
+      const viewModel = overlays[i] && overlays[i][viewModelKey];
+      const badges = viewModel && viewModel[badgesKey];
+      if (!Array.isArray(badges)) continue;
+      for (let j = 0; j < badges.length; j += 1) {
+        const badge = badges[j] && badges[j].thumbnailBadgeViewModel;
+        const text = badge && badge.text;
+        if (typeof text === 'string' && LOCKUP_DURATION_RE.test(text)) return text;
+      }
+    }
+    return undefined;
+  }
+
+  function lockupVidLength(renderer) {
+    const overlays = getObjectByPath(renderer, 'contentImage.thumbnailViewModel.overlays');
+    if (!Array.isArray(overlays)) return undefined;
+    const bottom = lockupDurationIn(overlays, 'thumbnailBottomOverlayViewModel', 'badges');
+    if (bottom !== undefined) return bottom;
+    return lockupDurationIn(overlays, 'thumbnailOverlayBadgeViewModel', 'thumbnailBadges');
+  }
+
+  function descriptionMetadataParts(renderer) {
+    const text = flattenRuns(getObjectByPath(renderer, 'metadataDetails'));
+    if (typeof text !== 'string') return undefined;
+    const sep = text.search(/[·•]/);
+    const views = (sep === -1 ? text : text.slice(0, sep)).trim();
+    const age = sep === -1 ? undefined : text.slice(sep + 1).trim();
+    return { views: views || undefined, age: age || undefined };
+  }
+
+  function descriptionViews(renderer) {
+    const parts = descriptionMetadataParts(renderer);
+    return parts && parts.views;
+  }
+
+  function descriptionPublishTime(renderer) {
+    const parts = descriptionMetadataParts(renderer);
+    return parts && parts.age;
   }
 
   function base64ToLatin1(input) {

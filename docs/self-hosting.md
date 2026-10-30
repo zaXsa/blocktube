@@ -31,6 +31,13 @@ It stays loaded across restarts as long as Developer mode stays on. After a
 `git pull`: repeat step 1 to rebuild, then hit the reload icon on the
 extension card — no reinstall needed.
 
+If `chrome://extensions` reports `Service worker registration failed` and
+YouTube stops playing videos, hit **Reload** on the extension card first and
+open its **Errors** panel — the log (`BlockTube background boot failed …`)
+names the real cause. Removing the extension is the last resort: it deletes
+all stored filters and options, so **Export first** from the options page and
+**Import** the backup after re-adding.
+
 ## Step by step — Firefox (temporary)
 
 1. Build it (assembles `dist/firefox_selfhosted/` — same deal as Chrome):

@@ -9,6 +9,20 @@ const YOUTUBE_ORIGINS = [
   'https://www.youtube-nocookie.com/*',
 ];
 
+// chrome.storage.local.get calls back with `undefined` when the extension
+// context was invalidated while the popup was open (reload/update/removal) and
+// sets chrome.runtime.lastError. Normalise that to `{}` so callers can index
+// the result safely: the popup should render defaults, not throw.
+function readLocalStorage(keys, callback) {
+  chrome.storage.local.get(keys, (result) => {
+    const error = chrome.runtime.lastError;
+    if (error) {
+      console.warn('BlockTube popup: storage read failed:', error.message || error);
+    }
+    callback(error || !result ? {} : result);
+  });
+}
+
 function renderToggle(checkbox, statusText, state) {
   checkbox.checked = state;
   statusText.textContent = state ? 'On' : 'Off';
@@ -27,7 +41,7 @@ function resolveUiTheme(storageTheme) {
 }
 
 function detectColorScheme() {
-  chrome.storage.local.get(BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY, (result) => {
+  readLocalStorage(BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY, (result) => {
     const storageTheme = result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]?.uiTheme;
     document.documentElement.setAttribute('data-theme', resolveUiTheme(storageTheme));
   });
@@ -105,10 +119,28 @@ function wireWhitelistSwitch(whitelistCheckbox) {
     if (event.target instanceof HTMLInputElement) {
       const on = event.target.checked;
       chrome.storage.local.get(BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY, (result) => {
+        const error = chrome.runtime.lastError;
+        if (error || !result) {
+          // Never write a fresh blob over the existing one on a failed read:
+          // that would wipe every stored filter/option. The checkbox simply
+          // stays put until the popup is reopened against a live context.
+          console.warn(
+            'BlockTube popup: storage read failed:',
+            error?.message || error || 'no result',
+          );
+          return;
+        }
         const data = result[BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY] || {};
         if (!data.options || typeof data.options !== 'object') data.options = {};
         data.options[BLOCKTUBE_CONSTS.OPTIONS.WHITELIST_MODE] = on;
         chrome.storage.local.set({ [BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY]: data }, () => {
+          const writeError = chrome.runtime.lastError;
+          if (writeError) {
+            console.warn(
+              'BlockTube popup: storage write failed:',
+              writeError.message || writeError,
+            );
+          }
           chrome.tabs.reload(); // Reload page to apply the new state
         });
       });
@@ -191,7 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
   );
 
   // Restore the switch states from storage
-  chrome.storage.local.get(
+  readLocalStorage(
     [BLOCKTUBE_CONSTS.MESSAGES.ENABLED_KEY, BLOCKTUBE_CONSTS.MESSAGES.STORAGE_KEY],
     (result) => restoreSwitchStates(checkbox, statusText, whitelistCheckbox, result),
   );

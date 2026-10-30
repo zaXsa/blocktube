@@ -121,6 +121,19 @@ Discard, and an `Unsaved changes` flag):
   - Block the entire page and leave a custom message
   - Auto redirect user to the next video
 
+* Videos never appear and nothing is blocked (Chrome/Edge)?  
+  BlockTube's background service worker feeds the filters to the page before
+  YouTube starts playback. If Chromium fails to start that worker
+  (`chrome://extensions` shows `Service worker registration failed`), the page
+  releases YouTube's own boot after about 3 seconds and logs
+  `BlockTube ready timed out; YouTube boot released unfiltered` — videos play,
+  but filtering is inactive until the worker is repaired.
+  First hit **Reload** on the extension card and check **Errors**; the first
+  line there names the real failure. Removing the extension also deletes all
+  stored filters and options, so **use Options → Export before removing it**,
+  then **Import** the backup afterwards. Firefox has no service-worker
+  background, so this does not apply there.
+
 * What happens to my other filters in whitelist mode?  
   They are bypassed, not deleted. While whitelist mode is on, only
   allowlisted channels show; title/name/ID/comment filters, duration and

@@ -50,7 +50,7 @@
     "unlimitedStorage"
   ],
   "background": {
-    "service_worker": "src/scripts/background.js"
+    "service_worker": "src/scripts/background-boot.js"
   },
   "icons": {
     "16": "assets/icons/16.png",

@@ -340,9 +340,14 @@
         // fragment is always loaded by call time.
         channelName: (renderer) => lockupChannelName(renderer),
         badges: `${lockupMetadataContent}[1].badges`,
-        vidLength:
-          'contentImage.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.text',
-        viewCount: `${lockupMetadataContent}[1].metadataParts.text.content`,
+        // Function-only (no static fallback): lockupVidLength scans BOTH the
+        // new bottom-overlay slot and the legacy overlay slot, and the legacy
+        // static path cannot tell a duration from a "New" status label.
+        vidLength: (renderer) => lockupVidLength(renderer),
+        viewCount: [
+          (renderer) => lockupViewCount(renderer),
+          `${lockupMetadataContent}[1].metadataParts.text.content`,
+        ],
         channelId: [
           `${lockupAvatarMedia}.decoratedAvatarViewModel.rendererContext.commandContext.onTap.innertubeCommand.browseEndpoint.browseId`,
           `${lockupMetadataContent}.metadataParts.text.commandRuns.onTap.innertubeCommand.browseEndpoint.browseId`,
@@ -355,7 +360,10 @@
         ],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
-        publishTimeText: `${lockupMetadataContent}[1].metadataParts[1].text.content`,
+        publishTimeText: [
+          (renderer) => lockupPublishTime(renderer),
+          `${lockupMetadataContent}[1].metadataParts[1].text.content`,
+        ],
       }),
 
       videoCardRenderer: paths({
@@ -367,6 +375,22 @@
         channelId: ['bylineText.runs.navigationEndpoint.browseEndpoint.browseId'],
         percentWatched:
           'contentImage.thumbnailViewModel.overlays.thumbnailBottomOverlayViewModel.progressBar.thumbnailOverlayProgressBarViewModel.startPercent',
+      }),
+
+      // Watch-page description infocards (first seen 2026-10-29, watch page):
+      // compactInfocardRenderer > structuredDescriptionVideoLockupRenderer.
+      // These carry no menu/sheet, so they are deliberately absent from
+      // contextMenuObjects; title/name/videoId/duration filters still apply.
+      structuredDescriptionVideoLockupRenderer: paths({
+        videoId: 'navigationEndpoint.watchEndpoint.videoId',
+        title: 'title',
+        // YouTube's own text is "by <channel>"; kept verbatim so a substring
+        // or regex filter matches either way (cannot strip a localized prefix
+        // reliably).
+        channelName: 'shortBylineText',
+        vidLength: 'lengthText',
+        viewCount: (renderer) => descriptionViews(renderer),
+        publishTimeText: (renderer) => descriptionPublishTime(renderer),
       }),
 
       // Mobile top chips

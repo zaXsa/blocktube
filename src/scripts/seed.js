@@ -8,12 +8,27 @@
   window.blockTubeDispatched = false;
   const isMobileInterface = document.location.hostname.startsWith('m.');
 
+  // Fail-open boot release. seed.js defers YouTube's own boot calls until the
+  // inject bundle fires `blockTubeReady`, which only happens once the
+  // background (service worker) delivers a FILTERS payload. If the worker is
+  // dead or the port stalls, YouTube would wait forever: no player and no
+  // filtering. After a bounded grace period we release every queued callback
+  // exactly once and let later calls through unfiltered.
+  // `blockTubeDispatched` deliberately stays false: the page is NOT armed, so a
+  // late storage payload must still install hooks for the next navigation.
+  const BOOT_READY_TIMEOUT_MS = 3000;
+  let bootReleased = false;
+
+  function bootIsReleased() {
+    return window.blockTubeDispatched === true || bootReleased;
+  }
+
   // Wrap one hooked method so it waits for blockTubeReady when the
   // extension isn't armed yet, then calls through with the live arguments.
   function deferUntilReady(value) {
     return function () {
-      if (window.blockTubeDispatched) return value.apply(null, arguments);
-      window.addEventListener('blockTubeReady', value.bind(null, arguments));
+      if (bootIsReleased()) return value.apply(null, arguments);
+      window.addEventListener('blockTubeReady', value.bind(null, arguments), { once: true });
     };
   }
 
@@ -99,12 +114,16 @@
     },
     genericHook(cb) {
       return function (...args) {
-        if (window.blockTubeDispatched) {
+        if (bootIsReleased()) {
           cb.call(this, ...args);
         } else {
-          window.addEventListener('blockTubeReady', () => {
-            cb.call(this, ...args);
-          });
+          window.addEventListener(
+            'blockTubeReady',
+            () => {
+              cb.call(this, ...args);
+            },
+            { once: true },
+          );
         }
       };
     },
@@ -144,7 +163,7 @@
         }
         next(resp);
       };
-      if (window.blockTubeDispatched) run();
+      if (bootIsReleased()) run();
       else window.addEventListener('blockTubeReady', run, { once: true });
     };
   }
@@ -364,6 +383,35 @@
     return;
   }
 
+  // Arm the bounded fail-open release (see bootReleased above). Registered
+  // after the early-abort check so an already-booted page never gets a timer.
+  let bootTimer = 0;
+  function releaseBootTimeout() {
+    if (bootReleased || window.blockTubeDispatched) return;
+    bootReleased = true;
+    console.warn('BlockTube ready timed out; YouTube boot released unfiltered');
+    try {
+      window.dispatchEvent(new Event('blockTubeReady'));
+    } catch (e) {}
+  }
+  try {
+    if (typeof setTimeout === 'function') {
+      bootTimer = setTimeout(releaseBootTimeout, BOOT_READY_TIMEOUT_MS);
+    }
+  } catch (e) {}
+  // Normal path: real storage arrives first, so stand the timer down.
+  try {
+    window.addEventListener(
+      'blockTubeReady',
+      function () {
+        try {
+          if (bootTimer) clearTimeout(bootTimer);
+        } catch (e) {}
+      },
+      { once: true },
+    );
+  } catch (e) {}
+
   // Youtube started using vanilla "fetch" for some endpoints (search and guide for now) :\
   // I'm forced to hook that one too
   // Bare reference to the original fetch so the wrapper below can delegate.
@@ -417,7 +465,7 @@
     }
     let settled = false;
     let timer = 0;
-    const finish = function (armed) {
+    const finish = (armed) => {
       if (settled) return;
       settled = true;
       try {
@@ -425,21 +473,16 @@
       } catch (e) {}
       callback(armed);
     };
+    // Only a REAL dispatch means hooks are installed (blockTubeDispatched is
+    // set just before it); the seed fail-open release dispatches unarmed.
+    const onReady = () => finish(window.blockTubeDispatched === true);
     try {
       if (typeof setTimeout === 'function') {
-        timer = setTimeout(function () {
-          finish(false);
-        }, 1500);
+        timer = setTimeout(() => finish(false), 1500);
       }
     } catch (e) {}
     try {
-      window.addEventListener(
-        'blockTubeReady',
-        function () {
-          finish(true);
-        },
-        { once: true },
-      );
+      window.addEventListener('blockTubeReady', onReady, { once: true });
     } catch (e) {
       finish(false);
     }
@@ -571,8 +614,8 @@
     },
     set(v) {
       this.writeEmbedValue = () => {
-        if (window.blockTubeDispatched) v.apply(this);
-        else window.addEventListener('blockTubeReady', v.bind(this));
+        if (bootIsReleased()) v.apply(this);
+        else window.addEventListener('blockTubeReady', v.bind(this), { once: true });
       };
     },
   });
@@ -584,8 +627,8 @@
     },
     set(v) {
       this.loadInitialDataValue = (a1) => {
-        if (window.blockTubeDispatched) return v(a1);
-        window.addEventListener('blockTubeReady', v.bind(this, a1));
+        if (bootIsReleased()) return v(a1);
+        window.addEventListener('blockTubeReady', v.bind(this, a1), { once: true });
       };
     },
   });

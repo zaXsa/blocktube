@@ -27,7 +27,15 @@
     const filterPathArr = filterPath instanceof Array ? filterPath : [filterPath];
     let value;
     for (let idx = 0; idx < filterPathArr.length; idx += 1) {
-      value = getObjectByPath(obj, filterPathArr[idx]);
+      const candidate = filterPathArr[idx];
+      // Function entries inside an alternative list: resolve on the renderer,
+      // then fall through to the next (usually legacy static) candidate.
+      if (typeof candidate === 'function') {
+        value = candidate(obj);
+        if (value !== undefined) return flattenRuns(value);
+        continue;
+      }
+      value = getObjectByPath(obj, candidate);
       if (value !== undefined) return flattenRuns(value);
     }
   }
@@ -465,6 +473,114 @@
     const stackNames = getCollaboratorChannelNames(renderer);
     if (stackNames.length > 0) return stackNames[0];
     return lockupTitleChannelName(renderer);
+  }
+
+  // Index of the metadata part carrying the view count in one row, or -1.
+  // Only explicit view signals are trusted: the play-arrow leading icon
+  // (current design) or a "views"/"watching" accessibility label (older
+  // variants, localized English labels). A channel-less single-row card must
+  // never fall back to position — its only part is the age.
+  function lockupViewPartIndex(parts) {
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i];
+      if (!part || typeof part !== 'object') continue;
+      const iconName = part.leadingIcon && part.leadingIcon.name;
+      if (iconName === 'PLAY_ARROW_OUTLINED') return i;
+      const label = part.accessibilityLabel;
+      if (typeof label === 'string' && /\bviews?\b|\bwatching\b/i.test(label)) return i;
+    }
+    return -1;
+  }
+
+  // View count of a lockupViewModel card, or undefined. The new home feed
+  // collapsed channel + views + age into ONE metadata row (first seen
+  // 2026-10-29, home feed), so the legacy `${rows}[1]` position no longer
+  // resolves there. The watch rail still ships the 2-row shape; both are
+  // walked the same way.
+  function lockupViewCount(renderer) {
+    const rows = getObjectByPath(renderer, lockupMetadataContent);
+    if (!Array.isArray(rows)) return undefined;
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      const idx = lockupViewPartIndex(parts);
+      if (idx !== -1) return channelTextOf(parts[idx].text);
+    }
+    return undefined;
+  }
+
+  // Publish time ("1y ago") sits immediately after the view-count part in the
+  // same row, in both the legacy 2-row and the new single-row shape. No view
+  // part means no anchor, so return undefined rather than guessing.
+  function lockupPublishTime(renderer) {
+    const rows = getObjectByPath(renderer, lockupMetadataContent);
+    if (!Array.isArray(rows)) return undefined;
+    for (let i = 0; i < rows.length; i += 1) {
+      const parts = rows[i] && rows[i].metadataParts;
+      if (!Array.isArray(parts)) continue;
+      const idx = lockupViewPartIndex(parts);
+      if (idx === -1) continue;
+      const next = parts[idx + 1];
+      return next && typeof next === 'object' ? channelTextOf(next.text) : undefined;
+    }
+    return undefined;
+  }
+
+  // Durations are `m:ss` / `h:mm:ss`. Status labels ("New", "LIVE",
+  // "Members only") share the badge slots and must never be read as a length.
+  const LOCKUP_DURATION_RE = /^\d+(?::\d+){1,2}$/;
+
+  // First duration-shaped badge text under one overlay container shape.
+  function lockupDurationIn(overlays, viewModelKey, badgesKey) {
+    for (let i = 0; i < overlays.length; i += 1) {
+      const viewModel = overlays[i] && overlays[i][viewModelKey];
+      const badges = viewModel && viewModel[badgesKey];
+      if (!Array.isArray(badges)) continue;
+      for (let j = 0; j < badges.length; j += 1) {
+        const badge = badges[j] && badges[j].thumbnailBadgeViewModel;
+        const text = badge && badge.text;
+        if (typeof text === 'string' && LOCKUP_DURATION_RE.test(text)) return text;
+      }
+    }
+    return undefined;
+  }
+
+  // Video length of a lockupViewModel card, or undefined. The current design
+  // moved it to thumbnailBottomOverlayViewModel.badges[]. The legacy
+  // thumbnailOverlayBadgeViewModel.thumbnailBadges[] slot survives on some
+  // cards but may hold a top-start status badge ("New"), hence the time-shape
+  // guard on both. Both shapes are scanned: fixtures for each are live.
+  function lockupVidLength(renderer) {
+    const overlays = getObjectByPath(renderer, 'contentImage.thumbnailViewModel.overlays');
+    if (!Array.isArray(overlays)) return undefined;
+    const bottom = lockupDurationIn(overlays, 'thumbnailBottomOverlayViewModel', 'badges');
+    if (bottom !== undefined) return bottom;
+    return lockupDurationIn(overlays, 'thumbnailOverlayBadgeViewModel', 'thumbnailBadges');
+  }
+
+  // structuredDescriptionVideoLockupRenderer (watch-page description
+  // infocards, first seen 2026-10-29) packs views AND age into one string
+  // ("71K views · 2 weeks ago"), so neither parseViewCount nor an exact age
+  // match works on the raw field. Split once on the separator; each half is
+  // returned as-is (undefined when absent), so an unknown locale simply
+  // yields undefined instead of mis-parsing.
+  function descriptionMetadataParts(renderer) {
+    const text = flattenRuns(getObjectByPath(renderer, 'metadataDetails'));
+    if (typeof text !== 'string') return undefined;
+    const sep = text.search(/[·•]/);
+    const views = (sep === -1 ? text : text.slice(0, sep)).trim();
+    const age = sep === -1 ? undefined : text.slice(sep + 1).trim();
+    return { views: views || undefined, age: age || undefined };
+  }
+
+  function descriptionViews(renderer) {
+    const parts = descriptionMetadataParts(renderer);
+    return parts && parts.views;
+  }
+
+  function descriptionPublishTime(renderer) {
+    const parts = descriptionMetadataParts(renderer);
+    return parts && parts.age;
   }
 
   // Channel a shortsLockupViewModel card attributes to, or undefined. No
