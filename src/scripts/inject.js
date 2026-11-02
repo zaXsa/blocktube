@@ -7715,4 +7715,8 @@
     menuOnTap,
     menuOnTapMobile,
   };
+
+  try {
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.READY);
+  } catch (e) {}
 })();

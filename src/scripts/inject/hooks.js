@@ -595,3 +595,11 @@
     menuOnTap,
     menuOnTapMobile,
   };
+
+  // A warm worker can deliver the STORAGE payload before this listener exists
+  // (the isolated-world content script runs in its own injection order), which
+  // would leave the page unarmed until the 5s fail-open. READY asks the content
+  // script to repeat the payload; it is a no-op until one has arrived.
+  try {
+    postMessage(BLOCKTUBE_CONSTS.MESSAGES.READY);
+  } catch (e) {}

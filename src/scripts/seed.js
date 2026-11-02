@@ -16,7 +16,7 @@
   // exactly once and let later calls through unfiltered.
   // `blockTubeDispatched` deliberately stays false: the page is NOT armed, so a
   // late storage payload must still install hooks for the next navigation.
-  const BOOT_READY_TIMEOUT_MS = 3000;
+  const BOOT_READY_TIMEOUT_MS = 5000;
   let bootReleased = false;
 
   function bootIsReleased() {
@@ -386,12 +386,24 @@
   // Arm the bounded fail-open release (see bootReleased above). Registered
   // after the early-abort check so an already-booted page never gets a timer.
   let bootTimer = 0;
+  // A slow cold-started worker can still arm the page shortly after the
+  // release (the content script retries at 1.2s); that is a recovery, not an
+  // error the user should see. Only a page that is still unarmed after this
+  // grace period gets the warning, so a slow start stays quiet.
+  const BOOT_WARN_GRACE_MS = 2000;
   function releaseBootTimeout() {
     if (bootReleased || window.blockTubeDispatched) return;
     bootReleased = true;
-    console.warn('BlockTube ready timed out; YouTube boot released unfiltered');
     try {
       window.dispatchEvent(new Event('blockTubeReady'));
+    } catch (e) {}
+    try {
+      if (typeof setTimeout === 'function') {
+        setTimeout(function () {
+          if (window.blockTubeDispatched === true) return;
+          console.warn('BlockTube ready timed out; YouTube boot released unfiltered');
+        }, BOOT_WARN_GRACE_MS);
+      }
     } catch (e) {}
   }
   try {

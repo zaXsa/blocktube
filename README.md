@@ -125,9 +125,12 @@ Discard, and an `Unsaved changes` flag):
   BlockTube's background service worker feeds the filters to the page before
   YouTube starts playback. If Chromium fails to start that worker
   (`chrome://extensions` shows `Service worker registration failed`), the page
-  releases YouTube's own boot after about 3 seconds and logs
+  releases YouTube's own boot after about 5 seconds; if the filters still have
+  not arrived 2 seconds later it logs
   `BlockTube ready timed out; YouTube boot released unfiltered` — videos play,
-  but filtering is inactive until the worker is repaired.
+  but filtering is inactive until the worker is repaired. A worker that is
+  merely slow to start gets one automatic reconnect at about 1.2 seconds, and a
+  late start that recovers is not reported.
   First hit **Reload** on the extension card and check **Errors**; the first
   line there names the real failure. Removing the extension also deletes all
   stored filters and options, so **use Options → Export before removing it**,

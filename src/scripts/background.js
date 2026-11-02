@@ -47,7 +47,20 @@ const DEFAULT_OPTIONS = {
   [OPTS.SAVE_SHORTCUT]: false,
 };
 
-// keyed by (contextId || frameId) of the sender -> still-open content-script port
+// Key one content-script port per frame. Chrome's MessageSender has no
+// `contextId`, so the old `contextId || frameId` key collapsed every tab's
+// main frame (frameId 0) onto one slot: on a cold worker only the last tab
+// received the FILTERS broadcast and the others timed out unfiltered. tab.id
+// keeps tabs apart; documentId/url cover theoretical senders without a tab.
+function portKey(port) {
+  const sender = (port && port.sender) || {};
+  if (sender.tab && sender.tab.id !== undefined) {
+    return `${sender.tab.id}:${sender.frameId}`;
+  }
+  return sender.documentId || sender.url || 'unknown';
+}
+
+// keyed by portKey() (tab + frame) -> still-open content-script port
 const ports = new Map();
 // per-key timestamp of the last accepted CONTEXT_BLOCK write (flood throttle)
 const blockTimestamps = new Map();
@@ -467,7 +480,7 @@ function handlePortDisconnect(key, port) {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
-  const key = port.sender.contextId || port.sender.frameId;
+  const key = portKey(port);
   port.onDisconnect.addListener(() => handlePortDisconnect(key, port));
   ports.set(key, port);
   port.onMessage.addListener((msg) => handlePortMessage(msg, key));

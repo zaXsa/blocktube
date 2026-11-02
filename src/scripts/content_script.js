@@ -18,6 +18,12 @@
   // (that would arm the page with empty rules before the background's storage
   // is compiled — the cold-start race that leaks the session until a reload).
   let filtersReady = false;
+  // One reconnect if the first handshake delivers nothing: a cold-started
+  // worker can miss it while booting, and seed.js releases YouTube unfiltered
+  // at 5s. The retry fires well before that and is the only one.
+  const FILTERS_RETRY_MS = 1200;
+  let filtersRetryTimer = 0;
+  let filtersRetried = false;
 
   const utils = {
     sendStorage() {
@@ -157,6 +163,7 @@
       case BLOCKTUBE_CONSTS.MESSAGES.FILTERS: {
         if (msg.data) {
           filtersReady = true;
+          clearFiltersRetry();
           globalStorage = msg.data.storage;
           compiledStorage = msg.data.compiledStorage;
           enabled = msg.data.enabled;
@@ -187,6 +194,43 @@
     connectToPort();
   }
 
+  // A page that already has its payload (or is unloading) needs no retry.
+  function clearFiltersRetry() {
+    if (!filtersRetryTimer) return;
+    try {
+      clearTimeout(filtersRetryTimer);
+    } catch (e) {}
+    filtersRetryTimer = 0;
+  }
+
+  // One-shot: a cold-started worker can be booting when the port connects and
+  // never deliver FILTERS. Reconnecting re-runs its onConnect, well inside the
+  // seed.js 5s fail-open window.
+  function armFiltersRetry() {
+    if (filtersReady || filtersRetryTimer || filtersRetried) return;
+    if (typeof setTimeout !== 'function') return;
+    filtersRetryTimer = setTimeout(() => {
+      filtersRetryTimer = 0;
+      if (filtersReady) return;
+      filtersRetried = true;
+      reconnectPort();
+    }, FILTERS_RETRY_MS);
+  }
+
+  // Drop the current port and open a fresh one; a worker that missed the first
+  // delivery responds to the new onConnect with another FILTERS payload.
+  function reconnectPort() {
+    const stale = port;
+    port = null;
+    portValid = false;
+    if (stale) {
+      try {
+        stale.disconnect();
+      } catch (e) {}
+    }
+    connectToPort();
+  }
+
   function connectToPort() {
     if (portValid || suppressReconnect) return;
     if (!chrome.runtime || !chrome.runtime.id) return;
@@ -194,6 +238,8 @@
     try {
       local = chrome.runtime.connect();
     } catch (e) {
+      // The worker may still be starting; the retry above gets one chance.
+      armFiltersRetry();
       return;
     }
     port = local;
@@ -201,6 +247,7 @@
     // Listen for messages from background page
     local.onMessage.addListener(handlePortMessage);
     local.onDisconnect.addListener(() => handlePortDisconnect(local));
+    armFiltersRetry();
   }
 
   connectToPort();
@@ -218,6 +265,7 @@
     if (!event.persisted || !port) return;
     suppressReconnect = true;
     portValid = false;
+    clearFiltersRetry();
     try {
       port.disconnect();
     } catch (e) {
