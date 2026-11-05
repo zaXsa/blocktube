@@ -1062,8 +1062,9 @@
     const text = document.createElement('span');
     // Without a manual label, fall back to the provenance text (e.g. the
     // video/channel title the context menu captured), muted to tell apart.
-    const fallback = row.provenance !== null ? row.provenance.text : '';
-    const shown = row.label !== '' ? row.label : fallback;
+    // rowLabel drops a fallback that only repeats the entry: comment-text
+    // rules store the same string as rule and provenance text.
+    const shown = BLOCKTUBE_ANNOTATIONS.rowLabel(row);
     if (shown === '') {
       text.textContent = '—';
       text.className = 'muted';
@@ -1071,7 +1072,11 @@
       text.textContent = shown;
       if (row.label === '') text.className = 'muted';
     }
-    text.title = row.provenanceLine !== '' ? `${shown} — ${row.provenanceLine}` : shown;
+    if (row.provenanceLine === '') {
+      text.title = shown === '' ? '—' : shown;
+    } else {
+      text.title = shown === '' ? row.provenanceLine : `${shown} — ${row.provenanceLine}`;
+    }
     cell.appendChild(text);
     const editBtn = document.createElement('button');
     editBtn.type = 'button';

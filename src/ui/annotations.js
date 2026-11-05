@@ -195,6 +195,21 @@
     };
   }
 
+  // Label text to show for one parsed row: a manual label wins; otherwise the
+  // provenance text (the title/name a menu captured) stands in, muted by the
+  // caller. A fallback that merely repeats the rule itself is dropped —
+  // comment-text blocks store the same string as both rule and provenance
+  // text, and an id fallback does the same, so the table would otherwise show
+  // the entry twice (ID column + label column).
+  function rowLabel(row) {
+    if (!row || typeof row !== 'object') return '';
+    if (typeof row.label === 'string' && row.label !== '') return row.label;
+    const text =
+      row.provenance !== null && typeof row.provenance === 'object' ? row.provenance.text : '';
+    if (typeof text !== 'string' || text === '') return '';
+    return String(row.id) === text ? '' : text;
+  }
+
   // Split stored lines into one row per rule (blocked ID). A `// Label:` line
   // attaches only when immediately above its rule; a `// Blocked …` line
   // attaches to following rules until a blank line ends the group (context
@@ -320,6 +335,7 @@
     findInvalidRegexLines,
     parseProvenance,
     parseRuleRows,
+    rowLabel,
     removeRuleLines,
     setRuleLabel,
   };
